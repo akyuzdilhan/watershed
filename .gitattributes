@@ -1,0 +1,7 @@
+# Store and check out text files with LF line endings on every OS (the app runs on Linux)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.mp4 binary
+*.parquet binary

@@ -17,6 +17,7 @@ Status: work in progress for a hackathon submission. Synthetic data only.
 | `data/replay/` | Pre-generated synthetic match used by the public demo |
 | `infra/` | Bicep and azd configuration |
 | `tests/` | Unit tests |
+| `spikes/` | Throwaway technical trials (Agent Framework workflow, human approval) |
 
 ## License
 
