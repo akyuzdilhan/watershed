@@ -92,6 +92,13 @@ class CosmosSink:
         """The match state lives next to the cards, with type "match_state". Its curve is thinned (contract): every point would make a 200 KB document rewritten all match long."""
         self._upsert(self.cards, {**doc, "wp_timeline": thin_timeline(doc["wp_timeline"])})
 
+    def insight(self, doc: dict) -> None:
+        """Insights live next to the cards, with type "insight" (contract)."""
+        self._upsert(self.cards, {**doc, "type": "insight"})
+
+    def load_insight(self, match_id: str, insight_id: str) -> dict | None:
+        return self.load_card(match_id, insight_id)
+
     def load_card(self, match_id: str, card_id: str) -> dict | None:
         """The card as stored, with the producer's latest decision."""
         from azure.cosmos.exceptions import CosmosResourceNotFoundError

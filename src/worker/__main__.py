@@ -4,6 +4,7 @@ Usage:
     python -m worker data/replay/demo-0007.jsonl.gz --truth data/replay/demo-0007.truth.json   # offline, scored against the ground truth
     python -m worker --live --cosmos                                                          # Service Bus in, Cosmos DB out
     python -m worker --live --cosmos --forever                                                # keep listening for new matches (container)
+    python -m worker data/replay/demo-0007.jsonl.gz --history data/history/1                  # with the insight engine, against the league history
 Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment).
 """
 
@@ -16,6 +17,20 @@ from pathlib import Path
 from generator.publish import load, service_bus_settings
 from worker.pipeline import MemorySink, Pipeline, ThreadedSink
 from worker.spotter import score_against_truth
+
+
+def load_history(path: Path):
+    """The league history at `path`, through whatever loader `league.history` offers."""
+    from league import history as module
+
+    for name in ("load", "load_history", "open_history"):
+        if callable(getattr(module, name, None)):
+            return getattr(module, name)(path)
+    cls = module.History
+    for name in ("load", "from_dir", "open"):
+        if callable(getattr(cls, name, None)):
+            return getattr(cls, name)(path)
+    return cls(path)
 
 
 def main() -> None:
@@ -31,6 +46,7 @@ def main() -> None:
     parser.add_argument("--forever", action="store_true", help="with --live: keep waiting for new sessions instead of stopping when the subscription is idle")
     parser.add_argument("--idle", type=float, default=30.0, help="with --live: seconds without a message before a session is released (and, without --forever, the worker stops)")
     parser.add_argument("--workers", type=int, default=8, help="with --cosmos: concurrent event writes")
+    parser.add_argument("--history", type=Path, help="league history (data/history/<seed>/): surface insights against it")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     for noisy in ("azure", "agent_framework", "httpx"):  # the SDKs log every HTTP request, AMQP link change and tool call at INFO
@@ -54,7 +70,8 @@ def main() -> None:
         if args.writer == "foundry":
             service_bus_settings()  # loads .env (Foundry endpoint and model)
         desk = Desk(sink, FoundryWriter() if args.writer == "foundry" else TemplateWriter(), auto_approve=args.auto_approve)
-    pipeline = Pipeline(sink=sink, desk=desk, threshold=args.threshold)
+    history = load_history(args.history) if args.history else None
+    pipeline = Pipeline(sink=sink, desk=desk, threshold=args.threshold, history=history)
 
     if args.live:
         from worker.azure_io import listen
@@ -82,6 +99,9 @@ def main() -> None:
             if "texts" in r:
                 print(f"           {r['writer']}, verified {r['verification']['verified']}, {r['status']}")
     match = next(iter(pipeline.matches.values()))
+    for doc in pipeline.insights(match.match_id):
+        mark = "*" if doc.get("stat_of_the_match") else " "
+        print(f" {mark}{doc['minute_label'] or '':>7}  insight  {doc['key']:<34} {doc['status']:<10} value {doc['value']:>3}  {doc['rarity']['basis']}")
     print(f"{len(match.messages)} messages, {match.duplicates} duplicates dropped, {match.late} processed late; final score {match.score()}")
     if args.truth and isinstance(sink, MemorySink):
         spotter = next(iter(pipeline.spotters.values()))
