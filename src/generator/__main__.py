@@ -1,17 +1,26 @@
 """Generate a synthetic match as JSON Lines plus its hidden ground truth, or check the calibration.
 
 Usage:
-    python -m generator --story demo --out data/replay    # the demo match, seed 7: demo-0007.jsonl
-    python -m generator --seed 12 --out data/replay       # an unscripted match: synthetic-0012.jsonl
+    python -m generator --story demo --out data/replay    # the demo match, seed 7: demo-0007.jsonl.gz, its truth, its CDF files in data/replay/cdf
+    python -m generator --seed 12 --out data/replay       # an unscripted match: synthetic-0012.jsonl.gz
     python -m generator --calibrate 200                   # means over 200 unscripted matches, against real orders of magnitude
 """
 
 import argparse
+import gzip
 import json
 from pathlib import Path
 
 from generator.calibration import TARGETS, summarise
+from generator.cdf import write_cdf
 from generator.engine import STORIES, generate_match
+
+
+def write_feed(stream: list[dict], path: Path) -> None:
+    """The feed as gzipped JSON Lines, byte-identical from one run to the next (no timestamp in the gzip header)."""
+    data = "".join(json.dumps(m, ensure_ascii=False) + "\n" for m in stream).encode("utf-8")
+    with open(path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
+        f.write(data)
 
 
 def calibrate(n: int) -> None:
@@ -32,6 +41,7 @@ def main() -> None:
     parser.add_argument("--match-id")
     parser.add_argument("--out", default="data/replay", help="output directory")
     parser.add_argument("--no-frames", action="store_true", help="leave out the 360-style freeze frames")
+    parser.add_argument("--no-cdf", action="store_true", help="skip the Common Data Format export (written to <out>/cdf)")
     parser.add_argument("--calibrate", type=int, metavar="N", help="print the calibration over N unscripted matches and exit")
     args = parser.parse_args()
     if args.calibrate:
@@ -41,11 +51,11 @@ def main() -> None:
     stream, truth = generate_match(seed=args.seed, story=args.story, match_id=args.match_id, frames=not args.no_frames)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    feed = out / f"{truth['match_id']}.jsonl"
-    with feed.open("w", encoding="utf-8", newline="\n") as f:
-        for message in stream:
-            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+    feed = out / f"{truth['match_id']}.jsonl.gz"
+    write_feed(stream, feed)
     (out / f"{truth['match_id']}.truth.json").write_text(json.dumps(truth, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    if not args.no_cdf:
+        write_cdf(stream, out / "cdf")
 
     c = truth["counts"]
     score = truth["final_score"]

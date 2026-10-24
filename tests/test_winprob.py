@@ -63,23 +63,29 @@ def test_red_cards_scale_the_rates():
 
 
 @pytest.mark.parametrize("name", MODELS)
-def test_converges_to_the_result_at_full_time(name):
+def test_converges_to_the_result_at_the_final_whistle(name):
     model = MODELS[name]
-    leader = [model.predict(MatchState(m, 2, 1)).home for m in (60, 80, 90, 94, 94.9)]
-    assert all(a < b for a, b in zip(leader, leader[1:])) and leader[-1] > 0.99
-    assert model.predict(MatchState(95, 2, 1)) == WinProb(1.0, 0.0, 0.0)
-    assert model.predict(MatchState(95, 1, 1)) == WinProb(0.0, 1.0, 0.0)
-    # Past the expected duration it is still full time.
-    assert model.predict(MatchState(97.5, 0, 2, home_reds=1)) == WinProb(0.0, 0.0, 1.0)
+    leader = [model.predict(MatchState(m, 2, 1, period=2, added_time=6)).home for m in (60, 80, 90, 94, 95.9)]
+    assert all(a < b for a, b in zip(leader, leader[1:])) and leader[-1] > 0.95
+    assert model.predict(MatchState(96.4, 2, 1, period=2, added_time=6, final=True)) == WinProb(1.0, 0.0, 0.0)
+    assert model.predict(MatchState(96.4, 1, 1, period=2, added_time=6, final=True)) == WinProb(0.0, 1.0, 0.0)
+    assert model.predict(MatchState(97.5, 0, 2, home_reds=1, final=True)) == WinProb(0.0, 0.0, 1.0)
 
 
-def test_duration_is_a_parameter():
-    # Half the match left under both durations; full time comes at the chosen duration, not at 95.
-    p, q = SkellamWinProb(duration=100).predict(MatchState(50, 1, 0)), SkellamWinProb().predict(MatchState(47.5, 1, 0))
-    assert (p.home, p.draw, p.away) == pytest.approx((q.home, q.draw, q.away), abs=1e-12)
-    assert SkellamWinProb(duration=100).predict(MatchState(97.5, 1, 0)).home < 1
-    assert SkellamWinProb(duration=90).predict(MatchState(92, 1, 0)) == WinProb(1.0, 0.0, 0.0)
-    assert TableWinProb.from_model(SkellamWinProb(duration=100)).predict(MatchState(100, 2, 1)) == WinProb(1.0, 0.0, 0.0)
+def test_never_certain_before_the_final_whistle():
+    # Past the announced added time the referee has not blown yet: a little time is always left.
+    assert 0.99 < SkellamWinProb().predict(MatchState(101.5, 2, 1, period=2, added_time=6)).home < 1
+
+
+def test_time_left_includes_the_added_time():
+    model = SkellamWinProb()
+    short, long = (model.predict(MatchState(91, 1, 0, period=2, added_time=t)) for t in (3, 8))
+    assert long.home < short.home, "more added time leaves more time to the trailing team"
+    # Before the board goes up, the model expects the average added time of a half.
+    assert model.predict(MatchState(85, 1, 0, period=2)) == model.predict(MatchState(85, 1, 0, period=2, added_time=6.5))
+    # 46 on the clock in first-half added time is not the 46th minute of the second half.
+    assert model.predict(MatchState(46, 1, 0, period=1, added_time=2)).home < model.predict(MatchState(46, 1, 0, period=2)).home
+    assert model.minutes_left(MatchState(0, 0, 0)) == model.length == 100.0
 
 
 def test_reference_case_rovers_united_at_67():
@@ -93,7 +99,7 @@ def test_skellam_matches_counting_poisson_goals():
     model = SkellamWinProb(home_strength=1.6, away_strength=1.1)
     goals = np.arange(40)
     for minute, home, away in [(0, 0, 0), (30, 0, 1), (67, 1, 1), (88, 2, 0)]:
-        left = (95 - minute) / 95
+        left = model.minutes_left(MatchState(minute, home, away)) / model.length
         joint = np.outer(poisson.pmf(goals, 1.6 * left), poisson.pmf(goals, 1.1 * left))
         final = home - away + goals[:, None] - goals[None, :]
         wp = model.predict(MatchState(minute, home, away))
@@ -101,7 +107,7 @@ def test_skellam_matches_counting_poisson_goals():
 
 
 def test_parameters_must_be_finite_and_positive():
-    for bad in ({"home_strength": 0}, {"red_opponent": float("nan")}, {"duration": float("inf")}):
+    for bad in ({"home_strength": 0}, {"red_opponent": float("nan")}, {"expected_added": (3.5, float("inf"))}, {"expected_added": (-1.0, 6.5)}):
         with pytest.raises(ValueError):
             SkellamWinProb(**bad)
 

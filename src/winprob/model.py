@@ -12,11 +12,14 @@ Team = Literal["home", "away"]
 
 @dataclass(frozen=True)
 class MatchState:
-    minute: float  # match clock in minutes, stoppage time included, as in the feed (clock_s / 60: the second half restarts at 45)
+    minute: float  # match clock in minutes, as in the feed (clock_s / 60): the second half restarts at 45, added time runs on past 45 and 90
     home_goals: int
     away_goals: int
     home_reds: int = 0
     away_reds: int = 0
+    period: int | None = None  # 1 or 2; None reads it from the minute (first half before 45)
+    added_time: float | None = None  # minutes of added time announced for the current half, once the board goes up
+    final: bool = False  # the final whistle has gone
 
     def with_goal(self, team: Team) -> "MatchState":
         """The same state with one more goal for `team`: the counterfactual "if the shot had gone in"."""

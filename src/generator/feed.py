@@ -63,10 +63,12 @@ class TruthRecorder:
 
     @staticmethod
     def _where(ev: dict) -> dict:
-        return {"event_id": ev["event_id"], "minute_label": ev["minute_label"], "clock_s": ev["clock_s"], "wall_s": ev["wall_s"]}
+        return {"event_id": ev.get("event_id", ev["message_id"]), "period": ev["period"], "minute_label": ev["minute_label"], "clock_s": ev["clock_s"], "wall_s": ev["wall_s"]}
 
     def moment(self, m, ev: dict) -> None:
-        self.moments[m.key] = {"key": m.key, "kind": m.kind, "team": m.side, "player": ev["player"], **self._where(ev)}
+        """A planted moment and the action (or, for a substitution, the message) that carries it."""
+        player = ev.get("player", ev.get("player_in"))
+        self.moments[m.key] = {"key": m.key, "kind": m.kind, "team": m.side, "player": player, **self._where(ev), "score_at": dict(self.e.state.score)}
 
     def shot(self, ev: dict, moment, score_before: dict, reds_before: dict) -> None:
         self.shots.append({
@@ -115,7 +117,7 @@ class TruthRecorder:
             if g is not None:
                 moments.append({**mo, "expected_card_action": g["expected_card_action"], "affected_event_ids": g["affected_event_ids"], "score_after": g["score_after"]})
             else:
-                score = events[mo["event_id"]]["score"]
+                score = mo["score_at"]
                 moments.append({**mo, "expected_card_action": "none", "affected_event_ids": [mo["event_id"]], "score_after": f"{score['home']}-{score['away']}"})
         assisted = {a for g in goals for a in g["affected_event_ids"]}
         corrections = [{**c, "card_relevant": c["target_event_id"] in goal_ids or c["target_event_id"] in assisted} for c in self.corrections]

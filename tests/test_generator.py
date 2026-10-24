@@ -1,3 +1,4 @@
+import gzip
 import json
 import math
 from pathlib import Path
@@ -6,6 +7,7 @@ import pytest
 
 from generator import generate_match
 from generator.calibration import TARGETS, summarise
+from generator.cdf import write_cdf
 from generator.clock import minute_label
 from generator.publish import replay, schedule
 from winprob.model import MatchState
@@ -13,7 +15,7 @@ from winprob.skellam import SkellamWinProb
 
 SEEDS = range(1, 201)  # the unscripted matches behind the invariants and the calibration table
 ENVELOPE = ("schema_version", "generator_version", "match_id", "message_id", "seq", "type", "wall_s", "emitted_at_s")
-DEMO_FILE = Path(__file__).parent.parent / "data" / "replay" / "demo-0007.jsonl"
+DEMO_FILE = Path(__file__).parent.parent / "data" / "replay" / "demo-0007.jsonl.gz"
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +49,7 @@ def test_same_seed_same_feed():
 def test_committed_demo_file_matches_the_generator(demo):
     if not DEMO_FILE.exists():
         pytest.skip("run python -m generator --story demo first")
-    lines = DEMO_FILE.read_text(encoding="utf-8").splitlines()
+    lines = gzip.decompress(DEMO_FILE.read_bytes()).decode("utf-8").splitlines()
     assert lines == [json.dumps(m, ensure_ascii=False) for m in demo[0]]
 
 
@@ -55,48 +57,65 @@ def test_demo_story(demo):
     stream, truth = demo
     moments = {m["key"]: (m["minute_label"], m["expected_card_action"], m["score_after"]) for m in truth["moments"]}
     assert moments == {
-        "goal-23": ("23'", "rewrite", "1-0"),
-        "goal-54": ("54'", "none", "1-1"),
-        "goal-67": ("67'", "retract", "1-1"),
-        "save-74": ("74'", "none", "1-1"),
-        "red-81": ("81'", "none", "1-1"),
-        "goal-88": ("88'", "none", "1-2"),
+        "goal-14": ("14'", "none", "0-1"),
+        "goal-31": ("31'", "rewrite", "0-2"),
+        "yellow-41": ("41'", "none", "0-2"),
+        "sub-46": ("46'", "none", "0-2"),
+        "goal-52": ("52'", "none", "1-2"),
+        "goal-57": ("57'", "none", "2-2"),
+        "goal-63": ("63'", "retract", "2-2"),
+        "goal-66": ("66'", "none", "3-2"),
+        "goal-69": ("69'", "retract", "3-2"),
+        "save-72": ("72'", "none", "3-2"),
+        "red-78": ("78'", "none", "3-2"),
+        "goal-83": ("83'", "none", "4-2"),
+        "goal-88": ("88'", "none", "5-2"),
     }
-    assert truth["final_score"] == {"home": 1, "away": 2}
+    assert truth["final_score"] == {"home": 5, "away": 2}
     msgs = in_order(stream)
     by_id = {m["message_id"]: m for m in msgs}
     ids = {m["key"]: m["event_id"] for m in truth["moments"]}
+    goals = [g for g in truth["goals"] if g["counts"]]
+    assert sum(g["player_id"] == "home-20" for g in goals) == 4, "the substitute scores four goals that stand"
+    sub = by_id[ids["sub-46"]]
+    assert (sub["type"], sub["player_in"]["id"], sub["player_out"]["id"]) == ("substitution", "home-20", "home-9")
 
     reassign = next(m for m in msgs if m["type"] == "correction" and m["op"] == "reassign")
-    assert (reassign["target_event_id"], reassign["minute_label"], reassign["changes"]["player"]["id"]) == (ids["goal-23"], "25'", "home-7")
+    assert (reassign["target_event_id"], reassign["minute_label"], reassign["changes"]["player"]["id"]) == (ids["goal-31"], "33'", "away-7")
 
-    checks = [m for m in msgs if m["type"] == "var_check" and m["target_event_id"] == ids["goal-67"]]
+    checks = [m for m in msgs if m["type"] == "var_check" and m["target_event_id"] == ids["goal-63"]]
     assert [c["status"] for c in checks] == ["started", "completed"] and checks[1]["decision"] == "overturned"
     after = [m for m in msgs if m["seq"] > checks[1]["seq"]]
     update, void = after[0], after[1]
     assert (update["op"], update["changes"]["result"], update["cause"]) == ("update", "offside", "var_offside")
-    assert (void["op"], void["target_event_id"], void["score"]) == ("void", ids["goal-67"], {"home": 1, "away": 1})
+    assert (void["op"], void["target_event_id"], void["score"]) == ("void", ids["goal-63"], {"home": 2, "away": 2})
     restart = next(m for m in after if m["type"] == "action")
     assert (restart["team"], restart["restart"]) == ("away", "free_kick")
 
     checks = [m for m in msgs if m["type"] == "var_check" and m["target_event_id"] == ids["goal-88"]]
     assert checks[-1]["decision"] == "stands"
     restart = next(m for m in msgs if m["type"] == "action" and m["seq"] > checks[-1]["seq"])
-    assert (restart["team"], restart["restart"]) == ("home", "kick_off")
+    assert (restart["team"], restart["restart"]) == ("away", "kick_off")
 
-    red = by_id[ids["red-81"]]
-    assert (red["team"], red["player"]["shirt"], red["result"], red["card"]) == ("home", 4, "red_card", "red")
-    save = by_id[ids["save-74"]]
-    assert (save["team"], save["shot"]["outcome"], save["score"]) == ("home", "saved", {"home": 1, "away": 1})
+    handball = next(m for m in msgs if m["type"] == "correction" and m["target_event_id"] == ids["goal-69"])
+    assert (handball["op"], handball["cause"], handball["score"]) == ("void", "var_handball", {"home": 3, "away": 2})
+    restart = next(m for m in msgs if m["type"] == "action" and m["seq"] > handball["seq"])
+    assert (restart["team"], restart["restart"]) == ("home", "free_kick")
+
+    first, second = by_id[ids["yellow-41"]], by_id[ids["red-78"]]
+    assert first["player"]["id"] == second["player"]["id"] == "away-5"
+    assert (first["card"], second["card"], second["result"]) == ("yellow", "second_yellow", "red_card")
+    save = by_id[ids["save-72"]]
+    assert (save["team"], save["shot"]["outcome"], save["score"]) == ("away", "saved", {"home": 3, "away": 2})
 
 
 def test_offside_is_visible_in_the_freeze_frame(demo):
     stream, truth = demo
-    goal = next(g for g in truth["goals"] if g["planted"] == "goal-67")
+    goal = next(g for g in truth["goals"] if g["planted"] == "goal-63")
     through_ball = next(m for m in actions(stream) if m["event_id"] in goal["affected_event_ids"] and m["event_id"] != goal["event_id"])
     frame = through_ball["freeze_frame"]
     second_last = sorted((p["location"][0] for p in frame if not p["teammate"]), reverse=True)[1]
-    runner = next(p for p in frame if p["player_id"] == "home-9")["location"][0]
+    runner = next(p for p in frame if p["player_id"] == "home-20")["location"][0]
     assert 0.1 <= runner - second_last <= 0.4 and runner > through_ball["start_x"]
 
 
@@ -114,17 +133,17 @@ def test_freeze_frames(demo):
 
 
 def test_planted_moments_outweigh_background_chances(demo):
-    """A background shot never swings the result more than the planted 74' save: chance value = xG x shift of the result probabilities if it had gone in."""
+    """A background shot never swings the result more than the planted 72' save: chance value = xG x shift of the result probabilities if it had gone in."""
     stream, truth = demo
     info = next(m for m in stream if m["type"] == "match_info")["teams"]
-    model = SkellamWinProb(info["home"]["expected_goals"], info["away"]["expected_goals"], duration=100.0)
+    model = SkellamWinProb(info["home"]["expected_goals"], info["away"]["expected_goals"])
 
     def value(shot):
-        state = MatchState(shot["clock_s"] / 60, shot["score_before"]["home"], shot["score_before"]["away"], shot["reds_before"]["home"], shot["reds_before"]["away"])
+        state = MatchState(shot["clock_s"] / 60, shot["score_before"]["home"], shot["score_before"]["away"], shot["reds_before"]["home"], shot["reds_before"]["away"], period=shot["period"])
         before, after = model.predict(state), model.predict(state.with_goal(shot["team"]))
         return shot["xg"] * 0.5 * (abs(after.home - before.home) + abs(after.draw - before.draw) + abs(after.away - before.away))
 
-    save = next(s for s in truth["shots"] if s["planted"] == "save-74")
+    save = next(s for s in truth["shots"] if s["planted"] == "save-72")
     background = [s for s in truth["shots"] if s["planted"] is None]
     assert background and max(value(s) for s in background) < value(save)
 
@@ -218,7 +237,7 @@ def test_replay_paces_key_moments(demo):
     stream, truth = demo
     times = schedule(stream, speed=10)
     at = {m["message_id"]: t for m, t in zip(stream, times)}
-    goal = next(m["event_id"] for m in truth["moments"] if m["key"] == "goal-67")
+    goal = next(m["event_id"] for m in truth["moments"] if m["key"] == "goal-63")
     void = next(m for m in stream if m["type"] == "correction" and m["op"] == "void")
     assert at[void["message_id"]] - at[goal] >= 60, "the VAR check must play in real time, so the card can air before the retraction"
     first_half_end = next(t for m, t in zip(stream, times) if m["type"] == "period_end" and m["period"] == 1)
@@ -230,3 +249,18 @@ def test_replay_paces_key_moments(demo):
     sent = []
     replay(stream, sent.append, speed=0)
     assert sent == stream
+
+
+def test_cdf_export_passes_the_official_validator(demo, tmp_path):
+    cdf = pytest.importorskip("cdf")
+    stream, truth = demo
+    paths = {p.name.split(".")[1]: p for p in write_cdf(stream, tmp_path)}
+    validators = {"meta": cdf.MetaSchemaValidator, "match": cdf.MatchSchemaValidator, "event": cdf.EventSchemaValidator, "tracking": cdf.TrackingSchemaValidator}
+    for name, validator in validators.items():
+        validator().validate_schema(sample=str(paths[name]), mode="extreme", limit=None)  # raises on any error, unknown keys included
+    sheet = json.loads(paths["match"].read_text(encoding="utf-8"))
+    final = sheet["match"]["result"]["final"]
+    assert (final["home"], final["away"]) == (truth["final_score"]["home"], truth["final_score"]["away"])
+    scorers = [g["player_id"] for g in sheet["events"]["goals"]]
+    assert scorers.count("home_20") == 4 and "away_7" in scorers, "corrections are applied: the 31' goal belongs to #7, disallowed goals are gone"
+    assert [c["type"] for c in sheet["events"]["cards"] if c["player_id"] == "away_5"] == ["yellow_card", "second_yellow_card"]

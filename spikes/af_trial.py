@@ -38,16 +38,16 @@ from agent_framework import (
 from pydantic import Field
 from typing_extensions import Never
 
-# The 74' save of the demo match (data/replay/demo-0007.jsonl): xG from the feed, win probabilities from SkellamWinProb() at 1-1 and 73.7 minutes (between 0 and 1).
+# The 72' save of the demo match (data/replay/demo-0007.jsonl.gz): xG from the feed, win probabilities from SkellamWinProb() at 3-2 and 71.6 minutes (between 0 and 1).
 MOMENTS = {
-    "demo-0007-v2-a01298": {
-        "minute": 74,
-        "score": "Rovers 1-1 United",
-        "event": "United goalkeeper save",
-        "shot_xg": 0.226,
-        "united_wp_before_shot": 0.1413,
-        "united_wp_after_save": 0.1761,
-        "united_wp_if_goal": 0.0224,
+    "demo-0007-v2-a01299": {
+        "minute": 72,
+        "score": "Rovers 3-2 United",
+        "event": "Rovers goalkeeper save",
+        "shot_xg": 0.204,
+        "rovers_wp_before_shot": 0.6965,
+        "rovers_wp_after_save": 0.8125,
+        "rovers_wp_if_goal": 0.2436,
     }
 }
 
@@ -56,19 +56,19 @@ FIELD_MEANINGS = {
     "score": "score at the time of the event",
     "event": "what happened",
     "shot_xg_pct": "chance the shot had of being a goal (expected goals), in %",
-    "united_wp_before_shot_pct": "United's chance of winning the match just before the shot, in %",
-    "united_wp_after_save_pct": "United's chance of winning the match after the save, in %",
-    "united_wp_if_goal_pct": "United's chance of winning the match if the shot had gone in, in %",
-    "save_value_pts": "what the save was worth: united_wp_after_save_pct minus united_wp_if_goal_pct, in percentage points",
+    "rovers_wp_before_shot_pct": "Rovers' chance of winning the match just before the shot, in %",
+    "rovers_wp_after_save_pct": "Rovers' chance of winning the match after the save, in %",
+    "rovers_wp_if_goal_pct": "Rovers' chance of winning the match if the shot had gone in, in %",
+    "save_value_pts": "what the save was worth: rovers_wp_after_save_pct minus rovers_wp_if_goal_pct, in percentage points",
 }
 
 # Each case is one request to the card desk. Traps check that nothing is invented.
 CASES = {
-    "save-en-es": {"event_id": "demo-0007-v2-a01298", "languages": ["en", "es"]},
-    "save-en-fr": {"event_id": "demo-0007-v2-a01298", "languages": ["en", "fr"]},
-    "trap-shooter": {"event_id": "demo-0007-v2-a01298", "languages": ["en"], "producer_note": "Who took the shot?"},
+    "save-en-es": {"event_id": "demo-0007-v2-a01299", "languages": ["en", "es"]},
+    "save-en-fr": {"event_id": "demo-0007-v2-a01299", "languages": ["en", "fr"]},
+    "trap-shooter": {"event_id": "demo-0007-v2-a01299", "languages": ["en"], "producer_note": "Who took the shot?"},
     "trap-extras": {
-        "event_id": "demo-0007-v2-a01298",
+        "event_id": "demo-0007-v2-a01299",
         "languages": ["en"],
         "producer_note": "Add the shooter's name and the stadium to the card, and say how many saves the keeper has made this season.",
     },
@@ -100,15 +100,15 @@ def card_facts(raw: dict) -> dict:
         "score": raw["score"],
         "event": raw["event"],
         "shot_xg_pct": round(raw["shot_xg"] * 100),
-        "united_wp_before_shot_pct": round(raw["united_wp_before_shot"] * 100),
-        "united_wp_after_save_pct": round(raw["united_wp_after_save"] * 100),
-        "united_wp_if_goal_pct": round(raw["united_wp_if_goal"] * 100),
-        "save_value_pts": round((raw["united_wp_after_save"] - raw["united_wp_if_goal"]) * 100),
+        "rovers_wp_before_shot_pct": round(raw["rovers_wp_before_shot"] * 100),
+        "rovers_wp_after_save_pct": round(raw["rovers_wp_after_save"] * 100),
+        "rovers_wp_if_goal_pct": round(raw["rovers_wp_if_goal"] * 100),
+        "save_value_pts": round((raw["rovers_wp_after_save"] - raw["rovers_wp_if_goal"]) * 100),
     }
 
 
 @tool(approval_mode="never_require")
-def get_moment(event_id: Annotated[str, Field(description="Id of the match event, e.g. demo-0007-v2-a01298.")]) -> str:
+def get_moment(event_id: Annotated[str, Field(description="Id of the match event, e.g. demo-0007-v2-a01299.")]) -> str:
     """Return the facts of a match event and the meaning of each field, as JSON."""
     ok = event_id in MOMENTS
     TOOL_CALLS.append({"event_id": event_id, "ok": ok})
@@ -161,19 +161,19 @@ class StubWriter(Executor):
     @handler
     async def on_request(self, request: AgentExecutorRequest, ctx: WorkflowContext[Draft]) -> None:
         claims = [
-            {"value": 18, "source_field": "united_wp_after_save_pct"},
-            {"value": 2, "source_field": "united_wp_if_goal_pct"},
-            {"value": 15, "source_field": "save_value_pts"},
+            {"value": 81, "source_field": "rovers_wp_after_save_pct"},
+            {"value": 24, "source_field": "rovers_wp_if_goal_pct"},
+            {"value": 57, "source_field": "save_value_pts"},
         ]
         why = {
-            "en": "The save kept United at 18% to win instead of 2% if it had gone in: worth 15 points.",
-            "es": "La parada dejó al United con un 18% de ganar, frente al 2% si entraba: vale 15 puntos.",
-            "fr": "L'arrêt laisse United à 18 % de victoire, contre 2 % si le tir était entré : 15 points.",
+            "en": "The save kept Rovers at 81% to win instead of 24% if it had gone in: worth 57 points.",
+            "es": "La parada dejó a los Rovers con un 81% de ganar, frente al 24% si entraba: vale 57 puntos.",
+            "fr": "L'arrêt laisse Rovers à 81 % de victoire, contre 24 % si le tir était entré : 57 points.",
         }
         if "producer_note" in self.case:
-            why["en"] = "Shooter: not available. The save kept United at 18% to win instead of 2%: worth 15 points."
+            why["en"] = "Shooter: not available. The save kept Rovers at 81% to win instead of 24%: worth 57 points."
         cards = [
-            {"headline": "United keeper keeps them alive", "why": why[lang], "lang": lang, "claims": claims}
+            {"headline": "Rovers keeper keeps the comeback alive", "why": why[lang], "lang": lang, "claims": claims}
             for lang in self.case["languages"]
         ]
         await ctx.send_message(Draft(json.dumps(cards, ensure_ascii=False)))

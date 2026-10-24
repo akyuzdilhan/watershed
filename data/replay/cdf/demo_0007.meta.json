@@ -1,0 +1,415 @@
+{
+  "competition": {
+    "id": "synthetic_league",
+    "name": "Synthetic League"
+  },
+  "season": {
+    "id": "season_2026_27",
+    "name": "2026/27"
+  },
+  "match": {
+    "id": "demo_0007",
+    "kickoff_time": "2026-10-24T14:00:00.000Z",
+    "periods": [
+      {
+        "period": "first_half",
+        "play_direction": "left_right",
+        "start_time": "2026-10-24T14:00:00.000Z",
+        "end_time": "2026-10-24T14:48:38.940Z",
+        "left_team_id": "rovers",
+        "right_team_id": "united"
+      },
+      {
+        "period": "second_half",
+        "play_direction": "right_left",
+        "start_time": "2026-10-24T15:03:38.940Z",
+        "end_time": "2026-10-24T15:59:10.120Z",
+        "left_team_id": "united",
+        "right_team_id": "rovers"
+      }
+    ],
+    "whistles": [
+      {
+        "type": "first_half",
+        "sub_type": "start",
+        "time": "2026-10-24T14:00:00.000Z"
+      },
+      {
+        "type": "first_half",
+        "sub_type": "end",
+        "time": "2026-10-24T14:48:38.940Z"
+      },
+      {
+        "type": "second_half",
+        "sub_type": "start",
+        "time": "2026-10-24T15:03:38.940Z"
+      },
+      {
+        "type": "second_half",
+        "sub_type": "end",
+        "time": "2026-10-24T15:59:10.120Z"
+      }
+    ]
+  },
+  "teams": {
+    "home": {
+      "id": "rovers",
+      "players": [
+        {
+          "id": "home_1",
+          "team_id": "rovers",
+          "jersey_number": 1,
+          "is_starter": true,
+          "first_name": "Umberto",
+          "last_name": "Valtonen"
+        },
+        {
+          "id": "home_2",
+          "team_id": "rovers",
+          "jersey_number": 2,
+          "is_starter": true,
+          "first_name": "Bastien",
+          "last_name": "Hepworth"
+        },
+        {
+          "id": "home_5",
+          "team_id": "rovers",
+          "jersey_number": 5,
+          "is_starter": true,
+          "first_name": "Caius",
+          "last_name": "Varga"
+        },
+        {
+          "id": "home_4",
+          "team_id": "rovers",
+          "jersey_number": 4,
+          "is_starter": true,
+          "first_name": "Silas",
+          "last_name": "Achterberg"
+        },
+        {
+          "id": "home_3",
+          "team_id": "rovers",
+          "jersey_number": 3,
+          "is_starter": true,
+          "first_name": "Gideon",
+          "last_name": "Jagger"
+        },
+        {
+          "id": "home_6",
+          "team_id": "rovers",
+          "jersey_number": 6,
+          "is_starter": true,
+          "first_name": "Nevan",
+          "last_name": "Varga"
+        },
+        {
+          "id": "home_8",
+          "team_id": "rovers",
+          "jersey_number": 8,
+          "is_starter": true,
+          "first_name": "Ivo",
+          "last_name": "Selwood"
+        },
+        {
+          "id": "home_10",
+          "team_id": "rovers",
+          "jersey_number": 10,
+          "is_starter": true,
+          "first_name": "Wendell",
+          "last_name": "Moravec"
+        },
+        {
+          "id": "home_7",
+          "team_id": "rovers",
+          "jersey_number": 7,
+          "is_starter": true,
+          "first_name": "Yanis",
+          "last_name": "Ackroyd"
+        },
+        {
+          "id": "home_9",
+          "team_id": "rovers",
+          "jersey_number": 9,
+          "is_starter": true,
+          "first_name": "Hugo",
+          "last_name": "Uribe"
+        },
+        {
+          "id": "home_11",
+          "team_id": "rovers",
+          "jersey_number": 11,
+          "is_starter": true,
+          "first_name": "Wendell",
+          "last_name": "Pennick"
+        },
+        {
+          "id": "home_13",
+          "team_id": "rovers",
+          "jersey_number": 13,
+          "is_starter": false,
+          "first_name": "Piers",
+          "last_name": "Uribe"
+        },
+        {
+          "id": "home_12",
+          "team_id": "rovers",
+          "jersey_number": 12,
+          "is_starter": false,
+          "first_name": "Vito",
+          "last_name": "Calloway"
+        },
+        {
+          "id": "home_15",
+          "team_id": "rovers",
+          "jersey_number": 15,
+          "is_starter": false,
+          "first_name": "Valen",
+          "last_name": "Jaramillo"
+        },
+        {
+          "id": "home_16",
+          "team_id": "rovers",
+          "jersey_number": 16,
+          "is_starter": false,
+          "first_name": "Nevan",
+          "last_name": "Valtonen"
+        },
+        {
+          "id": "home_18",
+          "team_id": "rovers",
+          "jersey_number": 18,
+          "is_starter": false,
+          "first_name": "Matteo",
+          "last_name": "Lindqvist"
+        },
+        {
+          "id": "home_21",
+          "team_id": "rovers",
+          "jersey_number": 21,
+          "is_starter": false,
+          "first_name": "Wilmer",
+          "last_name": "Achterberg"
+        },
+        {
+          "id": "home_17",
+          "team_id": "rovers",
+          "jersey_number": 17,
+          "is_starter": false,
+          "first_name": "Valen",
+          "last_name": "Blackwood"
+        },
+        {
+          "id": "home_19",
+          "team_id": "rovers",
+          "jersey_number": 19,
+          "is_starter": false,
+          "first_name": "Ivo",
+          "last_name": "Castellan"
+        },
+        {
+          "id": "home_20",
+          "team_id": "rovers",
+          "jersey_number": 20,
+          "is_starter": false,
+          "first_name": "Dorian",
+          "last_name": "Lightfoot"
+        }
+      ]
+    },
+    "away": {
+      "id": "united",
+      "players": [
+        {
+          "id": "away_1",
+          "team_id": "united",
+          "jersey_number": 1,
+          "is_starter": true,
+          "first_name": "Zeke",
+          "last_name": "Thackeray"
+        },
+        {
+          "id": "away_2",
+          "team_id": "united",
+          "jersey_number": 2,
+          "is_starter": true,
+          "first_name": "Ilan",
+          "last_name": "Moravec"
+        },
+        {
+          "id": "away_5",
+          "team_id": "united",
+          "jersey_number": 5,
+          "is_starter": true,
+          "first_name": "Hugo",
+          "last_name": "Wojcik"
+        },
+        {
+          "id": "away_6",
+          "team_id": "united",
+          "jersey_number": 6,
+          "is_starter": true,
+          "first_name": "Wendell",
+          "last_name": "Garside"
+        },
+        {
+          "id": "away_3",
+          "team_id": "united",
+          "jersey_number": 3,
+          "is_starter": true,
+          "first_name": "Ivo",
+          "last_name": "Moravec"
+        },
+        {
+          "id": "away_4",
+          "team_id": "united",
+          "jersey_number": 4,
+          "is_starter": true,
+          "first_name": "Emeric",
+          "last_name": "Tavares"
+        },
+        {
+          "id": "away_8",
+          "team_id": "united",
+          "jersey_number": 8,
+          "is_starter": true,
+          "first_name": "Florin",
+          "last_name": "Delacroix"
+        },
+        {
+          "id": "away_7",
+          "team_id": "united",
+          "jersey_number": 7,
+          "is_starter": true,
+          "first_name": "Kester",
+          "last_name": "Kettering"
+        },
+        {
+          "id": "away_10",
+          "team_id": "united",
+          "jersey_number": 10,
+          "is_starter": true,
+          "first_name": "Tobin",
+          "last_name": "Delacroix"
+        },
+        {
+          "id": "away_11",
+          "team_id": "united",
+          "jersey_number": 11,
+          "is_starter": true,
+          "first_name": "Soren",
+          "last_name": "Szabo"
+        },
+        {
+          "id": "away_9",
+          "team_id": "united",
+          "jersey_number": 9,
+          "is_starter": true,
+          "first_name": "Vito",
+          "last_name": "Valtonen"
+        },
+        {
+          "id": "away_13",
+          "team_id": "united",
+          "jersey_number": 13,
+          "is_starter": false,
+          "first_name": "Umberto",
+          "last_name": "Kettering"
+        },
+        {
+          "id": "away_12",
+          "team_id": "united",
+          "jersey_number": 12,
+          "is_starter": false,
+          "first_name": "Remy",
+          "last_name": "Ravensworth"
+        },
+        {
+          "id": "away_15",
+          "team_id": "united",
+          "jersey_number": 15,
+          "is_starter": false,
+          "first_name": "Nevan",
+          "last_name": "Garside"
+        },
+        {
+          "id": "away_16",
+          "team_id": "united",
+          "jersey_number": 16,
+          "is_starter": false,
+          "first_name": "Umberto",
+          "last_name": "Pennick"
+        },
+        {
+          "id": "away_18",
+          "team_id": "united",
+          "jersey_number": 18,
+          "is_starter": false,
+          "first_name": "Aldo",
+          "last_name": "Varga"
+        },
+        {
+          "id": "away_21",
+          "team_id": "united",
+          "jersey_number": 21,
+          "is_starter": false,
+          "first_name": "Elio",
+          "last_name": "Zielinski"
+        },
+        {
+          "id": "away_17",
+          "team_id": "united",
+          "jersey_number": 17,
+          "is_starter": false,
+          "first_name": "Oskar",
+          "last_name": "Mossley"
+        },
+        {
+          "id": "away_19",
+          "team_id": "united",
+          "jersey_number": 19,
+          "is_starter": false,
+          "first_name": "Dorian",
+          "last_name": "Shacklock"
+        },
+        {
+          "id": "away_20",
+          "team_id": "united",
+          "jersey_number": 20,
+          "is_starter": false,
+          "first_name": "Nils",
+          "last_name": "Kettering"
+        }
+      ]
+    }
+  },
+  "venue": {
+    "id": "synthetic_ground",
+    "pitch_length": 105.0,
+    "pitch_width": 68.0,
+    "name": "Synthetic Ground"
+  },
+  "meta": {
+    "video": null,
+    "tracking": {
+      "version": "2.0.0",
+      "name": "watershed_generator",
+      "fps": 0,
+      "collection_timing": "post_match"
+    },
+    "event": {
+      "version": "2.0.0",
+      "name": "watershed_generator",
+      "collection_timing": "live"
+    },
+    "landmarks": null,
+    "meta": {
+      "version": "2.0.0",
+      "name": "watershed_generator"
+    },
+    "ball": null,
+    "cdf": {
+      "version": "0.3.2"
+    }
+  }
+}

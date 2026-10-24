@@ -54,6 +54,7 @@ class MatchEngine:
             s.clock.start(period)
             self.message("period_start")
             if period == 2:
+                self.director.half_time()
                 self.laws.plan_substitutions()
             self.laws.order("kick_off", "home" if period == 1 else "away", *CENTRE)
             while not self.laws.half_over():

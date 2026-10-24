@@ -9,7 +9,8 @@ from generator.state import Restart
 from generator.teams import GROUP, Player
 
 YELLOW_PER_FOUL = 0.17  # about 4.2 yellow cards for 25 fouls a match
-SLOW_RESTART = 0.08  # share of every restart delay the referee adds back (time wasting, slow restarts)
+SLOW_RESTART = 0.12  # share of every restart delay the referee adds back (time wasting, slow restarts)
+CELEBRATION_FREE_S = 30.0  # since 2024/25 the Premier League adds back only what a goal celebration takes beyond 30 seconds
 VAR_REASONS = ["possible offside", "possible foul", "possible handball"]
 
 
@@ -55,6 +56,9 @@ class Laws:
         lost = min(r.lost_s + SLOW_RESTART * r.delay_s, r.delay_s)
         s.clock.advance(r.delay_s - lost)
         s.clock.advance(lost, stoppage=True)
+        end = s.clock.end_s
+        if end is not None and s.clock.clock_s >= end:
+            return  # time is up while the ball is dead: the referee blows without the restart
         s.ball.x, s.ball.y, s.ball.restart = r.x, r.y, None
         s.ball.alive, s.phase, s.missed_offside = True, "in_play", None
         s.give(r.side, None)
@@ -138,7 +142,7 @@ class Laws:
         r = self.rng.random()
         booked = self.s.yellows.get(offender.id, 0) >= 1
         if not self.e.director.background_reds:
-            return None if booked or r >= YELLOW_PER_FOUL else "yellow"
+            return None if booked or self.e.director.protected(offender.id) or r >= YELLOW_PER_FOUL else "yellow"
         if r < 0.002:
             return "red"
         if booked:
@@ -174,7 +178,7 @@ class Laws:
         else:
             rest = celebration
         self._credit(ev, side, moment)
-        self.order("kick_off", s.other(side), *CENTRE, delay=rest, lost=rest)
+        self.order("kick_off", s.other(side), *CENTRE, delay=rest, lost=max(rest - CELEBRATION_FREE_S, 0.0))
 
     def _credit(self, ev: dict, side: str, moment) -> None:
         """A goal that stands may later be credited to another player (a deflection), as providers do after review."""
@@ -202,11 +206,16 @@ class Laws:
         if var["decision"] != "overturned":
             return
         s.score[side] -= 1
+        delay = float(rng.uniform(15, 30))
+        if var.get("offence") == "handball":  # handball by the scorer: direct free kick to the defenders where he touched it
+            self.e.correct("void", ev["event_id"], {}, "var_handball", related=done["message_id"])
+            at = from_frame(side, ev["start_x"], ev["start_y"])
+            self.order("free_kick", s.other(side), *at, delay=delay, lost=delay)
+            return
         off = s.missed_offside
         self.e.correct("update", off["event_id"], {"result": "offside", "offside": {"player_id": off["player_id"], "margin_m": off["margin_m"]}}, "var_offside", related=done["message_id"])
         self.e.correct("void", ev["event_id"], {}, "var_offside", related=done["message_id"])
         s.missed_offside = None
-        delay = float(rng.uniform(15, 30))
         self.order("free_kick", s.other(side), *off["at"], delay=delay, lost=delay, direct=False)
 
     # --- dead balls: substitutions and injuries -------------------------------------------------
@@ -263,7 +272,7 @@ class Laws:
             done += 1
         if done and window:  # half-time changes use no window and no playing time
             lineup.windows_used += 1
-            s.clock.advance(20 + 10 * done + float(rng.uniform(0, 10)), stoppage=True)
+            s.clock.advance(15 + 8 * done + float(rng.uniform(0, 5)), stoppage=True)
 
     # --- time -----------------------------------------------------------------------------------
 
@@ -272,7 +281,7 @@ class Laws:
         c = self.s.clock
         if c.added_min[c.period] is None and c.clock_s >= c.regulation_end:
             minutes = c.announce()
-            c.over_s[c.period] = float(self.rng.uniform(5, 40))
+            c.over_s[c.period] = float(self.rng.uniform(0, 30))
             self.e.message("added_time", minutes=minutes)
         end = c.end_s
         return end is not None and c.clock_s >= end and not self.e.director.plan

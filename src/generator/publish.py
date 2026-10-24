@@ -5,13 +5,14 @@ Every message carries session_id = match_id, so the worker receives each match i
 Pacing is built for a live demo: the match runs `--speed` times faster than real time, except around key moments (goals, red cards, big chances, VAR checks, corrections), which play in real time so that a card can be written, approved and aired before the feed changes it. Half-time is cut to a few seconds, and a correction never arrives sooner than `--min-correction-delay` real seconds after the action it corrects.
 
 Usage:
-    python -m generator.publish data/replay/demo-0007.jsonl --dry --speed 0
-    python -m generator.publish data/replay/demo-0007.jsonl --speed 10
-    python -m generator.publish data/replay/demo-0007.jsonl --from-minute 60
+    python -m generator.publish data/replay/demo-0007.jsonl.gz --dry --speed 0
+    python -m generator.publish data/replay/demo-0007.jsonl.gz --speed 10
+    python -m generator.publish data/replay/demo-0007.jsonl.gz --from-minute 60
 Needs SERVICE_BUS_FQDN and SERVICE_BUS_TOPIC: from the environment, the .env file, or the azd environment (.azure/<env>/.env).
 """
 
 import argparse
+import gzip
 import json
 import os
 import sys
@@ -22,7 +23,8 @@ KEY_BEFORE_S, KEY_AFTER_S = 20.0, 60.0  # broadcast seconds played in real time 
 
 
 def load(path: Path) -> list[dict]:
-    with path.open(encoding="utf-8") as f:
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 

@@ -61,7 +61,8 @@ class Clock:
         added = self.added_min[self.period]
         if added is None:
             return None
-        return self.regulation_end + 60 * added + self.stoppage_s[self.period] + self.over_s[self.period]
+        # Time lost during the added time extends the half, but referees rarely go much beyond the board: 45 seconds more at most.
+        return self.regulation_end + 60 * added + min(self.stoppage_s[self.period], 45.0) + self.over_s[self.period]
 
     def fields(self) -> dict:
         """The clock fields of a feed message, all derived from the rounded clock so that they always agree."""

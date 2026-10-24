@@ -1,6 +1,6 @@
 """Fallback win-probability model: a lookup table indexed by minute and goal difference.
 
-It shows that the interface is replaceable: anything with a predict(MatchState) -> WinProb method can stand in for the Skellam model. The table can be filled from another model (from_model) or, later, from the final results of many simulated matches. Probabilities are interpolated linearly between two rows; goal differences beyond the table take its outermost column. Team strengths and red cards are ignored.
+It shows that the interface is replaceable: anything with a predict(MatchState) -> WinProb method can stand in for the Skellam model. The table can be filled from another model (from_model) or, later, from the final results of many simulated matches. Probabilities are interpolated linearly between two rows; goal differences beyond the table take its outermost column. Team strengths, red cards and announced added time are ignored; the result is certain at the final whistle.
 """
 
 import math
@@ -28,14 +28,17 @@ class TableWinProb:
 
     @classmethod
     def from_model(cls, model: WinProbModel, minutes: Sequence[float] | None = None, max_diff: int = 4) -> "TableWinProb":
-        """Tabulates another model on a grid of minutes and goal differences, with no red cards. The default grid has a row every 5 minutes and a last row at the model's full time (its duration, 95 if it has none), where the result is certain."""
+        """Tabulates another model on a grid of minutes and goal differences, with no red cards. The default grid has a row every 5 minutes up to the model's expected match length (its `length`, 100 if it has none)."""
         if minutes is None:
-            end = float(getattr(model, "duration", 95.0))
+            end = float(getattr(model, "length", 100.0))
             minutes = (*range(0, math.ceil(end), 5), end)
         rows = tuple(tuple(model.predict(MatchState(float(m), max(d, 0), max(-d, 0))) for d in range(-max_diff, max_diff + 1)) for m in minutes)
         return cls(tuple(float(m) for m in minutes), rows)
 
     def predict(self, state: MatchState) -> WinProb:
+        if state.final:
+            d = state.home_goals - state.away_goals
+            return WinProb(float(d > 0), float(d == 0), float(d < 0))
         diff = min(max(state.home_goals - state.away_goals, -self.max_diff), self.max_diff)
         cells = [row[diff + self.max_diff] for row in self.rows]
         home = float(np.interp(state.minute, self.minutes, [c.home for c in cells]))

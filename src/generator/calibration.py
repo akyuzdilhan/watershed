@@ -26,7 +26,9 @@ TARGETS: dict[str, tuple[float, float, str]] = {
     "interceptions": (13, 28, "16 (FotMob 2024/25) to 24 (StatsBomb 2015/16)"),
     "corners": (7, 13, "about 10 (rough, unverified)"),
     "offsides": (2, 6, "3 to 4 (rough, unverified)"),
-    "added_minutes": (8, 13, "11 to 12 since 2023/24 (rough, unverified)"),
+    "added_minutes": (8.5, 11.5, "about 10: matches lasted 99:44 (2024/25) and 100:35 (2025/26) on average, Opta"),
+    "added_first_half": (2.5, 4.5, "about 3.5 (estimated split)"),
+    "added_second_half": (5.0, 7.5, "about 6.5 (estimated split)"),
 }
 
 
@@ -81,6 +83,8 @@ def count(stream: list[dict]) -> dict[str, float]:
         "offsides": sum(a["result"] == "offside" for a in passes),
         "possession_changes": sum(a != b for a, b in zip(held, held[1:])),
         "added_minutes": sum(m["minutes"] for m in unique if m["type"] == "added_time"),
+        "added_first_half": sum(m["minutes"] for m in unique if m["type"] == "added_time" and m["period"] == 1),
+        "added_second_half": sum(m["minutes"] for m in unique if m["type"] == "added_time" and m["period"] == 2),
         "substitutions": sum(m["type"] == "substitution" for m in unique),
         "var_checks": sum(m["type"] == "var_check" and m["status"] == "completed" for m in unique),
         "corrections": sum(m["type"] == "correction" for m in unique),
