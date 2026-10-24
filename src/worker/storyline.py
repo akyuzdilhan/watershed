@@ -162,7 +162,8 @@ def _scorers(m: dict) -> list[tuple[str, str]]:
     for s in m.get("scorers") or m.get("goals") or []:
         if not isinstance(s, dict) or s.get("own_goal"):
             continue
-        pid = s.get("player_id") or s.get("id") or (s.get("player") or {}).get("id")
+        player = s.get("player")
+        pid = s.get("player_id") or (player if isinstance(player, str) else (player or {}).get("id"))
         club = s.get("club") or s.get("team")
         club = m["home"] if club == "home" else m["away"] if club == "away" else club
         if pid:
