@@ -28,10 +28,14 @@ class MemorySink:
         self.audit.append(action)
         self.cards[card["id"]] = dict(card)
 
+    def audit_entry(self, entry: dict) -> None:
+        self.audit.append(entry)
+
 
 @dataclass
 class Pipeline:
     sink: object = field(default_factory=MemorySink)
+    desk: object | None = None  # writes and stages each card; None keeps the Spotter's raw cards
     hold_s: float = 3.0
     threshold: float = 0.08
     matches: dict[str, Match] = field(default_factory=dict)
@@ -57,10 +61,16 @@ class Pipeline:
                 spotter = self.spotters[match.match_id] = Spotter(match, make_model(match, SkellamWinProb), self.threshold)
             if spotter is None:
                 continue  # nothing to evaluate before the match information
+            teams = {side: t["name"] for side, t in match.info["teams"].items()}
             for result in spotter.process(m):
+                card = spotter.cards[result["event_id"]]
                 if "action" in result:
-                    self.sink.action(result, spotter.cards[result["event_id"]])
+                    self.sink.action(result, card)
+                    if self.desk is not None:
+                        self.desk.on_action(card, result, teams)
                 else:
                     self.sink.card(result)
+                    if self.desk is not None:
+                        self.desk.write(card, teams)
                 out.append(result)
         return out

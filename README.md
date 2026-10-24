@@ -24,7 +24,7 @@ Status: work in progress for a hackathon submission. Synthetic data only.
 ```
 python -m venv .venv
 .venv\Scripts\activate            # Windows; source .venv/bin/activate elsewhere
-pip install -e ".[azure,dev]"
+pip install -e ".[azure,agents,dev]"
 pytest
 python -m generator --story demo --out data/replay      # the demo match and its hidden ground truth
 python -m generator --calibrate 200                     # compare 200 unscripted matches with real orders of magnitude
@@ -70,6 +70,16 @@ Corners (9.0) and offsides (3.8) are only checked against approximate figures, a
 - **Win probability.** Before and after each action, from the Skellam model and the pre-match expected goals of `match_info`; the time left includes the added time still to come.
 - **Spotter.** Every goal and red card gets a card. A shot that does not go in gets one if its xG times the swing it would have caused reaches 8 points, so a late half-chance does not outweigh a real chance; a save is credited to the keeper.
 - **Corrections.** A VAR check holds the card, a goal that stands releases it, a voided goal retracts it, a reassigned goal rewrites it. On the demo match the worker finds all 11 moments of the ground truth with no extra card, and takes the three card actions it expects; on 20 unscripted matches it finds every goal and takes the right action on every corrected one (`tests/test_worker.py`).
+
+## Writer and desk
+
+`python -m worker data/replay/demo-0007.jsonl.gz --writer foundry --auto-approve` writes every card with the Writer agent; `--writer template` does the same without Azure.
+
+- **Writer.** An Agent Framework agent on Microsoft Foundry (gpt-5.4-nano, gpt-5-mini as fallback) gets the facts of a card through a function tool, `get_moment`, and writes it in English, French and Spanish (shown as machine-translated). The code computes every number and names it explicitly; the model computes nothing and lists, for each number it writes, the field it comes from.
+- **Verifier.** Deterministic: every number in the text must be claimed, every claim must match its field, a percentage must come from a percentage field, and no decimal probability is allowed. A failed draft gets one retry, then a fixed template takes over, so a card is never blocked by the model. Win probabilities are never shown as 0% or 100% before the final whistle.
+- **Desk.** A written card waits for a producer (`pending`), who approves it, edits it or rejects it; every step goes to the audit trail. A correction retracts a card (and says whether it was on air) or has it rewritten as a new version. In auto-approve mode, used for judging, a verified card goes on air without a click.
+
+On the demo match, the live run wrote and verified all 12 texts (11 cards and one rewrite) on the first attempt, in 11 to 17 seconds per card for three languages.
 
 ## Deploy
 

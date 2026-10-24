@@ -31,6 +31,9 @@ class CosmosSink:
         self.audit.upsert_item(action)
         self.cards.upsert_item(card)
 
+    def audit_entry(self, entry: dict) -> None:
+        self.audit.upsert_item(entry)
+
 
 def cosmos_from_env() -> CosmosSink:
     return CosmosSink(os.environ["COSMOS_ENDPOINT"], os.environ.get("COSMOS_DATABASE", "watershed"))

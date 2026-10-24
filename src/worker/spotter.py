@@ -46,8 +46,10 @@ class Spotter:
         if m["type"] == "correction" and m["target_event_id"] in self.cards:
             card = self.cards[m["target_event_id"]]
             if m["op"] == "void":
+                action = self._action(card, "retract", m, m["cause"])
+                action["previous_status"] = card["status"]
                 card["status"] = "retracted"
-                return [self._action(card, "retract", m, m["cause"])]
+                return [action]
             if "player" in m["changes"]:
                 card["player"] = m["changes"]["player"]
                 card["version"] += 1
