@@ -34,7 +34,7 @@ def badges(card: dict) -> list:
 def rundown_options(cards: list[dict]) -> list[dict]:
     return [{"value": c["id"], "label": html.Div([
         html.Div([html.Span(c.get("minute_label", ""), className="ru-minute"), html.Span(MOMENTS.get(c.get("moment"), c.get("moment")), className="ru-moment"),
-                  html.Span(f"{c.get('value_pts', 0)} pts", className="ru-value")], className="ru-top"),
+                  html.Span(f"priority {c.get('value_pts', 0)}", className="ru-value")], className="ru-top"),
         html.Div(f"{c.get('team_name', '')}: {c.get('player', {}).get('name', '')}" + (f" (v{c['version']})" if c.get("version", 1) > 1 else ""), className="ru-who"),
         html.Div(badges(c), className="ru-badges")], className="ru-item " + ("ru-retracted" if c.get("status") == "retracted" else ""))} for c in cards]
 
@@ -58,7 +58,7 @@ def detail(card: dict | None, audit: list[dict]) -> html.Div:
                        for e in entries] or [html.Li(f"{h['action']} by {h['by']}, v{h['version']}") for h in card.get("history", [])], className="history")
     sb = card.get("score_before", {})
     head = html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
-                     html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, value {card.get('value_pts', 0)} pts, version {card.get('version', 1)}", className="muted"),
+                     html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, priority {card.get('value_pts', 0)}, version {card.get('version', 1)}", className="muted"),
                                *badges(card)], className="detail-meta")])
     duo = panels.duo_block(card)
     commentary = [html.H3("Commentary"), duo] if duo is not None else []

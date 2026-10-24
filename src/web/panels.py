@@ -190,7 +190,7 @@ def insight_rows(store, match_id: str) -> tuple[list[dict], bool]:
 def insight_options(docs: list[dict]) -> list[dict]:
     return [{"value": d["id"], "label": html.Div([
         html.Div([html.Span(d.get("minute_label") or "", className="ru-minute"), html.Span((d.get("kind") or "").title(), className="ru-moment"),
-                  html.Span(f"{d.get('value', 0)} pts", className="ru-value")], className="ru-top"),
+                  html.Span(f"priority {d.get('value', 0)}", className="ru-value")], className="ru-top"),
         html.Div(insight_title(d), className="ru-who"),
         html.Div(html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed")), className="ru-badges")],
         className="ru-item")} for d in docs]
@@ -221,7 +221,7 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool) -> tuple[
         return html.Div("No insight yet. Tactical candidates appear here once the feed has goals to explain.", className="muted"), empty_figure("No insight selected.")
     rarity = d.get("rarity") or {}
     parts = [html.H2(insight_title(d)),
-             html.Div([html.Span(f"{d.get('minute_label') or ''} {d.get('kind', '')}, value {d.get('value', 0)} pts", className="muted"),
+             html.Div([html.Span(f"{d.get('minute_label') or ''} {d.get('kind', '')}, priority {d.get('value', 0)}", className="muted"),
                        html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta")]
     if not from_desk:
         parts.append(html.P("Candidate computed from the feed by worker.tactics: not on the desk, no text yet, nothing to approve.", className="muted small"))

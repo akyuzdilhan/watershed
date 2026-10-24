@@ -407,7 +407,8 @@ def test_card_detail_shows_the_commentary_duo(desk):
                                            {"speaker": "Bram", "lang": "fr", "line": "Troisième but.", "claims": []}])
     text = texts_in(console.detail(card, []))
     assert "He has done it again!" in text and "Troisième but." in text and "Commentary" in text
-    assert "Commentary" not in texts_in(console.detail(card_at(desk, "66'"), []))
+    without = {k: v for k, v in card_at(desk, "66'").items() if k != "duo"}
+    assert "Commentary" not in texts_in(console.detail(without, []))
 
 
 def test_overlay_never_loads_the_graphics_or_the_worker():

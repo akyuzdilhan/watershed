@@ -322,7 +322,8 @@ class InsightEngine:
         why = f"{top.key} ranks first with a value of {val} and {top_bits:.1f} bits of surprisal"
         if len(ranked) > 1:
             v2, b2, second, _ = ranked[1]
-            ratio = round(2 ** (top_bits - b2), 1)
+            ratio = 2 ** (top_bits - b2)
+            ratio = int(round(ratio)) if ratio >= 10 else round(ratio, 1)  # "230 times rarer" reads better than 227.5
             facts |= {"runner_up": second.key, "runner_up_value": v2, "runner_up_surprisal_bits": round(b2, 1), "times_rarer_than_runner_up": ratio}
             meanings |= {"runner_up": "key of the fact that ranks second", "runner_up_value": "its value, 0 to 100", "runner_up_surprisal_bits": "its rarity in bits",
                          "times_rarer_than_runner_up": "how many times rarer the top fact is than the second, 2 to the power of the difference in bits"}

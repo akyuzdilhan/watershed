@@ -6,7 +6,7 @@ What the worker writes and what the console, the overlay and the post-match anal
 
 | Mode | Cards and match state | Audit trail | How to select |
 |---|---|---|---|
-| Local | `data/desk/<match_id>/cards.json` (array), `state.json` | `data/desk/<match_id>/audit.jsonl` | `python -m worker <replay> --writer template --desk-dir data/desk`; readers use the `DESK_DIR` environment variable |
+| Local | `data/desk/<match_id>/cards.json` (array), `state.json`, `insights.json`, `storyline.json` | `data/desk/<match_id>/audit.jsonl` | `python -m worker <replay> --writer template --desk-dir data/desk`; readers use the `DESK_DIR` environment variable |
 | Azure | Cosmos DB, database `watershed`, container `cards` (documents with `type` `card` or `match_state`) | container `audit` | `COSMOS_ENDPOINT` and `COSMOS_DATABASE` set; Entra ID only |
 
 Every document carries `match_id`, the partition key in Cosmos DB.
@@ -77,6 +77,8 @@ The worker and the insight engine only use this read API (a `History` object; te
 ### Insight (`type: "insight"`, id `insight-<match_id>-<key>`)
 
 A fact about the match in progress or just finished, compared with the history: `{id, type, match_id, key, kind (record, rarity, streak, milestone, storyline, tactical), minute_label, clock_s, event_id (or null), headline_facts: {field: value}, field_meanings: {field: meaning}, rarity: {p, surprisal_bits, basis}, value (0 to 100, the ranking key), status (proposed, pending, approved, rejected, superseded), texts (as cards), history}`. `rarity.basis` says what was counted ("4 goals by a substitute: 0 in 18,620 matches since 1976/77"). Every number shown comes from `headline_facts`. Insights go through the same Writer, Verifier and desk as cards.
+
+The engine also writes: `group` (the fact an insight updates, e.g. `scorer-home-20`) and `version`; `superseded_by` and `supersede_cause` when a newer level of the same fact, or a correction, replaces it; `under_review` while a VAR check runs on the goal behind it; `evidence` (the event ids counted); `last_time` (the most recent occurrence in the history). At full time the document `insight-<match_id>-stat-of-the-match` carries `stat_of_the_match: true`, `why_first` (bits against the runner-up, how many times rarer) and `ranked` (the top five keys with their values). Fallback texts of the main families (scorer, comeback, half-time lead lost, goals against xG) quote `headline_facts` and are claimed like card texts (`src/worker/insight_texts.py`).
 
 ### Storyline (`type: "storyline"`, id `storyline-<match_id>`)
 

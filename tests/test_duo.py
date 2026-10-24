@@ -382,7 +382,7 @@ def test_write_insight_with_templates_goes_through_the_desk():
     assert sorted(t["lang"] for t in doc["texts"]) == sorted(LANGS) and doc["machine_translated"] == ["es"]
     facts, _ = insight_facts(doc, TEAMS)
     assert verify_duo(doc["duo"], LANGS, facts)["verified"]
-    assert sink.cards[doc["id"]]["type"] == "insight"
+    assert sink.insights[doc["id"]]["type"] == "insight"  # insights have their own store, apart from the cards
     assert [e["action"] for e in sink.audit if e["card_id"] == doc["id"]] == ["written"]
     desk.approve(doc, "producer-1")
     assert doc["status"] == "approved" and [e["action"] for e in sink.audit if e["card_id"] == doc["id"]][-1] == "approved"
@@ -419,3 +419,33 @@ def test_storyline_goes_through_the_same_path():
     story = {"id": "storyline-m", "type": "storyline", "match_id": "m", "facts": {"rovers_title_chance_pct": 12}, "field_meanings": {"rovers_title_chance_pct": "Rovers' chance of the title, in %"}}
     doc = Desk(MemorySink(), TemplateWriter(), auto_approve=True).write_insight(story, TEAMS)
     assert doc["status"] == "approved" and doc["verification"]["verified"] and len(doc["texts"]) == 3 and doc["duo"]
+
+
+ENGINE_FACTS = {  # the headline facts the insight engine gives a substitute's four goals and a comeback
+    "scorer-home-20-4": {"player": "Dorian Lightfoot", "team": "Rovers", "goals": 4, "goal_minutes": "52', 57', 66', 83'", "substitute": True, "came_on": "46'",
+                         "history_count": 0, "history_opportunities": 19000, "history_since": "1976/77"},
+    "comeback-home-2-3": {"team": "Rovers", "opponent": "United", "deficit_goals": 2, "trailing_score": "0-2", "stage": "won", "score": "5-2", "club_last_season": "2019/20",
+                          "history_count": 114, "history_opportunities": 9579, "history_since": "1976/77", "last_season": "2025/26", "last_match": "Stellbury 4-3 Netherwick"},
+}
+
+
+def test_engine_insights_get_texts_with_their_numbers():
+    for key, facts in ENGINE_FACTS.items():
+        doc = {"id": f"insight-m-{key}", "type": "insight", "match_id": "m", "key": key, "kind": "rarity", "headline_facts": facts,
+               "field_meanings": {k: k for k in facts}, "value": 80, "status": "proposed"}
+        out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(doc, TEAMS)
+        assert out["verification"]["verified"] and out["duo"]
+        en = next(t for t in out["texts"] if t["lang"] == "en")
+        assert {c["source_field"] for c in en["claims"]} >= {"history_opportunities"}  # the count behind the rarity is on screen
+        fr = next(t for t in out["texts"] if t["lang"] == "fr")
+        assert "9\u202f579" in fr["why"] or "19\u202f000" in fr["why"]
+
+
+def test_a_starter_never_gets_the_bench_lines():
+    facts = dict(ENGINE_FACTS["scorer-home-20-4"], substitute=False)
+    facts.pop("came_on")
+    doc = {"id": "insight-m-scorer-home-9-3", "type": "insight", "match_id": "m", "key": "scorer-home-9-3", "kind": "milestone", "headline_facts": facts,
+           "field_meanings": {k: k for k in facts}, "value": 60, "status": "proposed"}
+    out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(doc, TEAMS)
+    text = json.dumps(out["texts"] + out["duo"], ensure_ascii=False).lower()
+    assert not any(w in text for w in ("bench", "banc", "banquillo"))
