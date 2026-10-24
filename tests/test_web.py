@@ -415,3 +415,104 @@ def test_overlay_never_loads_the_graphics_or_the_worker():
     code = "import sys, json, web.overlay; print(json.dumps(sorted(m for m in sys.modules if m.startswith(('worker', 'web.graphics', 'web.panels', 'web.console')))))"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env={**os.environ, "PYTHONPATH": str(SRC)}).stdout
     assert json.loads(out) == []
+
+
+# --- producer feedback ----------------------------------------------------------------------------
+
+def feedback_ids(component, kind: str = "fb") -> list[dict]:
+    return [i for i in component_ids_all(component) if isinstance(i, dict) and i.get("type") == kind]
+
+
+def component_ids_all(component) -> list:
+    """Every component id, dict ids included (they are not hashable)."""
+    out = []
+    if isinstance(component, (list, tuple)):
+        for c in component:
+            out += component_ids_all(c)
+        return out
+    if hasattr(component, "to_plotly_json"):
+        if getattr(component, "id", None):
+            out.append(component.id)
+        out += component_ids_all(getattr(component, "children", None))
+    return out
+
+
+def test_card_detail_has_thumbs_next_to_every_sentence_and_reasons_after_a_thumbs_down(desk):
+    card = card_at(desk, "57'")
+    view = console.detail(card, [])
+    thumbs = feedback_ids(view)
+    n_sentences = 2 * len(card["texts"]) + len(card.get("duo") or [])
+    assert len(thumbs) == 2 * n_sentences and {i["v"] for i in thumbs} == {"up", "down"} and {i["p"] for i in thumbs} == {"d"}
+    assert {i["k"].split("|")[2] for i in thumbs} == {"en", "fr", "es"}  # every language shown
+    assert not feedback_ids(view, "fb-r") and "No producer feedback" in texts_in(view)
+    key = f"{card['id']}|why|fr|0"
+    message, done = console.give_feedback(MATCH, key, "verdict", "down", "producer-1")
+    assert done and "not relevant" in message
+    message, done = console.give_feedback(MATCH, key, "reason", "too_long", "producer-1")
+    assert done and "too long" in message
+    view = console.detail(card, [], desk.feedback_docs(MATCH))
+    reasons = feedback_ids(view, "fb-r")
+    assert {i["r"] for i in reasons} == set(console.FB.REASONS) and {i["k"] for i in reasons} == {key}
+    assert feedback_ids(view, "fb-n") and "Approval so far: 0% of 1" in texts_in(view)
+
+
+def test_feedback_is_stored_audited_and_keeps_the_card_as_it_was(desk):
+    card = card_at(desk, "66'")
+    before = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
+    assert console.give_feedback(MATCH, f"{card['id']}|headline|en|0", "verdict", "up", "producer-1")[1]
+    assert console.give_feedback(MATCH, f"{card['id']}|duo|es|0", "verdict", "down", "producer-1")[1]
+    assert console.give_feedback(MATCH, f"{card['id']}|duo|es|0", "note", "Too much drama", "producer-1")[1]
+    lines = [json.loads(line) for line in (desk.root / MATCH / "feedback.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(lines) == 3 and all(line["type"] == "feedback" for line in lines)
+    latest = console.FB.by_target(lines)
+    en = next(t for t in card["texts"] if t["lang"] == "en")
+    assert latest[f"{card['id']}|headline|en|0"]["text"] == en["headline"] and latest[f"{card['id']}|headline|en|0"]["writer"] == "template"
+    assert latest[f"{card['id']}|duo|es|0"]["note"] == "Too much drama"
+    assert ("feedback", "producer-1") in audit_of(desk, card["id"])
+    assert json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8")) == before  # a feedback is not a decision on the card
+    message, done = console.decide("approve", MATCH, card["id"], "producer-1")  # never blocks approval
+    assert done, message
+    assert console.give_feedback(MATCH, f"{card['id']}|headline|en|0", "verdict", "up", None) == ("Sign in to give feedback.", False)
+    assert not console.give_feedback(MATCH, f"{card['id']}|duo|en|99", "verdict", "up", "producer-1")[1]
+
+
+def test_feedback_rebuilds_the_profile_when_the_store_keeps_one(desk, tmp_path):
+    desk.profile_path = tmp_path / "feedback" / "profile.json"
+    card = card_at(desk, "66'")
+    console.give_feedback(MATCH, f"{card['id']}|why|en|0", "reason", "wrong_tone", "producer-1")
+    profile = json.loads(desk.profile_path.read_text(encoding="utf-8"))
+    assert profile["votes"] == 1 and profile["rules"][0]["source"] == "wrong_tone"
+
+
+def test_insight_and_storyline_sentences_have_thumbs_candidates_do_not(feed_desk):
+    out = panels.insights(MATCH, None, "insights", None, store=feed_desk)
+    assert not feedback_ids(out[2]) and not feedback_ids(out[4])  # feed candidates: nothing to judge
+    docs = write_docs(feed_desk)
+    out = panels.insights(MATCH, docs[0]["id"], "insights", None, store=feed_desk)
+    assert len(feedback_ids(out[2])) == 2 * 4 and {i["p"] for i in feedback_ids(out[2])} == {"i"}  # headline, why, two duo lines
+    assert len(feedback_ids(out[4])) == 2 * 2
+    message, done = console.give_feedback(MATCH, f"{docs[0]['id']}|duo|en|1", "verdict", "up", "producer-1")
+    assert done, message
+    again = panels.insights(MATCH, docs[0]["id"], "insights", out[-1], store=feed_desk)
+    assert again[-1] != out[-1]  # the feedback redraws the panel
+    stored = (feed_desk.root / MATCH / "feedback.jsonl").read_text(encoding="utf-8")
+    assert '"doc_type": "insight"' in stored and '"text": "A quarter of a metre."' in stored
+
+
+def test_feedback_callback_refuses_without_sign_in_in_public_mode(desk, monkeypatch):
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    card = card_at(desk, "66'")
+    key = next(k for k in app.callback_map if "c-i-rev.data@" in k)
+    outputs = [{"id": part.split(".")[0], "property": part.split(".", 1)[1]} for part in key.strip(".").split("...")]
+    thumb = {"k": f"{card['id']}|headline|en|0", "p": "d", "type": "fb", "v": "up"}
+    body = {"output": key, "outputs": outputs,
+            "inputs": [[{"id": thumb, "property": "n_clicks", "value": 1}], [], []],
+            "state": [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-i-rev", "property": "data", "value": 0}],
+            "changedPropIds": [json.dumps(thumb, sort_keys=True, separators=(",", ":")) + ".n_clicks"]}
+    response = app.server.test_client().post("/_dash-update-component", json=body, headers={security.PRINCIPAL_HEADER: "mallory"})
+    assert response.status_code == 200 and "Sign in to give feedback" in response.get_data(as_text=True)
+    assert desk.feedback_docs(MATCH) == []
+    monkeypatch.setenv("PUBLIC_MODE", "0")
+    response = app.server.test_client().post("/_dash-update-component", json=body)
+    assert "relevant, by local-producer" in response.get_data(as_text=True)
+    assert len(desk.feedback_docs(MATCH)) == 1

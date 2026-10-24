@@ -105,3 +105,28 @@ Speakers are `wren` (Wren Calder, emotion and story) and `joss` (Joss Ferrier, d
 Insights and the storyline are written by `Desk.write_insight(doc, teams)`: same Writer, Verifier, retry and template path, same statuses and audit entries as cards, stored through the sink's `insight` method when it has one, else `card`.
 
 The recap (`type: "recap"`) adds `analysis.disallowed_goals`: `[{card_id, minute_label, team, player, reason, margin_cm}]`, read from the `ruled_out` records of retracted goal cards (or passed to `build_recap(..., disallowed=...)`); the texts name them only as ruled out, with the reason and the margin.
+
+## Producer feedback (`type: "feedback"`)
+
+A producer's thumbs up or down on one sentence of a card, an insight or the storyline, written by `Desk.feedback(doc, target, verdict, reasons, note, by, teams=None)`. Locally appended to `data/desk/<match_id>/feedback.jsonl` (a later line with the same `id` replaces an earlier one); in Azure upserted in the `cards` container next to the cards. The judged document is not rewritten: a feedback changes no status, text or history.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | `feedback-<doc_id>-v<doc_version>-<part>-<lang>-<index>-<hash of by>`: one per producer, sentence and version; a second click replaces the first |
+| `match_id`, `doc_id`, `doc_type`, `doc_version` | string, string, `card`/`insight`/`storyline`, int | the document judged and its version |
+| `moment` | string or null | card moment (`goal`, `save`, `red_card`, `chance`) |
+| `family` | string or null | insight family, the words of the key before the first id, side or number (`scorer`, `comeback`, `ht-lead-lost`), or `storyline` |
+| `target` | `{part, lang, index}` | `part` `headline`, `why` or `duo`; `index` 0 for a headline or why, the position among the duo lines of that language for a duo line |
+| `text`, `speaker` | string, string or null | the exact text judged, and the duo speaker |
+| `writer` | string | `writer` of the document (model name or `template`), `duo_writer` for a duo line |
+| `verdict` | `up` or `down` | |
+| `reasons` | array | on `down` only, among `wrong_fact`, `not_relevant`, `repetitive`, `wrong_tone`, `too_long`, `wrong_moment` |
+| `note` | string or null | the producer's note, 200 characters at most |
+| `by` | string | the producer's identity (never exported) |
+| `facts`, `field_meanings` | objects | the facts the sentence was written from (`card_facts` or `insight_facts`) |
+| `pattern` | string | the sentence's skeleton (names of the facts as `{}`, numbers as `#`), to match template variants |
+| `at` | number | epoch seconds |
+
+Audit entry: `{id, match_id, card_id, action: "feedback", by, version, at, target, verdict, reasons}`. The console calls it through `Store.feedback`; like approve, it is refused without a signed-in producer in public mode.
+
+The producer profile (written to `FEEDBACK_PROFILE`, default `data/feedback/profile.json`; the worker reads it only when `FEEDBACK_PROFILE` is set), built by `worker.feedback.build_profile` from every feedback of every match: `{version, built_at, votes, approval_rate, rules: [{rule, source, count, last_at}], examples: {rejected, approved}: [{text, part, lang, moment, family, reasons, note, at}], families and moments: {name: {up, votes, rate, weight}}, demoted: [pattern]}`. Insights whose family the feedback weighs carry `feedback_weight` (their `value` is already weighted). The dataset export (`python -m worker.feedback export`) writes `record: "judgement"` lines (the feedback without `by`) then `record: "pair"` lines `{doc_id, part, lang, facts, field_meanings, chosen, rejected, rejected_reasons, ...}`.

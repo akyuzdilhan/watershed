@@ -1,6 +1,6 @@
 """The console's match-graphics tab and its insights and storyline tab.
 
-Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Like `console`, the functions below are plain functions that `register` wires as callbacks.
+Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Every sentence of a document on the desk carries the producer feedback controls (`fb_controls`, wired in `console`). Like `console`, the functions below are plain functions that `register` wires as callbacks.
 """
 
 import hashlib
@@ -13,6 +13,7 @@ from web import graphics as G
 from web import pitch, security
 from web.matchfeed import player_names, team_names
 from web.store import get_store
+from worker import feedback as FB
 from worker import tactics as T
 
 PANEL_REFRESH_MS = 5000  # the desk ticks every 1.5 s (about 80 requests a minute); the visible panel adds 12, under the 120 per minute rate limit
@@ -46,8 +47,48 @@ def _sized(fig: go.Figure, height: int = 620) -> go.Figure:
     return fig
 
 
-def duo_block(doc: dict, lang: str | None = None) -> html.Div | None:
-    """The commentary duo lines of a card or insight (`duo: [{speaker, lang, line}]`), grouped by language."""
+FB_UP, FB_DOWN = "\U0001F44D", "\U0001F44E"
+_FB_BTN = {"fontSize": "12px", "fontWeight": "normal", "padding": "0 6px", "lineHeight": "18px", "background": "transparent", "border": "1px solid #2c2c2a",
+           "borderRadius": "10px", "color": "#c3c2b7", "cursor": "pointer"}
+_FB_ON = {"up": {"borderColor": "#2f9e5b", "background": "rgba(47,158,91,.2)"}, "down": {"borderColor": "#d64545", "background": "rgba(214,69,69,.2)"}}
+
+
+def fb_controls(pane: str, doc: dict, part: str, lang: str, index: int, text: str, verdicts: dict | None) -> list:
+    """Thumbs up and down next to one sentence, and on a thumbs down the one-click reasons and a short note (Enter saves). `verdicts` (`worker.feedback.by_target`) marks the current judgement when it was on this exact text; None draws nothing (a candidate, not on the desk)."""
+    if verdicts is None or not text:
+        return []
+    key = FB.target_key(doc["id"], part, lang, index)
+    cur = verdicts.get(key)
+    if cur is not None and cur.get("text") != text:
+        cur = None  # the sentence was rewritten since
+    verdict = (cur or {}).get("verdict")
+    label = {"headline": "headline", "why": "text", "duo": "duo line"}[part]
+    buttons = [html.Button(FB_UP if v == "up" else FB_DOWN, id={"type": "fb", "p": pane, "k": key, "v": v}, n_clicks=0, className="fb-btn" + (" fb-on" if verdict == v else ""),
+                           title=("Relevant" if v == "up" else "Not relevant") + f": this {label} ({lang})", style=dict(_FB_BTN, **(_FB_ON[v] if verdict == v else {})))
+               for v in ("up", "down")]
+    out = [html.Span(buttons, className="fb", style={"display": "inline-flex", "gap": "4px", "marginLeft": "8px", "verticalAlign": "middle"})]
+    if verdict == "down":
+        chosen = set(cur.get("reasons") or [])
+        chips = [html.Button(name, id={"type": "fb-r", "p": pane, "k": key, "r": r}, n_clicks=0, className="fb-reason" + (" fb-on" if r in chosen else ""),
+                             style=dict(_FB_BTN, **(_FB_ON["down"] if r in chosen else {}))) for r, name in FB.REASONS.items()]
+        note = dcc.Input(id={"type": "fb-n", "p": pane, "k": key}, value=cur.get("note") or "", type="text", debounce=True, maxLength=FB.NOTE_MAX,
+                         placeholder="Note, Enter to save", className="fb-note", style={"fontSize": "12px", "minWidth": "10em", "flex": "1"})
+        out.append(html.Div([*chips, note], className="fb-reasons", style={"display": "flex", "flexWrap": "wrap", "gap": "4px", "margin": "4px 0", "fontSize": "12px", "fontWeight": "normal"}))
+    return out
+
+
+def fb_stats(docs: list[dict]) -> html.Div:
+    """The approval rate of the match so far, by writer and language."""
+    s = FB.stats(docs)
+    if not s["votes"]:
+        return html.Div("No producer feedback on this match yet.", className="muted small")
+    rows = [html.Tr([html.Td(b["writer"], className="fact-key"), html.Td(b["lang"]), html.Td(f"{round(100 * b['rate'])}% of {b['votes']}")]) for b in s["by"]]
+    return html.Div([html.Div(f"Approval so far: {round(100 * s['rate'])}% of {s['votes']} sentence(s) judged", className="muted small"),
+                     html.Table([html.Tbody(rows)], className="facts")], className="fb-stats")
+
+
+def duo_block(doc: dict, lang: str | None = None, verdicts: dict | None = None, pane: str = "i") -> html.Div | None:
+    """The commentary duo lines of a card or insight (`duo: [{speaker, lang, line}]`), grouped by language, each with its feedback controls when `verdicts` is given."""
     lines = [d for d in doc.get("duo") or [] if isinstance(d, dict) and (lang is None or d.get("lang") == lang)]
     if not lines:
         return None
@@ -55,7 +96,8 @@ def duo_block(doc: dict, lang: str | None = None) -> html.Div | None:
     for d in lines:
         by_lang.setdefault(d.get("lang", "en"), []).append(d)
     return html.Div([html.Div([html.Div(code.upper(), className="lang"),
-                               *[html.P([html.Span(f"{d.get('speaker', '?')}: ", className="duo-speaker"), d.get("line", "")], className="duo-line") for d in items]],
+                               *[html.P([html.Span(f"{d.get('speaker', '?')}: ", className="duo-speaker"), d.get("line", ""),
+                                         *fb_controls(pane, doc, "duo", code, i, d.get("line", ""), verdicts)], className="duo-line") for i, d in enumerate(items)]],
                               className="duo-lang") for code, items in by_lang.items()], className="duo")
 
 
@@ -64,11 +106,18 @@ def facts_table(facts: dict, meanings: dict) -> html.Table:
                       className="facts")
 
 
-def texts_block(doc: dict) -> list:
+def text_lines(doc: dict, t: dict, verdicts: dict | None, pane: str) -> list:
+    """The headline and the why of one language, each with its feedback controls."""
+    lang = t.get("lang", "")
+    return [html.Div([t.get("headline", ""), *fb_controls(pane, doc, "headline", lang, 0, t.get("headline", ""), verdicts)], className="headline"),
+            html.Div([t.get("why", ""), *fb_controls(pane, doc, "why", lang, 0, t.get("why", ""), verdicts)], className="why")]
+
+
+def texts_block(doc: dict, verdicts: dict | None = None, pane: str = "i") -> list:
     mt = set(doc.get("machine_translated") or [])
     return [html.Div([html.Div([html.Span(t.get("lang", "").upper(), className="lang"), *([html.Span("machine-translated", className="badge st-mt")] if t.get("lang") in mt else [])],
                                className="lang-row"),
-                      html.Div(t.get("headline", ""), className="headline"), html.Div(t.get("why", ""), className="why")], className="text-block")
+                      *text_lines(doc, t, verdicts, pane)], className="text-block")
             for t in doc.get("texts") or []]
 
 
@@ -216,7 +265,7 @@ def insight_title(d: dict) -> str:
     return (d.get("key") or d.get("id", "")).replace("-", " ")
 
 
-def insight_detail(d: dict | None, feed: dict | None, from_desk: bool) -> tuple[html.Div, go.Figure]:
+def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts: dict | None = None) -> tuple[html.Div, go.Figure]:
     if d is None:
         return html.Div("No insight yet. Tactical candidates appear here once the feed has goals to explain.", className="muted"), empty_figure("No insight selected.")
     rarity = d.get("rarity") or {}
@@ -225,8 +274,9 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool) -> tuple[
                        html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta")]
     if not from_desk:
         parts.append(html.P("Candidate computed from the feed by worker.tactics: not on the desk, no text yet, nothing to approve.", className="muted small"))
-    parts += texts_block(d)
-    duo = duo_block(d)
+    fb = (verdicts if verdicts is not None else {}) if from_desk else None
+    parts += texts_block(d, fb)
+    duo = duo_block(d, verdicts=fb)
     if duo is not None:
         parts += [html.H3("Commentary"), duo]
     parts += [html.H3("Facts"), facts_table(d.get("headline_facts") or {}, d.get("field_meanings") or {})]
@@ -236,12 +286,13 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool) -> tuple[
     return html.Div(parts), _sized(fig) if fig is not None else empty_figure("No figure for this insight.")
 
 
-def storyline_block(doc: dict | None) -> html.Div:
+def storyline_block(doc: dict | None, verdicts: dict | None = None) -> html.Div:
     if not doc:
         return html.Div("No storyline for this match yet.", className="muted")
     parts = [html.Div([html.Span(STATUS.get(doc.get("status"), doc.get("status", "")), className="badge " + STATUS_CLASS.get(doc.get("status"), "st-proposed"))], className="detail-meta")]
-    parts += texts_block(doc)
-    duo = duo_block(doc)
+    fb = verdicts if verdicts is not None else {}
+    parts += texts_block(doc, fb)
+    duo = duo_block(doc, verdicts=fb)
     if duo is not None:
         parts += [html.H3("Commentary"), duo]
     parts += [html.H3("Facts"), facts_table(doc.get("facts") or doc.get("headline_facts") or {}, doc.get("field_meanings") or {})]
@@ -260,15 +311,17 @@ def insights(match_id: str | None, selected: str | None, view: str | None, last_
     ids = [d["id"] for d in docs]
     picked = selected if selected in ids else (ids[0] if ids else None)
     feed = store.feed(match_id)
-    sig = _sig(match_id, docs, story, picked, rev, (feed or {}).get("last_seq"))
+    fb_docs = store.feedback_docs(match_id)
+    sig = _sig(match_id, docs, story, picked, rev, (feed or {}).get("last_seq"), len(fb_docs))
     if sig == last_sig:
         return (no_update,) * 10
     doc = next((d for d in docs if d["id"] == picked), None)
-    detail, fig = insight_detail(doc, feed, from_desk)
+    verdicts = FB.by_target(fb_docs)
+    detail, fig = insight_detail(doc, feed, from_desk, verdicts)
     status = (doc or {}).get("status")
     no_doc = not from_desk or doc is None
     s_status = (story or {}).get("status")
-    return (insight_options(docs), picked if picked != selected else no_update, detail, fig, storyline_block(story),
+    return (insight_options(docs), picked if picked != selected else no_update, detail, fig, storyline_block(story, verdicts),
             no_doc or status in ("approved", "superseded"), no_doc or status in ("rejected", "superseded"),
             story is None or s_status == "approved", story is None or s_status == "rejected", sig)
 
