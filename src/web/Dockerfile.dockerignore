@@ -1,0 +1,15 @@
+# Used by BuildKit when building with -f src/web/Dockerfile from the repository root; the image only copies src/.
+**/.git
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.env
+**/.env.*
+.azure
+.claude
+data
+tests
+spikes
+infra
