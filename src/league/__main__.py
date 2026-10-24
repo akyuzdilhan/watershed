@@ -4,6 +4,7 @@ Usage:
     python -m league --seed 1 --calibrate 1000           # means over 1,000 independent seasons, against real orders of magnitude
     python -m league table --seed 1 --matchday 30        # the table after 30 matchdays, with the observer's chances
     python -m league demo --seed 1 --matchday 30         # expected goals and card context for Rovers v United on matchday 30
+    python -m league history --seed 9 --seasons 50 --out data/history   # 50 seasons of fictional history in data/history/9/
 """
 
 import argparse
@@ -39,20 +40,40 @@ def print_table(seed: int, matchday: int, params: Params, n_sims: int) -> None:
         )
 
 
+def print_history(seed: int, n_seasons: int, out: str) -> None:
+    from league.history import build, frequencies
+
+    history, folder, seconds = build(seed, n_seasons, out)
+    labels = history.seasons()
+    print(f"History of seed {seed}: {labels[0]} to {labels[-1]}, {history.count('match')} matches, {len(history.names)} players, written to {folder} ({seconds:.1f} s)")
+    titles: dict[str, int] = {}
+    for row in history.champions():
+        titles[row["club"]] = titles.get(row["club"], 0) + 1
+    print("  titles: " + ", ".join(f"{club} {n}" for club, n in sorted(titles.items(), key=lambda x: -x[1])))
+    for club in ("Rovers", "United"):
+        print(f"  {club}: {history.club(club)}")
+    freq = frequencies(history)
+    print("  per season: " + ", ".join(f"{k.removesuffix('_per_season')} {v:.2f}" for k, v in freq.items() if k.endswith("_per_season")))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m league")
-    parser.add_argument("command", nargs="?", choices=("table", "demo"), help="table: standings and chances; demo: what the league gives the demo fixture")
+    parser.add_argument("command", nargs="?", choices=("table", "demo", "history"), help="table: standings and chances; demo: what the league gives the demo fixture; history: generate the fictional history")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--matchday", type=int, default=DEMO_MATCHDAY)
     parser.add_argument("--sims", type=int, default=N_SIMS, help="Monte Carlo simulations of the remaining fixtures")
     parser.add_argument("--elite", action="store_true", help="elite tier: the two strongest clubs pulled further clear")
     parser.add_argument("--calibrate", type=int, metavar="N", help="print the calibration over N independent seasons and exit")
+    parser.add_argument("--seasons", type=int, default=50, help="history: number of seasons, ending in 2025/26")
+    parser.add_argument("--out", default="data/history", help="history: output folder (the seed is a subfolder)")
     args = parser.parse_args()
     params = Params(elite=args.elite)
     if args.calibrate:
         print_calibration(args.calibrate, args.seed, params)
     elif args.command == "table":
         print_table(args.seed, args.matchday, params, args.sims)
+    elif args.command == "history":
+        print_history(args.seed, args.seasons, args.out)
     elif args.command == "demo":
         print(json.dumps(demo_fixture(args.seed, args.matchday, params, args.sims), indent=2))
     else:
