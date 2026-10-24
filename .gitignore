@@ -18,7 +18,7 @@ data/*
 !data/replay/
 *.parquet
 
-# Private preparation notes never go in this repo
+# Local notes
 prep-*/
 
 # OS and editors

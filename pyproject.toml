@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watershed"
+version = "0.1.0"
+description = "Football's fine margins, measured live and explained to you."
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2", "scipy>=1.13"]
+
+[project.optional-dependencies]
+azure = ["azure-servicebus>=7.14", "azure-identity>=1.19", "python-dotenv>=1.0"]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["generator*", "winprob*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
