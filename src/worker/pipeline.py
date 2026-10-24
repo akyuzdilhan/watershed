@@ -25,6 +25,7 @@ class MemorySink:
         self.events: list[dict] = []
         self.cards: dict[str, dict] = {}
         self.audit: list[dict] = []
+        self.insights: dict[str, dict] = {}
 
     def event(self, m: dict) -> None:
         self.events.append(m)
@@ -46,9 +47,15 @@ class MemorySink:
     def load_card(self, match_id: str, card_id: str) -> dict | None:
         return self.cards.get(card_id)
 
+    def insight(self, doc: dict) -> None:
+        self.insights[doc["id"]] = copy.deepcopy(doc)
+
+    def load_insight(self, match_id: str, insight_id: str) -> dict | None:
+        return self.insights.get(insight_id)
+
 
 class JsonFileSink(MemorySink):
-    """Writes the desk of each match to `root/<match_id>/`: cards.json, state.json and audit.jsonl. The console reads these files when Cosmos DB is not configured."""
+    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json and audit.jsonl. The console reads these files when Cosmos DB is not configured."""
 
     def __init__(self, root: Path) -> None:
         super().__init__()
@@ -82,6 +89,21 @@ class JsonFileSink(MemorySink):
         super().state(doc)
         (self._dir(doc["match_id"]) / "state.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
 
+    def insight(self, doc: dict) -> None:
+        super().insight(doc)
+        docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"]]
+        (self._dir(doc["match_id"]) / "insights.json").write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
+
+    def load_insight(self, match_id: str, insight_id: str) -> dict | None:
+        """Reads the file, where the console writes the producer's decisions."""
+        path = self._dir(match_id) / "insights.json"
+        if path.exists():
+            for doc in json.loads(path.read_text(encoding="utf-8")):
+                if doc["id"] == insight_id:
+                    self.insights[insight_id] = doc
+                    return doc
+        return self.insights.get(insight_id)
+
     def load_card(self, match_id: str, card_id: str) -> dict | None:
         """Reads the file, where the console writes the producer's decisions."""
         path = self._dir(match_id) / "cards.json"
@@ -110,7 +132,7 @@ def match_state(match: Match, spotter: Spotter, timeline: list[dict]) -> dict:
 class ThreadedSink:
     """Wraps a slow sink (Cosmos DB) so the pipeline does not wait for each write.
 
-    Events are independent documents: a pool writes them concurrently. Cards, card actions, audit entries and any other write (match state) go through one ordered lane, so the documents of a card are written in the order the desk produced them. A card is copied when it is handed over, since the desk keeps changing the same dict. At most `max_in_flight` writes wait at any time: beyond it the caller blocks, which keeps memory bounded. `drain()` waits for every write handed over so far and returns the errors they raised.
+    Events are independent documents: a pool writes them concurrently. Cards, card actions, audit entries and any other write (match state, insights) go through one ordered lane, so the documents of a card are written in the order the desk produced them. A card is copied when it is handed over, since the desk keeps changing the same dict. At most `max_in_flight` writes wait at any time: beyond it the caller blocks, which keeps memory bounded. `drain()` waits for every write handed over so far and returns the errors they raised.
     """
 
     def __init__(self, sink, workers: int = 8, max_in_flight: int = 128) -> None:
@@ -175,6 +197,10 @@ class ThreadedSink:
         self.drain()
         return self.sink.load_card(match_id, card_id) if hasattr(self.sink, "load_card") else None
 
+    def load_insight(self, match_id: str, insight_id: str) -> dict | None:
+        self.drain()
+        return self.sink.load_insight(match_id, insight_id) if hasattr(self.sink, "load_insight") else None
+
     def drain(self, timeout: float | None = None) -> list[BaseException]:
         """Waits for every write handed over so far; returns (and forgets) the errors raised since the last drain."""
         with self._lock:
@@ -205,6 +231,11 @@ class Pipeline:
     spotters: dict[str, Spotter] = field(default_factory=dict)
     timelines: dict[str, list[dict]] = field(default_factory=dict)
     state_every: int = 25  # actions between two writes of the match state
+    history: object | None = None  # a league.history.History (or any object with its read API): turns the insight engine on
+    insight_cap: int = 4  # new insights per period (first half, second half, full time)
+    insight_min_value: int = 40
+    engines: dict[str, object] = field(default_factory=dict)
+    _history_view: object | None = None
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
         """Processes one message off the wire; returns the cards and card actions it produced."""
@@ -248,9 +279,38 @@ class Pipeline:
                     if self.desk is not None:
                         self.desk.write(card, teams)
                 out.append(result)
+            self._insights(match, spotter, m, teams)
             if hasattr(self.sink, "state") and (produced or m["type"] in ("period_end", "full_time", "correction") or len(timeline) % self.state_every == 0):
                 self.sink.state(match_state(match, spotter, timeline))
         return out
+
+    def _insights(self, match: Match, spotter: Spotter, m: dict, teams: dict[str, str]) -> None:
+        """After the Spotter: the facts this message makes true, or no longer true, against the match and the history. Not returned by `handle`, which keeps returning cards and card actions."""
+        if self.history is None:
+            return
+        engine = self.engines.get(match.match_id)
+        if engine is None:
+            from worker.insight_history import HistoryView
+            from worker.insights import InsightEngine
+
+            if self._history_view is None:
+                self._history_view = HistoryView(self.history)
+            engine = self.engines[match.match_id] = InsightEngine(match, self._history_view, spotter, self.insight_cap, self.insight_min_value,
+                                                                  load=getattr(self.sink, "load_insight", None))
+        store = getattr(self.sink, "insight", None)
+        write = getattr(self.desk, "write_insight", None) if self.desk is not None else None
+        for doc, needs_text in engine.process(m):
+            if store is not None:
+                store(doc)
+            if needs_text and write is not None:
+                write(doc, teams)
+                if store is not None:
+                    store(doc)  # the texts and the status the desk set, whether or not it stored them itself
+
+    def insights(self, match_id: str) -> list[dict]:
+        """Every insight written for a match, superseded ones included."""
+        engine = self.engines.get(match_id)
+        return list(engine.docs.values()) if engine else []
 
     def _refresh(self, card: dict) -> None:
         """Before the feed changes a card, take the producer's decisions from the store: the console writes them there, not into this process."""
