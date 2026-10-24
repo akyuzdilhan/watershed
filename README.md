@@ -22,6 +22,11 @@ All match data is synthetic, produced by the match engine in this repository. No
 | Pitch figures from the 360 frames, including the 63' offside frame with the offside line and the margin | Built | [`src/web/pitch.py`](src/web/pitch.py), [`docs/img/`](docs/img/) |
 | Producer console and public read-only overlay, with a per-IP rate limit and sign-in required for producer actions | Built, not deployed yet (the deployed web app is still the placeholder page) | [`src/web/`](src/web/) |
 | CI (tests, Bicep build, secret scanning), Dependabot, cost kill switch tied to the budget | Built; the kill switch is not deployed yet | [`.github/`](.github/), [`infra/killswitch/`](infra/killswitch/) |
+| Fictional league history: 50 seasons, 32 clubs with promotion and relegation, about 4,000 players with careers, 19,000 matches with scorers, substitutions and cards | Done, tested | [`src/league/history.py`](src/league/history.py), [`docs/notes/history.md`](docs/notes/history.md) |
+| Insight engine: facts that surface live (a substitute's hat-trick, a comeback, a half-time lead lost), ranked by how rare they are in the history, updated or withdrawn as the match goes on, and a stat of the match at full time | Done, tested | [`src/worker/insights.py`](src/worker/insights.py), [`docs/notes/insights.md`](docs/notes/insights.md) |
+| Storyline: table, relegation stakes, form and head-to-head before kick-off; what the result changed after it | Done, tested | [`src/worker/storyline.py`](src/worker/storyline.py) |
+| Commentary duo: two fictional commentators with complementary voices, in three languages, with a per-match memory against repetition | Done, tested with templates; the model's duo mode has not been run live yet | [`src/worker/duo.py`](src/worker/duo.py), [`docs/notes/duo.md`](docs/notes/duo.md) |
+| Match graphics (shot map, goal build-ups, animated set pieces, momentum) and tactical details from the 360 frames | Built | [`src/web/graphics.py`](src/web/graphics.py), [`src/worker/tactics.py`](src/worker/tactics.py) |
 
 ## Why it matters
 
@@ -51,6 +56,22 @@ Seed 7, story `demo`: Rovers (home) against United, both fictional. The committe
 | 88' | Rovers #10 scores; VAR check; the goal stands | Card held, then released | 99%, never 100% before the final whistle |
 
 Final score 5-2. Against the ground truth, the worker finds all 11 moments that deserve a card, produces no extra card, and takes exactly the three expected card actions (one rewrite, two retractions) (`tests/test_worker.py`). The feed also carries 13 duplicated and 32 delayed messages, which the worker absorbs.
+
+## Story, history and the commentary duo
+
+Every number a viewer sees is anchored to something they can picture. The desk compares the match in progress with 50 fictional seasons of the same league and says what makes it unique, for whom, in seasons rather than in match counts:
+
+| When | What airs (French texts and duo, from the template writer) |
+|---|---|
+| Before kick-off | "Rovers - United, duel pour le maintien": United are on 34% to go down, 16% with a win, 43% with a defeat. Wren: "Rovers 17e, United 18e. Ce soir, on joue le maintien, Joss." |
+| 66' | "Seulement le 6e triplé d'un remplaçant en 50 saisons, le premier depuis Silas Thackeray en 2021/22." |
+| 83' | "Premier quadruplé d'un joueur entré en cours de match en 50 saisons de championnat." Joss: "Jamais, Wren. En 50 saisons, aucun joueur entré en cours de match n'avait marqué 4 fois." |
+| Full time | "Première défaite de United à l'extérieur après avoir mené à la pause depuis 2020/21, il y a 6 saisons." Stat of the match: the substitute's four goals, ranked first by rarity. |
+| Recap | Names both goals VAR ruled out and why ("hors-jeu d'un rien", "main"), and what the result changed: "Rovers passe de la 17e à la 14e place, et son risque de descente de 11 % à 4 %." |
+
+Offside margins stay off air: they are not announced in real broadcasts, and at sprint speed a player covers about 30 cm between two tracking frames, so a centimetre figure would be false precision. The console keeps the measured margin for the producer.
+
+The two commentators, Wren Calder (the emotion and the story) and Joss Ferrier (the number and the detail), are fictional and imitate no real person.
 
 ## Architecture
 
@@ -180,6 +201,10 @@ python -m generator --calibrate 200                      # the calibration table
 python -m worker data/replay/demo-0007.jsonl.gz --truth data/replay/demo-0007.truth.json --writer template --auto-approve
 python -m worker data/replay/demo-0007.jsonl.gz --writer template --desk-dir data/desk   # cards.json, state.json, audit.jsonl for the console
 python -m generator.publish data/replay/demo-0007.jsonl.gz --dry --speed 10    # print the replay with the live pacing
+python -m league history --seed 9 --seasons 50 --out data/history                # the 50-season history, about 10 s
+python -m worker data/replay/demo-0007.jsonl.gz --writer template --auto-approve --desk-dir data/desk --history data/history/9 --league-seed 9   # with insights and the storyline
+python -m worker.recap data/desk/demo-0007                                       # the post-match recap
+python -m web.app                                                                # the producer console on http://127.0.0.1:8050 (set DESK_DIR=data/desk, PUBLIC_MODE=0)
 ```
 
 The `worker` command prints every card in three languages, every card action, and the score against the ground truth. `--writer foundry` uses the Writer agent instead of templates; it needs `FOUNDRY_PROJECT_ENDPOINT` and `FOUNDRY_MODEL` in `.env` (see `.env.example`) and an `az login` account allowed to call the Foundry project.
@@ -205,7 +230,7 @@ A new role assignment can take 5 to 10 minutes to apply; the publisher says so i
 
 ## Tests
 
-`pytest` runs 37 tests (some parametrised over 20 matches, the generator checks over 200).
+`pytest` runs about 370 tests in about 3 minutes (some parametrised over 20 matches, the generator checks over 200). The main files:
 
 | File | What it proves |
 |---|---|
@@ -220,7 +245,9 @@ All tests run without Azure and without model calls (the Writer is replaced by t
 
 - **Synthetic data only.** The engine is hand-tuned to real orders of magnitude, not fitted, and the demo match is scripted.
 - **Simple win-probability model.** Constant scoring rates, placeholder red-card factors and team strengths; no shots, momentum or substitutions in the model.
-- **No producer console yet.** Producer decisions exist as `Desk` methods and are tested, but the deployed web app is a placeholder page; the demo runs in auto-approve mode, where a verified card airs without a click.
+- **Console not deployed yet.** The producer console runs locally; the deployed web app is still a placeholder page. The demo can run in auto-approve mode, where a verified card airs without a click.
+- **History is score-first.** Each historical match draws its score before placing the events, so a team two goals down does not push harder and a red card does not change the score; club strength decides results, player ratings only who scores. The history has seasons, not dates.
+- **Players in the live match and the history are linked only for the demo squads.** For other matches the insight engine has no career facts.
 - **One model-backed agent.** The Spotter and the Verifier are deterministic code, by design; only the Writer calls a model. The Agent Framework workflow with a human approval pause exists as a spike, not in the main pipeline.
 - **No model fallback in code.** `.env.example` names a fallback deployment (`gpt-5-mini`), but the code does not switch to it: after one failed retry, the fixed template takes over.
 - **Worker state lives in memory.** A restarted worker does not reload a match in progress from Cosmos DB, and the live listener stops after 30 seconds without a session.
