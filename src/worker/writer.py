@@ -16,6 +16,7 @@ from typing import Any
 
 from worker.duo import (ALLOWED_NAMES, CARDINALS, EYE, HEART, LINES, NB, ORDINALS, PERSONAS, PhraseMemory, count_words, fill, fr_de, fr_typography, persona_brief,
                         placeholders, rotated, stable)
+from worker.feedback import skeleton
 
 LANGUAGES = ("en", "fr", "es")
 MACHINE_TRANSLATED = {"es"}  # shown on air with a "machine-translated" label
@@ -663,11 +664,15 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
     return values, fields
 
 
-class _Picker:
-    """Chooses among template variants: the least used in the match (and in the draft so far), ties broken by a stable rotation."""
+DEMOTED = 500  # a variant the control room turned down repeatedly: after every other one, before a repeat
 
-    def __init__(self, memory: PhraseMemory | None, doc_id: str, lang: str, facts: dict) -> None:
+
+class _Picker:
+    """Chooses among template variants: the least used in the match (and in the draft so far), ties broken by a stable rotation; the variants the producers turned down (`demoted` skeletons, worker.feedback) come last."""
+
+    def __init__(self, memory: PhraseMemory | None, doc_id: str, lang: str, facts: dict, demoted: frozenset = frozenset()) -> None:
         self.memory = memory or PhraseMemory()
+        self.facts, self.demoted = facts, demoted
         self.memory.learn_names(facts)
         self.doc_id, self.lang = doc_id, lang
         self.headlines = self.memory.headlines(lang, exclude=doc_id)
@@ -685,7 +690,7 @@ class _Picker:
                 if not filled:
                     continue
                 text = filled[0]
-                score = (1000 if self.memory.key(text) in self.headlines else 0) + 10 * sum(self.verbs.count(v) for v in self.memory.verbs_in(text, self.lang)) + rank
+                score = (1000 if self.memory.key(text) in self.headlines else 0) + 10 * sum(self.verbs.count(v) for v in self.memory.verbs_in(text, self.lang)) + rank + self.penalty(text)
                 if best is None or score < best[0]:
                     best = (score, filled)
         if best is None:
@@ -706,7 +711,7 @@ class _Picker:
             if not filled:
                 continue
             repeat = self.memory.key(filled[0]) in self.said
-            score = 1000 * repeat + 10 * self.openings.count(self.memory.opening(filled[0])) + len(self.memory.ngrams(filled[0]) & self.phrases)
+            score = 1000 * repeat + 10 * self.openings.count(self.memory.opening(filled[0])) + len(self.memory.ngrams(filled[0]) & self.phrases) + self.penalty(filled[0])
             if best is None or score < best[0]:
                 best = (score, filled)
         if best is None or (optional and best[0] >= 1000):
@@ -715,6 +720,9 @@ class _Picker:
         self.phrases |= self.memory.ngrams(best[1][0])
         self.said.add(self.memory.key(best[1][0]))
         return best[1]
+
+    def penalty(self, text: str) -> int:
+        return DEMOTED if self.demoted and skeleton(text, self.facts) in self.demoted else 0
 
     def tic(self, speaker: str) -> str | None:
         for t in rotated(list(PERSONAS[speaker].voices[self.lang].tics), self.doc_id, self.lang, speaker, "tic"):
@@ -736,13 +744,16 @@ class TemplateWriter:
 
     name = "template"
 
+    def __init__(self, demoted=None) -> None:
+        self.demoted = frozenset(demoted or ())
+
     def write(self, card: dict, facts: dict, languages: list[str], memory: PhraseMemory | None = None, duo: bool = False) -> str:
         """The card texts (a JSON array), or with `duo` an object {"texts", "duo"}."""
         texts, lines = [], []
         for lang in languages:
             values, fields = template_values(card, facts, lang)
             values["score_after"] = facts.get("score_after")
-            pick = _Picker(memory, card["id"], lang, facts)
+            pick = _Picker(memory, card["id"], lang, facts, self.demoted)
             if facts.get("stake") == "low":
                 t = LOW_STAKE_TEMPLATES[lang]
                 pools = [t["headlines"]]
@@ -797,7 +808,7 @@ class TemplateWriter:
         for lang in languages:
             values, fields = template_values(card, facts, lang)
             slots = LINES["ruling"][lang]
-            pick = _Picker(memory, card["id"] + "#ruling", lang, facts)
+            pick = _Picker(memory, card["id"] + "#ruling", lang, facts, self.demoted)
             reason = facts.get("ruled_out_reason", "other")
             key = f"offside_{facts['offside_call']}" if reason == "offside" and facts.get("offside_call") else reason if reason in slots["eye"] else "other"
             heart = pick.line(slots["heart"], values, fields, "heart")
@@ -817,7 +828,7 @@ class TemplateWriter:
         own = {t.get("lang"): t for t in doc.get("texts") or [] if isinstance(t, dict)}
         texts, lines = [], []
         for lang in languages:
-            pick = _Picker(memory, doc["id"], lang, facts)
+            pick = _Picker(memory, doc["id"], lang, facts, self.demoted)
             values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team")}
             mine = own.get(lang)
             if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], facts)[1]["verified"] and memory_key_free(pick, mine):
@@ -917,13 +928,21 @@ class FoundryWriter:
             options["reasoning"] = {"effort": effort}
         self.agent = Agent(client=client, name="writer", instructions=WRITER_INSTRUCTIONS, tools=[get_moment], default_options=options)
 
-    async def write_async(self, card: dict, facts: tuple[dict, dict], languages: list[str], note: str | None = None, avoid: dict | None = None, duo: bool = False) -> str:
+    async def write_async(self, card: dict, facts: tuple[dict, dict], languages: list[str], note: str | None = None, avoid: dict | None = None, duo: bool = False,
+                          preferences: str | None = None) -> str:
         self.facts[card["id"]] = facts
-        prompt = f"Write the cards for this request: {json.dumps(writer_request(card, languages, avoid, duo), ensure_ascii=False)}"
-        if note:
-            prompt += f"\nProducer note: {note}"
-        response = await self.agent.run(prompt)
+        response = await self.agent.run(writer_prompt(card, languages, note, avoid, duo, preferences))
         return response.text
+
+
+def writer_prompt(card: dict, languages: list[str], note: str | None = None, avoid: dict | None = None, duo: bool = False, preferences: str | None = None) -> str:
+    """The user message of one Writer call: the request, the control room's preferences (`worker.feedback.prompt_block`, bounded), and the Verifier's note on a retry."""
+    prompt = f"Write the cards for this request: {json.dumps(writer_request(card, languages, avoid, duo), ensure_ascii=False)}"
+    if preferences:
+        prompt += f"\n{preferences}"
+    if note:
+        prompt += f"\nProducer note: {note}"
+    return prompt
 
 
 def writer_request(card: dict, languages: list[str], avoid: dict | None = None, duo: bool = False) -> dict:
@@ -960,7 +979,8 @@ def accepts(writer, name: str) -> bool:
     return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
-async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list[str], calls_left: int, memory: PhraseMemory | None, duo: bool, template) -> Draft:
+async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list[str], calls_left: int, memory: PhraseMemory | None, duo: bool, template,
+                 preferences: str | None = None) -> Draft:
     """The model, one retry told what the Verifier rejected, then the template. Model texts that passed are kept when only the duo failed."""
     attempts, note, kept, done = 0, None, None, None
     ask_duo = duo and accepts(writer, "duo")
@@ -976,6 +996,8 @@ async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list
                 kwargs["duo"] = True
             if memory is not None and accepts(writer, "avoid"):
                 kwargs["avoid"] = memory.avoid(languages)
+            if preferences and accepts(writer, "preferences"):
+                kwargs["preferences"] = preferences
             try:
                 text = await writer.write_async(doc, (facts, meanings), languages, **kwargs)
             except Exception as error:  # a model or network failure falls through to the template
@@ -999,18 +1021,20 @@ async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list
     return Draft(doc["id"], doc.get("version", 1), name, attempts, texts, report, sorted(MACHINE_TRANSLATED & set(languages)), lines or [], duo_name)
 
 
-async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2, memory: PhraseMemory | None = None, duo: bool = False) -> Draft:
-    """Writes and verifies a card: the model, one retry told what the Verifier rejected, then the template. `calls_left` caps the model calls this card may still make; `memory` is what the match already said; `duo` adds the commentary lines."""
+async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2, memory: PhraseMemory | None = None, duo: bool = False,
+                preferences: str | None = None, demoted=None) -> Draft:
+    """Writes and verifies a card: the model, one retry told what the Verifier rejected, then the template. `calls_left` caps the model calls this card may still make; `memory` is what the match already said; `duo` adds the commentary lines; `preferences` (the control room's, in the prompt) and `demoted` (template variants picked last) come from the producers' feedback."""
     facts, meanings = card_facts(card, teams)
     return await _draft(card, facts, meanings, writer, languages, calls_left, memory, duo,
-                        lambda mem: TemplateWriter().write(card, facts, languages, memory=mem, duo=duo))
+                        lambda mem: TemplateWriter(demoted).write(card, facts, languages, memory=mem, duo=duo), preferences)
 
 
-async def draft_insight(doc: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2, memory: PhraseMemory | None = None, duo: bool = False) -> Draft:
+async def draft_insight(doc: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2, memory: PhraseMemory | None = None, duo: bool = False,
+                        preferences: str | None = None, demoted=None) -> Draft:
     """Writes and verifies an insight or the storyline, through the same path as a card."""
     facts, meanings = insight_facts(doc, teams)
     return await _draft(doc, facts, meanings, writer, languages, calls_left, memory, duo,
-                        lambda mem: TemplateWriter().write_insight(doc, facts, languages, memory=mem, duo=duo))
+                        lambda mem: TemplateWriter(demoted).write_insight(doc, facts, languages, memory=mem, duo=duo), preferences)
 
 
 def ruling_duo(card: dict, teams: dict[str, str], languages: list[str] = list(LANGUAGES), memory: PhraseMemory | None = None) -> tuple[list[dict], dict]:

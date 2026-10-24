@@ -1,6 +1,6 @@
 """The producer console (`/`): the rundown of cards, the selected card with its texts, facts and history, the producer's decisions, and the win-probability curve.
 
-Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
+Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and duo line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
 """
 
 import hashlib
@@ -11,6 +11,7 @@ from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from web import panels, security
 from web.store import get_store
+from worker import feedback as FB
 
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
 MOMENTS = {"goal": "Goal", "save": "Save", "red_card": "Red card", "chance": "Chance"}
@@ -39,13 +40,15 @@ def rundown_options(cards: list[dict]) -> list[dict]:
         html.Div(badges(c), className="ru-badges")], className="ru-item " + ("ru-retracted" if c.get("status") == "retracted" else ""))} for c in cards]
 
 
-def detail(card: dict | None, audit: list[dict]) -> html.Div:
+def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None) -> html.Div:
+    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
+    verdicts = FB.by_target(feedback or [])
     mt = set(card.get("machine_translated") or [])
     texts = [html.Div([html.Div([html.Span(LANG_NAMES.get(t["lang"], t["lang"]), className="lang"),
                                  *([html.Span("machine-translated", className="badge st-mt")] if t["lang"] in mt else [])], className="lang-row"),
-                       html.Div(t.get("headline", ""), className="headline"), html.Div(t.get("why", ""), className="why")], className="text-block")
+                       *panels.text_lines(card, t, verdicts, "d")], className="text-block")
              for t in card.get("texts") or []] or [html.Div("Not written yet.", className="muted")]
     facts = html.Table([html.Tbody([html.Tr([html.Td(k, className="fact-key"), html.Td(str(v))]) for k, v in (card.get("facts") or {}).items()])], className="facts")
     v = card.get("verification") or {}
@@ -60,9 +63,10 @@ def detail(card: dict | None, audit: list[dict]) -> html.Div:
     head = html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
                      html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, priority {card.get('value_pts', 0)}, version {card.get('version', 1)}", className="muted"),
                                *badges(card)], className="detail-meta")])
-    duo = panels.duo_block(card)
+    duo = panels.duo_block(card, verdicts=verdicts, pane="d")
     commentary = [html.H3("Commentary"), duo] if duo is not None else []
-    return html.Div([head, html.Div(texts), *commentary, html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history])
+    return html.Div([head, html.Div(texts), *commentary, html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history,
+                     html.H3("Producer feedback"), panels.fb_stats(feedback or [])])
 
 
 PERIOD_STARTS = (2700.0, 5400.0, 6300.0)  # second half, extra time
@@ -159,15 +163,16 @@ def refresh(match_id: str | None, selected: str | None, last_sig: str | None, re
     store = store or get_store()
     if not match_id:
         return [], None, detail(None, []), figure(None, []), "No match on the desk yet", True, True, True, None
-    cards, state, audit = store.cards(match_id), store.state(match_id), store.audit(match_id)
+    cards, state, audit, fb_docs = store.cards(match_id), store.state(match_id), store.audit(match_id), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
     picked = selected if selected in ids else next((c["id"] for c in cards if c.get("status") == "pending"), ids[0] if ids else None)
-    sig = hashlib.sha1(json.dumps([cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), len(audit), picked, match_id, rev], sort_keys=True, default=str).encode()).hexdigest()
+    sig = hashlib.sha1(json.dumps([cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), len(audit), len(fb_docs), picked, match_id, rev],
+                                  sort_keys=True, default=str).encode()).hexdigest()
     if sig == last_sig:
         return (no_update,) * 9
     card = next((c for c in cards if c["id"] == picked), None)
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
-    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit), figure(state, cards, picked), scoreline(state), *button_states(card), sig)
+    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit, fb_docs), figure(state, cards, picked), scoreline(state), *button_states(card), sig)
 
 
 def edit_panel(open_: bool, match_id: str | None, card_id: str | None, store=None) -> tuple[list, dict]:
@@ -252,6 +257,57 @@ def decide(action: str, match_id: str | None, card_id: str | None, by: str | Non
     return f"Unknown action {action}.", False
 
 
+def parse_key(key: str) -> tuple[str, dict]:
+    """(document id, target) of a `worker.feedback.target_key`."""
+    doc_id, part, lang, index = str(key).rsplit("|", 3)
+    return doc_id, {"part": part, "lang": lang, "index": int(index)}
+
+
+def give_feedback(match_id: str | None, key: str | None, kind: str, value, by: str | None, store=None) -> tuple[str, bool]:
+    """A producer's feedback on one sentence: `kind` `verdict` (value `up` or `down`), `reason` (toggles one reason, a thumbs down) or `note` (a thumbs down with this note). Returns (message, done)."""
+    if by is None:
+        return "Sign in to give feedback.", False
+    if not match_id or not key:
+        return "Select a sentence first.", False
+    store = store or get_store()
+    try:
+        doc_id, target = parse_key(key)
+    except ValueError:
+        return "Unknown sentence.", False
+    doc = store.doc(match_id, doc_id)
+    if doc is None:
+        return "This document is no longer on the desk.", False
+    try:
+        text = FB.sentence(doc, target)["text"]
+    except ValueError as error:
+        return f"Refused: {error}.", False
+    cur = FB.by_target(store.feedback_docs(match_id)).get(key)
+    if cur is not None and cur.get("text") != text:
+        cur = None  # a judgement on an earlier wording
+    down = cur is not None and cur.get("verdict") == "down"
+    reasons, note = (list(cur.get("reasons") or []), cur.get("note")) if down else ([], None)
+    if kind == "verdict":
+        verdict = value
+    elif kind == "reason":
+        verdict = "down"
+        reasons = [r for r in reasons if r != value] if value in reasons else reasons + [value]
+    elif kind == "note":
+        verdict, note = "down", value
+    else:
+        return f"Unknown feedback {kind}.", False
+    try:
+        store.feedback(match_id, doc_id, target, verdict, reasons, note, by)
+    except KeyError:
+        return "This document is no longer on the desk.", False
+    except ValueError as error:
+        return f"Refused: {error}.", False
+    what = {"headline": "headline", "why": "text", "duo": "duo line"}[target["part"]]
+    if verdict == "up":
+        return f"Noted: {what} ({target['lang']}) relevant, by {by}.", True
+    detail_ = ", ".join(FB.REASONS[r].lower() for r in reasons)
+    return f"Noted: {what} ({target['lang']}) not relevant" + (f" ({detail_})" if detail_ else "") + (", with a note" if note else "") + f", by {by}.", True
+
+
 # --- layout and wiring ----------------------------------------------------------------------------
 
 def layout(user: str) -> html.Div:
@@ -313,6 +369,31 @@ def _decide_cb(_a, _r, _e, match_id, card_id, rev, h_ids, headlines, w_ids, whys
     return html.Span(message, className="ok" if done else "error"), (rev or 0) + 1 if done else no_update
 
 
+def _feedback_cb(_v, _r, _n, match_id, rev):
+    """Desk pane: the message only (the next tick redraws the thumbs; bumping c-rev would close an edit in progress). Insights pane: the message and a redraw."""
+    trig = ctx.triggered_id
+    if not isinstance(trig, dict) or not ctx.triggered:
+        return no_update, no_update, no_update
+    value = ctx.triggered[0].get("value")
+    kind = {"fb": "verdict", "fb-r": "reason", "fb-n": "note"}.get(trig.get("type"))
+    if kind in ("verdict", "reason") and not value:
+        return no_update, no_update, no_update  # a control drawn, not clicked
+    if kind == "verdict":
+        value = trig.get("v")
+    elif kind == "reason":
+        value = trig.get("r")
+    elif kind == "note":
+        value = (value or "").strip()
+        cur = FB.by_target(get_store().feedback_docs(match_id)).get(trig.get("k")) if match_id else None
+        if value == ((cur or {}).get("note") or ""):
+            return no_update, no_update, no_update  # unchanged, or the field just drawn
+    message, done = give_feedback(match_id, trig.get("k"), kind, value, security.producer())
+    span = html.Span(message, className="ok" if done else "error")
+    if trig.get("p") == "i":
+        return no_update, span, (rev or 0) + 1 if done else no_update
+    return span, no_update, no_update
+
+
 def register(app) -> None:
     app.callback(Output("c-match", "options"), Output("c-match", "value"), Input("c-tick", "n_intervals"), State("c-match", "value"))(
         lambda _n, current: match_options(current) if security.producer() is not None else ([], None))
@@ -329,4 +410,7 @@ def register(app) -> None:
                  State({"type": "c-edit-headline", "lang": ALL}, "id"), State({"type": "c-edit-headline", "lang": ALL}, "value"),
                  State({"type": "c-edit-why", "lang": ALL}, "id"), State({"type": "c-edit-why", "lang": ALL}, "value"),
                  prevent_initial_call=True)(_decide_cb)
+    app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-i-message", "children", allow_duplicate=True), Output("c-i-rev", "data", allow_duplicate=True),
+                 Input({"type": "fb", "p": ALL, "k": ALL, "v": ALL}, "n_clicks"), Input({"type": "fb-r", "p": ALL, "k": ALL, "r": ALL}, "n_clicks"),
+                 Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
     panels.register(app)

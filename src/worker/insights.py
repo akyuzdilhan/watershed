@@ -18,6 +18,8 @@ from typing import Callable
 
 from worker.insight_history import LATE_MINUTE, Features, HistoryView, comeback_stage
 from worker.insight_rarity import binom_sf, bits, fmt, laplace, normal_sf, one_in, poisson_sf, value
+from worker.feedback import adjust_value
+from worker.feedback import source as profile_source
 from worker.match import Match
 
 BY = "insights"
@@ -80,7 +82,8 @@ def shown_minute(a: dict) -> int:
 
 
 class InsightEngine:
-    def __init__(self, match: Match, view: HistoryView, spotter=None, cap_per_period: int = 4, min_value: int = 40, load: Callable | None = None) -> None:
+    def __init__(self, match: Match, view: HistoryView, spotter=None, cap_per_period: int = 4, min_value: int = 40, load: Callable | None = None, profile=None) -> None:
+        self.profiles = profile_source(profile)  # the producers' approval rate per family weighs the value (worker.feedback.adjust_value)
         self.match = match
         self.view = view
         self.spotter = spotter
@@ -97,6 +100,7 @@ class InsightEngine:
         self._now: dict = {}
         self.half_time = False
         self.ranked: list[tuple[int, float, Fact, dict]] = []
+        self.weights: dict[str, float] = {}  # group -> feedback weight, when it is not 1
 
     # --- intake -----------------------------------------------------------------------------------
 
@@ -251,6 +255,11 @@ class InsightEngine:
         doc.update({"kind": f.kind, "minute_label": f.minute_label or self._now.get("minute_label"), "clock_s": f.clock_s if f.clock_s is not None else self._now.get("clock_s"), "event_id": f.event_id, "headline_facts": facts, "field_meanings": meanings,
                     "rarity": {"p": r["p"], "surprisal_bits": r["surprisal_bits"], "basis": r["basis"]}, "last_time": r["last"], "value": val,
                     "evidence": list(f.evidence), "under_review": any(e in self.reviewing for e in f.evidence)})
+        w = self.weights.get(f.group)
+        if w is None:
+            doc.pop("feedback_weight", None)
+        else:
+            doc["feedback_weight"] = w
 
     def _reconcile(self, cands: list[Fact], m: dict, cause: str | None) -> list[tuple[dict, bool]]:
         out: list[tuple[dict, bool]] = []
@@ -258,9 +267,14 @@ class InsightEngine:
         bucket = "full_time" if self.final else m.get("period", 1)
         groups = set()
         scored = []
+        profile = self.profiles.get()
+        self.weights: dict[str, float] = {}
         for f in cands:
             r = self.rarity(f)
-            scored.append((value(r["surprisal_bits"], f.relevance), r["surprisal_bits"], f, r))
+            val, w = adjust_value(value(r["surprisal_bits"], f.relevance), f.group, profile, self.min_value)
+            if w != 1.0:
+                self.weights[f.group] = w
+            scored.append((val, r["surprisal_bits"], f, r))
         self.ranked = sorted(scored, key=lambda x: (-x[0], -x[1], x[2].key))
         for val, _, f, r in scored:
             groups.add(f.group)

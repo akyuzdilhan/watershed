@@ -3,6 +3,8 @@
 Reads are cached for a second, so that every viewer of the overlay costs one read per process and per second. Producer decisions go through `worker.desk.Desk`, with a sink that writes back to the same store; the desk is imported only when a decision is made, so the overlay never loads the Writer.
 
 Besides cards, the store reads insight and storyline documents (`insights.json` and `storyline.json` locally, `type` insight or storyline in the `cards` container) and the feed itself for the match graphics: locally `<match>/feed.jsonl[.gz]` in the desk folder, else `<REPLAY_DIR>/<match>.jsonl[.gz]` (default data/replay), in Azure the `events` container. While the match is not final, the feed is cut at the match state's `last_seq`, so a replay file never shows what the desk has not seen yet.
+
+Producer feedback on sentences (`feedback`, through `Desk.feedback`) is read back with `feedback_docs`: `<match>/feedback.jsonl` locally, `type` feedback in the `cards` container in Azure. Locally, from `from_env`, every feedback also rebuilds the producer profile (`FEEDBACK_PROFILE`, default data/feedback/profile.json) that the worker reads.
 """
 
 import json
@@ -142,10 +144,34 @@ class Store:
             finally:
                 self.invalidate()
 
+    def feedback_docs(self, match_id: str) -> list[dict]:
+        """The producers' feedback on the match's sentences, as written (the latest per id wins: `worker.feedback.latest`)."""
+        return self._cached(("feedback", match_id), lambda: self._feedback(match_id))
+
+    def feedback(self, match_id: str, doc_id: str, target: dict, verdict: str, reasons: list[str] | None, note: str | None, by: str) -> dict:
+        """A producer's thumbs up or down on one sentence, through `Desk.feedback` (stored and audited); the profile is rebuilt when the store keeps one."""
+        with self._lock:
+            doc = self.doc(match_id, doc_id)
+            if doc is None:
+                raise KeyError(doc_id)
+            teams = (self._state(match_id) or {}).get("teams")
+            try:
+                item = self.desk().feedback(doc, target, verdict, reasons, note, by, teams)
+                self._rebuild_profile()
+                return item
+            finally:
+                self.invalidate()
+
+    def _rebuild_profile(self) -> None:
+        return None
+
     # --- backends ---------------------------------------------------------------------------------
 
     def sink(self):
         raise NotImplementedError
+
+    def _feedback(self, match_id: str) -> list[dict]:
+        return []
 
     def _insights(self, match_id: str) -> list[dict]:
         return []
@@ -200,19 +226,27 @@ class FileDeskSink:
         docs = [card if c["id"] == card["id"] else c for c in docs] + ([] if any(c["id"] == card["id"] for c in docs) else [card])
         _write_atomic(path, docs)
 
-    def audit_entry(self, entry: dict) -> None:
-        path = self.root / entry["match_id"] / "audit.jsonl"
+    def _append(self, name: str, entry: dict) -> None:
+        path = self.root / entry["match_id"] / name
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    def audit_entry(self, entry: dict) -> None:
+        self._append("audit.jsonl", entry)
+
+    def feedback(self, item: dict) -> None:
+        """A producer feedback, appended to feedback.jsonl (a later line with the same id replaces an earlier one)."""
+        self._append("feedback.jsonl", item)
+
 
 class FileStore(Store):
-    """The desk the worker writes with `--desk-dir`: one folder per match."""
+    """The desk the worker writes with `--desk-dir`: one folder per match. With `profile_path`, every feedback rebuilds the producer profile there (`worker.feedback.build_profile` over every match of the desk)."""
 
-    def __init__(self, root: Path, replay_dir: Path | None = None) -> None:
+    def __init__(self, root: Path, replay_dir: Path | None = None, profile_path: Path | None = None) -> None:
         super().__init__()
         self.root = Path(root)
+        self.profile_path = Path(profile_path) if profile_path is not None else None
         self.replay_dir = Path(replay_dir if replay_dir is not None else os.environ.get("REPLAY_DIR", "data/replay"))
         self._last_good: dict[Path, object] = {}
         self._feeds: dict[Path, tuple[float, list[dict]]] = {}
@@ -277,18 +311,31 @@ class FileStore(Store):
         return messages
 
     def _audit(self, match_id: str) -> list[dict]:
-        path = self.root / match_id / "audit.jsonl"
+        return _jsonl(self.root / match_id / "audit.jsonl")
+
+    def _feedback(self, match_id: str) -> list[dict]:
+        return _jsonl(self.root / match_id / "feedback.jsonl")
+
+    def _rebuild_profile(self) -> None:
+        if self.profile_path is None:
+            return
+        from worker import feedback
+
+        feedback.save_profile(feedback.build_profile(feedback.load_local(self.root)), self.profile_path)
+
+
+def _jsonl(path: Path) -> list[dict]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in lines:
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError:
-            return []
-        out = []
-        for line in lines:
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue  # a line being written
-        return out
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue  # a line being written
+    return out
 
 
 class CosmosStore(Store):
@@ -341,6 +388,9 @@ class CosmosStore(Store):
         self._events[match_id] = (ts, seen)
         return list(seen.values())
 
+    def _feedback(self, match_id: str) -> list[dict]:
+        return [_clean(d) for d in self.cards_c.query_items("SELECT * FROM c WHERE c.type = 'feedback'", partition_key=match_id)]
+
     def _audit(self, match_id: str) -> list[dict]:
         docs = list(self.audit_c.query_items("SELECT * FROM c", partition_key=match_id))
         docs.sort(key=lambda d: d.get("at") or d.get("_ts", 0))
@@ -355,7 +405,7 @@ def from_env() -> Store:
     desk = os.environ.get("DESK", "").strip().lower()
     if desk == "cosmos" or (not desk and os.environ.get("COSMOS_ENDPOINT") and not os.environ.get("DESK_DIR")):
         return CosmosStore(os.environ["COSMOS_ENDPOINT"], os.environ.get("COSMOS_DATABASE", "watershed"))
-    return FileStore(Path(os.environ.get("DESK_DIR", "data/desk")))
+    return FileStore(Path(os.environ.get("DESK_DIR", "data/desk")), profile_path=Path(os.environ.get("FEEDBACK_PROFILE", "data/feedback/profile.json")))
 
 
 def get_store() -> Store:
