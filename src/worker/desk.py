@@ -10,8 +10,10 @@ from worker.writer import LANGUAGES, TemplateWriter, draft
 
 
 class Desk:
-    def __init__(self, sink, writer=None, auto_approve: bool = False, languages: tuple[str, ...] = LANGUAGES) -> None:
+    def __init__(self, sink, writer=None, auto_approve: bool = False, languages: tuple[str, ...] = LANGUAGES, max_calls_per_match: int = 40) -> None:
         self.sink = sink
+        self.max_calls_per_match = max_calls_per_match  # cost guard: beyond it, cards use the template
+        self.calls: dict[str, int] = {}
         self.writer = writer or TemplateWriter()
         self.auto_approve = auto_approve
         self.languages = list(languages)
@@ -24,7 +26,9 @@ class Desk:
 
     def write(self, card: dict, teams: dict[str, str]) -> dict:
         """Writes (or rewrites) a card and puts it up for approval."""
-        d = self.loop.run_until_complete(draft(card, teams, self.writer, self.languages))
+        left = self.max_calls_per_match - self.calls.get(card["match_id"], 0)
+        d = self.loop.run_until_complete(draft(card, teams, self.writer, self.languages, calls_left=max(left, 0)))
+        self.calls[card["match_id"]] = self.calls.get(card["match_id"], 0) + d.attempts
         card["texts"] = d.texts
         card["machine_translated"] = d.machine_translated
         card["writer"] = d.writer

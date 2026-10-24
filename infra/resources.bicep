@@ -24,6 +24,8 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   properties: {
     sku: { name: 'PerGB2018' }
     retentionInDays: 30
+    // Stop ingesting for the day beyond 0.2 GB: the free allowance is 5 GB a month, and a logging loop must not turn into a bill.
+    workspaceCapping: { dailyQuotaGb: json('0.2') }
   }
 }
 
@@ -132,6 +134,12 @@ resource containers 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containe
     resource: {
       id: name
       partitionKey: { paths: [ '/match_id' ], kind: 'Hash' }
+      // The 360 frames are read with their event, never queried: indexing every position only costs request units on each write.
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [ { path: '/*' } ]
+        excludedPaths: [ { path: '/freeze_frame/*' }, { path: '/"_etag"/?' } ]
+      }
     }
   }
 }]

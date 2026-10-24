@@ -194,7 +194,7 @@ class TemplateWriter:
 class FoundryWriter:
     """The Writer agent on Microsoft Foundry (Agent Framework, Responses API), with get_moment as a function tool."""
 
-    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int = 4000) -> None:
+    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int = 3000) -> None:
         from agent_framework import Agent, tool
         from agent_framework.foundry import FoundryChatClient
         from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
@@ -240,12 +240,12 @@ class Draft:
     machine_translated: list[str] = field(default_factory=list)
 
 
-async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES)) -> Draft:
-    """Writes and verifies a card: the model, one retry, then the template."""
+async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2) -> Draft:
+    """Writes and verifies a card: the model, one retry, then the template. `calls_left` caps the model calls this card may still make."""
     facts, meanings = card_facts(card, teams)
     attempts = 0
     if not isinstance(writer, TemplateWriter):
-        for _ in range(2):
+        for _ in range(min(2, calls_left)):
             attempts += 1
             try:
                 text = await writer.write_async(card, (facts, meanings), languages)
