@@ -62,6 +62,15 @@ The probabilities are hand-tuned, not fitted. Means over 200 unscripted matches,
 
 Corners (9.0) and offsides (3.8) are only checked against approximate figures, and the split of added time between the halves is an estimate. `tests/test_generator.py` checks the laws, the clocks and these bands on the same 200 matches, and that the committed demo file is exactly what the generator produces.
 
+## Worker
+
+`python -m worker data/replay/demo-0007.jsonl.gz --truth data/replay/demo-0007.truth.json` runs the desk on the replay file and scores it against the ground truth; `python -m worker --live --cosmos` reads the Service Bus subscription and writes events, cards and the audit trail to Cosmos DB.
+
+- **Intake.** Messages are deduplicated by message id and put back in provider order, with a 3-second buffer for late ones. The match state (score, red cards, announced added time, final whistle) is derived from the messages, so a late or duplicated message never corrupts it. Messages with an unknown schema go to the dead-letter queue.
+- **Win probability.** Before and after each action, from the Skellam model and the pre-match expected goals of `match_info`; the time left includes the added time still to come.
+- **Spotter.** Every goal and red card gets a card. A shot that does not go in gets one if its xG times the swing it would have caused reaches 8 points, so a late half-chance does not outweigh a real chance; a save is credited to the keeper.
+- **Corrections.** A VAR check holds the card, a goal that stands releases it, a voided goal retracts it, a reassigned goal rewrites it. On the demo match the worker finds all 11 moments of the ground truth with no extra card, and takes the three card actions it expects; on 20 unscripted matches it finds every goal and takes the right action on every corrected one (`tests/test_worker.py`).
+
 ## Deploy
 
 ```
