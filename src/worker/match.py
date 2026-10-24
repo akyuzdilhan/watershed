@@ -1,6 +1,8 @@
 """The worker's view of one match: every message it has received, deduplicated, put back in provider order, with the corrections applied.
 
 The state is derived from the set of messages rather than accumulated as they arrive, so a late or duplicated message never corrupts it: the score before an action is the goals of lower sequence number that still count. A short reorder buffer holds a message until the ones before it have arrived, or until `hold_s` seconds of feed time have passed.
+
+The derived state is kept in small indexes (goals and red cards that count, added-time boards, first final whistle), updated each time an action, a correction or a board is applied, so a query costs the number of goals or boards rather than the number of messages. An index entry is recomputed from the action as it now stands, so a late goal, a void that arrives before its goal, or a correction applied out of order give the same answer as a full scan.
 """
 
 from dataclasses import dataclass, field
@@ -27,6 +29,12 @@ class Match:
     versions: dict[str, dict] = field(default_factory=dict)  # event id -> action as it now stands
     voided: set[str] = field(default_factory=set)
     info: dict | None = None
+    goals: dict[str, tuple[int, str]] = field(default_factory=dict)  # event id -> (seq, team) of each goal that counts
+    red_cards: dict[str, tuple[int, str]] = field(default_factory=dict)  # event id -> (seq, team) of each sending-off
+    boards: dict[int, list[tuple[int, float]]] = field(default_factory=dict)  # period -> (seq, minutes) of each added-time board, in the order applied
+    full_time_seq: int | None = None  # lowest sequence number of a final whistle
+    max_seq: int = 0  # highest sequence number applied
+    clock_seq: int | None = None  # highest sequence number applied of a message with a match clock
 
     # --- intake ---------------------------------------------------------------------------------
 
@@ -63,47 +71,72 @@ class Match:
 
     def _apply(self, m: dict) -> dict:
         self.by_seq[m["seq"]] = m
-        if m["type"] == "match_info":
+        self.max_seq = max(self.max_seq, m["seq"])
+        if "clock_s" in m and (self.clock_seq is None or m["seq"] >= self.clock_seq):
+            self.clock_seq = m["seq"]
+        kind = m["type"]
+        if kind == "match_info":
             self.info = m
-        elif m["type"] == "action":
+        elif kind == "action":
             self.versions[m["event_id"]] = dict(m)
-        elif m["type"] == "correction":
+            self._index(m["event_id"])
+        elif kind == "correction":
             target = self.versions.get(m["target_event_id"])
             if m["op"] == "void":
                 self.voided.add(m["target_event_id"])
             elif target is not None:
                 target.update(m["changes"])
                 target["version"] = m["new_version"]
+            self._index(m["target_event_id"])
+        elif kind == "added_time":
+            self.boards.setdefault(m["period"], []).append((m["seq"], float(m["minutes"])))
+        elif kind == "full_time" and (self.full_time_seq is None or m["seq"] < self.full_time_seq):
+            self.full_time_seq = m["seq"]
         return m
+
+    def _index(self, event_id: str) -> None:
+        """Recomputes what one action contributes to the derived state, from the action as it now stands."""
+        self.goals.pop(event_id, None)
+        self.red_cards.pop(event_id, None)
+        a = self.versions.get(event_id)
+        if a is None:
+            return  # a correction for an action not received yet: the action applies it when it arrives
+        if self.is_goal(a):
+            self.goals[event_id] = (a["seq"], a["team"])
+        if a["action_type"] == "foul" and a.get("card") in ("red", "second_yellow"):
+            self.red_cards[event_id] = (a["seq"], a["team"])
 
     # --- derived state --------------------------------------------------------------------------
 
     def is_goal(self, a: dict) -> bool:
         return a["type"] == "action" and a["action_type"].startswith("shot") and a["shot"]["outcome"] == "goal" and a["event_id"] not in self.voided
 
+    @staticmethod
+    def _count(index: dict[str, tuple[int, str]], before_seq: int | None) -> dict[str, int]:
+        out = {"home": 0, "away": 0}
+        for seq, team in index.values():
+            if before_seq is None or seq < before_seq:
+                out[team] += 1
+        return out
+
     def score(self, before_seq: int | None = None) -> dict[str, int]:
-        score = {"home": 0, "away": 0}
-        for a in self.versions.values():
-            if (before_seq is None or a["seq"] < before_seq) and self.is_goal(a):
-                score[a["team"]] += 1
-        return score
+        return self._count(self.goals, before_seq)
 
     def reds(self, before_seq: int | None = None) -> dict[str, int]:
-        reds = {"home": 0, "away": 0}
-        for a in self.versions.values():
-            if (before_seq is None or a["seq"] < before_seq) and a["action_type"] == "foul" and a.get("card") in ("red", "second_yellow"):
-                reds[a["team"]] += 1
-        return reds
+        return self._count(self.red_cards, before_seq)
 
     def added_time(self, period: int, before_seq: int) -> float | None:
-        board = [m for s, m in self.by_seq.items() if s < before_seq and m["type"] == "added_time" and m["period"] == period]
-        return float(board[-1]["minutes"]) if board else None
+        """Minutes on the board most recently applied for `period` among those of lower sequence number."""
+        for seq, minutes in reversed(self.boards.get(period, ())):
+            if seq < before_seq:
+                return minutes
+        return None
 
     def state(self, m: dict, after: bool = False) -> MatchState:
         """Win-probability state just before message `m` (or just after, `after=True`)."""
         cut = m["seq"] + 1 if after else m["seq"]
         score, reds = self.score(cut), self.reds(cut)
-        final = any(x["type"] == "full_time" for s, x in self.by_seq.items() if s < cut)
+        final = self.full_time_seq is not None and self.full_time_seq < cut
         return MatchState(m["clock_s"] / 60, score["home"], score["away"], reds["home"], reds["away"], period=m["period"], added_time=self.added_time(m["period"], cut), final=final)
 
     def model_inputs(self) -> tuple[float, float]:
