@@ -1,6 +1,6 @@
 """Post-match analysis and audience previews: from the approved cards of a finished match to a recap, a fan text and an analyst text in several languages, every number checked.
 
-Only `approved` cards are read: a retracted, rejected or pending card is never cited, and the points of the win-probability curve that belong to a retracted moment are dropped. The code computes every number (`analyse`, then `recap_facts` with explicit field names, like `card_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. Each text goes through `writer.verify`, plus checks on length, player names, spelled-out numbers and retracted moments. A failed draft gets one retry, then a fixed template takes over.
+Only `approved` cards are read: a retracted, rejected or pending card is never cited, and the points of the win-probability curve that belong to a retracted moment are dropped. Goals ruled out by VAR are told as such, with the reason and the margin (`disallowed_goals`, from the `ruled_out` record the desk keeps on a retracted goal card, or passed explicitly), never as goals. "Points" in a text is only ever a change in a chance of winning: the card ranking value `value_pts` orders the biggest moments but is never written. The code computes every number (`analyse`, then `recap_facts` with explicit field names, like `card_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. Each text goes through `writer.verify`, plus checks on length, player names, spelled-out numbers and retracted moments. A failed draft gets one retry, then a fixed template takes over.
 
 Usage:
     python -m worker.recap data/desk/demo-0007 [--writer template|foundry] [--fan-team home|away] [--out file]
@@ -15,9 +15,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from worker.writer import LANGUAGES, MACHINE_TRANSLATED, names_ok, shown, verify
+from worker.duo import fr_de
+from worker.writer import LANGUAGES, MACHINE_TRANSLATED, names_ok, sentences, shown, verify
 
-MAX_WORDS = {"recap": 60, "fan": 50, "analyst": 60}
+MAX_WORDS = {"recap": 80, "fan": 50, "analyst": 60}
 HALF_TIME_GAP_S = 120  # the match clock goes back to 45:00 at the start of the second half
 TOP_MOMENTS = 3
 SPELLED_NUMBERS = {  # numbers must be written in digits, or the Verifier cannot check them
@@ -33,6 +34,20 @@ def slug(name: str) -> str:
 
 def other(side: str) -> str:
     return "away" if side == "home" else "home"
+
+
+RULED_OUT_WORDS = {"en": r"(?i)\bVAR\b|ruled out|disallowed", "fr": r"(?i)\bVAR\b|refusé|annulé", "es": r"(?i)\bVAR\b|anulad|anul[óo]"}  # a sentence that names a retracted minute must say it was ruled out
+REASONS = {"offside": {"en": "offside", "fr": "hors-jeu", "es": "fuera de juego"}, "handball": {"en": "handball", "fr": "main", "es": "mano"}}
+
+
+def disallowed_goals(cards: list[dict]) -> list[dict]:
+    """Goals VAR ruled out, in match order, with the reason and the offside margin the desk recorded on the retracted card."""
+    out = []
+    for c in sorted((c for c in cards if c.get("status") == "retracted" and c.get("moment") == "goal" and c.get("ruled_out")), key=lambda c: c["clock_s"]):
+        r = c["ruled_out"]
+        out.append({"card_id": c["id"], "minute_label": c["minute_label"], "team": c["team"], "player": c["player"]["name"], "reason": r.get("reason") or "other",
+                    "margin_cm": r.get("margin_cm") if isinstance(r.get("margin_cm"), int) else None})
+    return out
 
 
 def load_desk(path: Path) -> tuple[list[dict], dict]:
@@ -56,8 +71,8 @@ def curve_point(label: str, p: dict, final: bool = False) -> dict:
     return {"label": label, "minute_label": p["minute_label"], "home_pct": pct(p["home"]), "draw_pct": pct(p["draw"]), "away_pct": pct(p["away"])}
 
 
-def analyse(cards: list[dict], state: dict) -> dict:
-    """Everything the texts may say, computed from the approved cards and the win-probability curve."""
+def analyse(cards: list[dict], state: dict, disallowed: list[dict] | None = None) -> dict:
+    """Everything the texts may say, computed from the approved cards and the win-probability curve; `disallowed` (goals ruled out by VAR: minute_label, team, player, reason, margin_cm) defaults to what the retracted cards record."""
     teams, score = state["teams"], state["score"]
     raw = state.get("wp_timeline", [])
     order = {p["event_id"]: i for i, p in enumerate(raw)}
@@ -73,7 +88,8 @@ def analyse(cards: list[dict], state: dict) -> dict:
     half_time = next((i for i in range(1, len(raw)) if raw[i]["clock_s"] < raw[i - 1]["clock_s"] - HALF_TIME_GAP_S), None)
 
     out: dict[str, Any] = {"match_id": state["match_id"], "final": bool(state.get("final")), "teams": teams, "score": score, "winner": winner,
-                           "goals_consistent": goals_consistent, "cards_on_air": [c["id"] for c in on_air], "cards_retracted": [c["id"] for c in retracted]}
+                           "goals_consistent": goals_consistent, "cards_on_air": [c["id"] for c in on_air], "cards_retracted": [c["id"] for c in retracted],
+                           "disallowed_goals": disallowed_goals(cards) if disallowed is None else disallowed}
     if half_time is not None and goals_consistent:
         ht = {s: sum(c["team"] == s for c in goals if position(c)[0] < half_time) for s in ("home", "away")}
         out["half_time_score"] = ht
@@ -188,14 +204,20 @@ def recap_facts(analysis: dict, fan_side: str | None = None) -> tuple[dict, dict
             meanings[f"turning_point_{s[side]}_wp_before_pct"] = f"{teams[side]}'s chance of winning just before the turning point, in %"
             meanings[f"turning_point_{s[side]}_wp_after_pct"] = f"{teams[side]}'s chance of winning just after the turning point, in %"
     events = {"goal": "goal", "save": "goalkeeper save", "red_card": "player sent off", "chance": "chance missed"}
-    for i, m in enumerate(analysis["biggest_moments"], start=1):
-        facts |= {f"moment_{i}_minute": m["minute_label"], f"moment_{i}_event": f"{teams[m['team']]} {events[m['moment']]}", f"moment_{i}_player": m["player"], f"moment_{i}_value_pts": m["value_pts"]}
-        meanings |= {f"moment_{i}_minute": f"minute of the number {i} moment by value", f"moment_{i}_event": f"what happened at moment {i}", f"moment_{i}_player": f"player credited with moment {i}",
-                     f"moment_{i}_value_pts": f"how far moment {i} moved the result probabilities, in percentage points"}
+    for i, m in enumerate(analysis["biggest_moments"], start=1):  # ranked by value_pts, which is never written: "points" on screen is a change in a chance of winning
+        facts |= {f"moment_{i}_minute": m["minute_label"], f"moment_{i}_event": f"{teams[m['team']]} {events[m['moment']]}", f"moment_{i}_player": m["player"]}
+        meanings |= {f"moment_{i}_minute": f"minute of the number {i} moment by how far it moved the result", f"moment_{i}_event": f"what happened at moment {i}", f"moment_{i}_player": f"player credited with moment {i}"}
+    for i, g in enumerate(analysis.get("disallowed_goals", []), start=1):
+        facts |= {f"disallowed_{i}_minute": g["minute_label"], f"disallowed_{i}_team": teams[g["team"]], f"disallowed_{i}_player": g["player"], f"disallowed_{i}_reason": g["reason"]}
+        meanings |= {f"disallowed_{i}_minute": f"minute of goal {i} that VAR ruled out: it does not count", f"disallowed_{i}_team": f"team whose goal {i} was ruled out",
+                     f"disallowed_{i}_player": f"player whose goal {i} was ruled out", f"disallowed_{i}_reason": f"why VAR ruled goal {i} out (offside, handball or other)"}
+        if g.get("margin_cm") is not None:
+            facts[f"disallowed_{i}_margin_cm"] = g["margin_cm"]
+            meanings[f"disallowed_{i}_margin_cm"] = f"by how much the player was offside for goal {i}, in centimetres"
 
     roles = {"F": s[fan], "R": s[analyst], "W": s[winner] if winner else None, "T": s[tp["side"]] if tp else None,
              "fan_result": "draw" if not winner else "won" if fan == winner else "lost", "tp_moment": tp["moment"] if tp else None,
-             "moments": len(analysis["biggest_moments"])}
+             "moments": len(analysis["biggest_moments"]), "disallowed": len(analysis.get("disallowed_goals", []))}
     return facts, meanings, roles
 
 
@@ -220,7 +242,7 @@ def verify_recap(text: str, languages: list[str], facts: dict, cards: list[dict]
     drafts, valid = parse_drafts(text)
     allowed = " ".join(str(v) for v in facts.values())
     players = {c["player"]["name"] for c in cards}
-    retracted_minutes = {c["minute_label"] for c in cards if c.get("status") == "retracted"} - {v for v in facts.values() if isinstance(v, str)}
+    retracted_minutes = {c["minute_label"] for c in cards if c.get("status") == "retracted"} - {v for k, v in facts.items() if isinstance(v, str) and not k.startswith("disallowed_")}
     report: dict[str, Any] = {"json_valid": valid, "languages_ok": sorted(str(d.get("lang")) for d in drafts) == sorted(languages), "texts": []}
     for d in drafts:
         claims = d.get("claims") if isinstance(d.get("claims"), list) else []
@@ -236,7 +258,7 @@ def verify_recap(text: str, languages: list[str], facts: dict, cards: list[dict]
                 "lang": d.get("lang"), "section": section, "words": len(body.split()), "length_ok": len(body.split()) <= limit,
                 "unknown_players": sorted(p for p in players if any(n in body and n not in allowed for n in (p, p.split()[-1]))),
                 "spelled_numbers": [w for w in re.findall(r"[\wÀ-ÿ]+", body.lower()) if w in spelled],
-                "retracted_minutes": sorted(m for m in retracted_minutes if m in body),
+                "retracted_minutes": sorted({m for m in retracted_minutes for s in sentences(body) if m in s and not re.search(RULED_OUT_WORDS.get(str(d.get("lang")), "VAR"), s)}),
             }
             entry["verified"] = (entry["verified"] and entry["length_ok"] and not entry["unknown_names"] and not entry["unknown_players"]
                                  and not entry["spelled_numbers"] and not entry["retracted_minutes"])
@@ -278,15 +300,43 @@ TEMPLATES = {  # each sentence is used only when every field it names is in the 
     "analyst": {
         "en": {"curve": "{R}: {R_wp_kickoff_pct}% to win at kick-off", "ht": ", {R_wp_half_time_pct}% at half-time", "low": ", low of {R_lowest_wp_pct}% at {R_lowest_wp_minute}",
                "good": "Above {majority_line_pct}% for good from {R_above_50_for_good_from}.", "tp": "Biggest swing: {turning_point_minute}, {turning_point_swing_pts} points ({turning_point_T_wp_before_pct}% to {turning_point_T_wp_after_pct}%).",
-               "moments": "Top moments by value: ", "moment": "{moment_N_minute} ({moment_N_value_pts} pts)"},
+               "moments": "Top moments: ", "moment": "{moment_N_minute}"},
         "fr": {"curve": "{R} : {R_wp_kickoff_pct} % de chances de gagner au coup d'envoi", "ht": ", {R_wp_half_time_pct} % à la mi-temps", "low": ", plancher à {R_lowest_wp_pct} % ({R_lowest_wp_minute})",
                "good": "Au-dessus de {majority_line_pct} % pour de bon à partir de {R_above_50_for_good_from}.", "tp": "Plus forte bascule : {turning_point_minute}, {turning_point_swing_pts} points (de {turning_point_T_wp_before_pct} % à {turning_point_T_wp_after_pct} %).",
-               "moments": "Moments les plus lourds : ", "moment": "{moment_N_minute} ({moment_N_value_pts} pts)"},
+               "moments": "Moments les plus lourds : ", "moment": "{moment_N_minute}"},
         "es": {"curve": "{R}: {R_wp_kickoff_pct}% de opciones de ganar al inicio", "ht": ", {R_wp_half_time_pct}% al descanso", "low": ", mínimo del {R_lowest_wp_pct}% ({R_lowest_wp_minute})",
                "good": "Por encima del {majority_line_pct}% para siempre desde el {R_above_50_for_good_from}.", "tp": "Mayor cambio: {turning_point_minute}, {turning_point_swing_pts} puntos (del {turning_point_T_wp_before_pct}% al {turning_point_T_wp_after_pct}%).",
-               "moments": "Momentos de más valor: ", "moment": "{moment_N_minute} ({moment_N_value_pts} pts)"},
+               "moments": "Momentos de más peso: ", "moment": "{moment_N_minute}"},
     },
 }
+
+
+DISALLOWED = {  # goals ruled out by VAR: one sentence in the recap, one in the analyst text
+    "recap": {"en": ("VAR ruled out {items}.", "{player}'s goal at {minute}", " and "), "fr": ("La VAR a refusé {items}.", "le but {de_player} à {minute}", " et "),
+              "es": ("El VAR anuló {items}.", "el gol de {player} en el {minute}", " y ")},
+    "analyst": {"en": ("VAR: {items}.", "{minute}{reason}", ", "), "fr": ("VAR : {items}.", "{minute}{reason}", ", "), "es": ("VAR: {items}.", "{minute}{reason}", ", ")},
+    "with_margin": {"en": " ({reason} by {margin} cm)", "fr": " ({reason} de {margin} cm)", "es": " ({reason} por {margin} cm)"},
+    "reason_only": {"en": " ({reason})", "fr": " ({reason})", "es": " ({reason})"},
+}
+
+
+def disallowed_sentence(section: str, lang: str, facts: dict, count: int) -> str:
+    """The sentence about goals VAR ruled out, with placeholders on the disallowed_* facts (filled and claimed by RecapTemplateWriter.fill)."""
+    head, item, sep = DISALLOWED[section][lang]
+    items = []
+    for i in range(1, count + 1):
+        player = "{disallowed_%d_player}" % i
+        de_player = ("d'" if fr_de(str(facts.get(f"disallowed_{i}_player", "x"))).startswith("d'") else "de ") + player
+        reason = REASONS.get(facts.get(f"disallowed_{i}_reason"), {}).get(lang)
+        text = item.replace("{de_player}", de_player).replace("{player}", player).replace("{minute}", "{disallowed_%d_minute}" % i)
+        detail = ""
+        if reason and f"disallowed_{i}_margin_cm" in facts:
+            detail = DISALLOWED["with_margin"][lang].replace("{reason}", reason).replace("{margin}", "{disallowed_%d_margin_cm}" % i)
+        elif reason:
+            detail = DISALLOWED["reason_only"][lang].replace("{reason}", reason)
+        items.append(text.replace("{reason}", detail) if "{reason}" in text else text + detail)
+    joined = items[0] if len(items) == 1 else (", ".join(items[:-1]) + sep + items[-1] if section == "recap" else sep.join(items))
+    return head.replace("{items}", joined)
 
 
 TEAM_FIELDS = {"F": "fan_team", "R": "analyst_team", "W": "winner", "T": "turning_point_team"}
@@ -334,6 +384,8 @@ class RecapTemplateWriter:
             if r["W"] and facts.get(f"{r['W']}_lowest_wp_pct", 100) < 50:  # only when the winner was ever behind in the odds
                 recap.append(low)
             recap.append(tp)
+            if r.get("disallowed"):
+                recap.append(disallowed_sentence("recap", lang, facts, r["disallowed"]))
             if r["W"] and facts.get(f"{r['W']}_top_scorer_goals", 0) >= 2:
                 recap.append(scorer)
             fan_t = TEMPLATES["fan"][lang]
@@ -351,6 +403,8 @@ class RecapTemplateWriter:
                 curve = a["curve"] + "".join(p for p in (a["ht"], a["low"]) if self.fill(p, facts)) + "."
                 analyst_parts.append(curve)
             analyst_parts += [a["good"], a["tp"]]
+            if r.get("disallowed"):
+                analyst_parts.append(disallowed_sentence("analyst", lang, facts, r["disallowed"]))
             moments = [a["moment"].replace("_N_", f"_{i}_") for i in range(1, r["moments"] + 1)]
             if moments:
                 analyst_parts.append(a["moments"] + ", ".join(moments) + ".")
@@ -363,12 +417,14 @@ class RecapTemplateWriter:
 
 RECAP_INSTRUCTIONS = """You write the post-match texts of a football broadcast.
 
-Facts: call the get_recap_facts tool with the match_id to get the facts and the meaning of each field. Use ONLY those facts. Never invent a statistic, name, minute or fact, and never mention a moment that is not in the facts (goals ruled out by VAR are deliberately left out).
+Facts: call the get_recap_facts tool with the match_id to get the facts and the meaning of each field. Use ONLY those facts. Never invent a statistic, name, minute or fact, and never mention a moment that is not in the facts.
 
-Each number has a field name that says what it means: never use a number with another meaning. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are percentage points: write them as points. Do not compute any new number. Write every number in digits (4 goals, never "four goals"), and use no proper noun that is not in the facts.
+Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Lightfoot's goal at 63': offside by 25 cm"), in the same sentence as the words VAR or ruled out, with the reason and the margin when given. They never count as goals.
+
+Each number has a field name that says what it means: never use a number with another meaning. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are changes in a team's chance of winning, in percentage points: write them as points. The word points means nothing else. Do not compute any new number. Write every number in digits (4 goals, never "four goals"), and use no proper noun that is not in the facts.
 
 For each requested language write three texts:
-- recap: the match in at most 60 words, neutral, built around the turning point.
+- recap: the match in at most 80 words, neutral, built around the turning point.
 - fan: at most 50 words, emotional, from the point of view of fan_team's supporters.
 - analyst: at most 60 words, numbers-led, following analyst_team's chance of winning (kick-off, half-time, low point, turning point, biggest moments).
 Write each language natively, with the same facts in every language.
@@ -423,9 +479,10 @@ def failures(report: dict) -> str:
                                                                  if e.get(k)) + ("" if e.get("length_ok", True) else " too long") for e in bad)[:600] or "invalid JSON or missing languages"
 
 
-async def recap_async(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, calls_left: int = 2) -> dict:
-    """Analyses the match, writes and verifies the texts: the model, one retry, then the template."""
-    analysis = analyse(cards, state)
+async def recap_async(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, calls_left: int = 2,
+                      disallowed: list[dict] | None = None) -> dict:
+    """Analyses the match, writes and verifies the texts: the model, one retry, then the template. `disallowed` overrides the goals ruled out read from the cards."""
+    analysis = analyse(cards, state, disallowed)
     facts, meanings, roles = recap_facts(analysis, fan_side)
     attempts, note, texts, report, name = 0, None, None, None, "template"
     if writer is not None and not isinstance(writer, RecapTemplateWriter):
@@ -450,8 +507,8 @@ async def recap_async(cards: list[dict], state: dict, writer=None, languages: li
             "analysis": analysis, "facts": facts, "field_meanings": meanings}
 
 
-def build_recap(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None) -> dict:
-    return asyncio.run(recap_async(cards, state, writer, languages, fan_side))
+def build_recap(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, disallowed: list[dict] | None = None) -> dict:
+    return asyncio.run(recap_async(cards, state, writer, languages, fan_side, disallowed=disallowed))
 
 
 def recap_cosmos(match_id: str, writer=None, fan_side: str | None = None) -> dict:
