@@ -1,6 +1,6 @@
 """The Writer and the Verifier: from a Spotter card to on-air text in several languages, every number checked.
 
-The code computes every number and sends it under an explicit field name (`card_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. The Verifier checks those claims, rejects any number nobody claimed, a percentage taken from a field that is not one, and any name that is not in the facts. A failed draft gets one retry, then a fixed template takes over, so a card is never blocked by the model.
+The code computes every number and sends it under an explicit field name (`card_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. The Verifier checks those claims, rejects any number nobody claimed, a percentage taken from a field that is not one, and flags any name that is not in the facts. It also applies broadcast style rules per language (`LANGUAGE_RULES`, `STRUCTURAL_RULES`): an error fails the draft, a warning is only reported. A failed draft gets one retry, told what was rejected, then a fixed template takes over, so a card is never blocked by the model.
 
 The model runs on Microsoft Foundry through Agent Framework (`FoundryWriter`, a function tool `get_moment`); `TemplateWriter` needs no Azure and serves the tests and the fallback.
 """
@@ -14,20 +14,45 @@ from typing import Any
 LANGUAGES = ("en", "fr", "es")
 MACHINE_TRANSLATED = {"es"}  # shown on air with a "machine-translated" label
 
-WRITER_INSTRUCTIONS = """You write live football broadcast cards.
+WRITER_INSTRUCTIONS = """You write live football broadcast cards: a headline and one sentence, "why", shown on screen during the match like a professional TV graphic.
 
 Facts: call the get_moment tool with the card_id to get the facts and the meaning of each field. Use ONLY those facts. Never invent a statistic, name or fact. If something you are asked for is not in the facts, write "not available" for it.
 
-Each number has a field name that says what it means: never use a number with another meaning. For example, a win probability "if goal" is a chance of winning, never a chance of scoring. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are percentage points: write them as points. Do not compute any new number.
+Numbers. Each number has a field name that says what it means: never use a number with another meaning. For example, a win probability "if goal" is a chance of winning, never a chance of scoring. Do not compute any new number. Write every number exactly as given: whole numbers, no sign (never +24), no decimals.
+- Fields ending in _pct are percentages: write them with a % sign (34%, never 0.34).
+- Fields ending in _pts are percentage points: always write the word points (French: points, Spanish: puntos) right after the number, never a % sign.
 
-Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Write each language natively, with the same meaning in every language.
+Content. Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Every sentence that gives a win probability names the team it belongs to: rovers_wp_after_pct is the chance of Rovers. Never write "win chance", "the chances" or "les chances" without the team.
+- Headline: at most 8 words, names the player or the team. No minute and no number at the start: the graphic already shows the minute and the score.
+- Why: one sentence, at most 25 words.
+- Same meaning in every language, each written natively as a broadcaster of that country would say it, not translated word for word.
+
+Language rules.
+- en: plain broadcast English. Say "Rovers go from 30% to 54% to win", "worth 13 points". No jargon: no "+24-point swing", no "win chance".
+- fr: French TV style. Club names without article: "Rovers", "pour United", "contre Rovers"; never "l'United", "le Rovers", "d'United", "du Rovers", "aux Rovers". If an article or "d'" would fall before a club name, make the club the subject of the sentence. No English words: never "swing" or "momentum"; say "points", "points de probabilité" or "bascule" ("soit 24 points de mieux"). Put a space before %: "34 %".
+- es: Spanish broadcast style. Use the article before a club name as Spanish commentators do ("el Rovers", "del United", "al Town"). Say "opciones de ganar" and "puntos". Never "swing" or "momentum", never "en puntos de diferencia".
+
+Good and bad "why" sentences (a goal taking Rovers from 30% to 54%, swing_pts 24):
+- en good: "Rovers go from 30% to 54% to win, up 24 points." Bad: "Win chance jumped: a +24-point swing." (no team, sign, jargon)
+- fr good: "Rovers passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux." Bad: "Le but fait bondir les chances de l'United : swing de 24 points." (whose chances, article, anglicism)
+- es good: "El Rovers pasa del 30% al 54% de opciones de ganar: 24 puntos más." Bad: "Swing para el Rovers con un +24 en puntos de diferencia." (anglicism, sign, clumsy)
 
 Reply with valid JSON only, no other text: a JSON array with one object per requested language:
 {"headline": string (max 8 words), "why": string (max 25 words), "lang": string, "claims": [{"value": number, "source_field": string}]}
 claims lists every number written in headline or why, with the field it comes from.
+"""
 
-Example for another moment, facts {"minute": "81'", "score": "City 0-0 Town", "event": "Town goalkeeper save", "town_wp_after_save_pct": 22, "town_wp_if_goal_pct": 9, "save_value_pts": 13}, languages ["en", "es"]:
-[{"headline": "Town keeper keeps them alive", "why": "The save kept Town at 22% to win instead of 9% if it had gone in: worth 13 points.", "lang": "en", "claims": [{"value": 22, "source_field": "town_wp_after_save_pct"}, {"value": 9, "source_field": "town_wp_if_goal_pct"}, {"value": 13, "source_field": "save_value_pts"}]}, {"headline": "El portero del Town lo mantiene vivo", "why": "La parada dejó al Town con un 22% de ganar, frente al 9% si entraba: vale 13 puntos.", "lang": "es", "claims": [{"value": 22, "source_field": "town_wp_after_save_pct"}, {"value": 9, "source_field": "town_wp_if_goal_pct"}, {"value": 13, "source_field": "save_value_pts"}]}]"""
+# The worked example of the instructions, kept as data so that a test can run it through the Verifier.
+EXAMPLE_FACTS = {"minute": "81'", "score_before": "City 0-0 Town", "event": "Town goalkeeper save", "goalkeeper": "Ari Holt",
+                 "town_wp_after_save_pct": 22, "town_wp_if_goal_pct": 9, "save_value_pts": 13}
+_EXAMPLE_CLAIMS = [{"value": 22, "source_field": "town_wp_after_save_pct"}, {"value": 9, "source_field": "town_wp_if_goal_pct"}, {"value": 13, "source_field": "save_value_pts"}]
+EXAMPLE_REPLY = [
+    {"headline": "Ari Holt keeps Town alive", "why": "The save kept Town at 22% to win instead of 9% if it had gone in: worth 13 points.", "lang": "en", "claims": _EXAMPLE_CLAIMS},
+    {"headline": "Ari Holt maintient Town en vie", "why": "Town reste à 22 % de chances de gagner, contre 9 % si le tir était entré : l'arrêt vaut 13 points.", "lang": "fr", "claims": _EXAMPLE_CLAIMS},
+    {"headline": "Ari Holt mantiene vivo al Town", "why": "La parada deja al Town con un 22% de opciones de ganar, frente al 9% si hubiera entrado: vale 13 puntos.", "lang": "es", "claims": _EXAMPLE_CLAIMS},
+]
+WRITER_INSTRUCTIONS += (f"\nExample for another moment, facts {json.dumps(EXAMPLE_FACTS, ensure_ascii=False)}, languages [\"en\", \"fr\", \"es\"]:\n"
+                        + json.dumps(EXAMPLE_REPLY, ensure_ascii=False))
 
 
 def shown(pct: int) -> int:
@@ -81,7 +106,11 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
 # --- Verifier -------------------------------------------------------------------------------------
 
 def numbers_in(text: str) -> list[tuple[float, bool]]:
-    return [(float(m.group(1).replace(",", ".")), bool(m.group(2))) for m in re.finditer(r"(\d+(?:[.,]\d+)?)(\s?%)?", text.replace("\xa0", " ").replace(" ", " "))]
+    return [(float(m.group(1).replace(",", ".")), bool(m.group(2))) for m in re.finditer(r"(\d+(?:[.,]\d+)?)(\s?%)?", normalise(text))]
+
+
+def normalise(text: str) -> str:
+    return text.replace("\xa0", " ").replace("\u202f", " ")
 
 
 def claim_ok(claim: Any, facts: dict) -> bool:
@@ -101,6 +130,134 @@ def names_ok(text: str, facts: dict) -> list[str]:
     return sorted({w for w in words if w not in allowed})
 
 
+# --- style rules ----------------------------------------------------------------------------------
+# Every rule is data: a code, a severity and a pattern. An "error" fails the draft (one retry, then the template), a "warning" is
+# only reported. In a pattern, {team} stands for each club name of the match. The checks that need the claims (which team a
+# probability belongs to, the unit of a number) are listed in STRUCTURAL_RULES and implemented in style_issues.
+
+FR_ARTICLE = r"(?i:\b(?:l['’]\s?|d['’]\s?|(?:le|la|les|du|des|au|aux)\s+))"
+
+LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
+    "en": [
+        ("jargon", "warning", r"(?i)\bwin chances?\b"),
+    ],
+    "fr": [
+        ("forbidden_word", "error", r"(?i)\bswing\w*"),
+        ("forbidden_word", "error", r"(?i)\bmomentum\b"),
+        ("forbidden_word", "error", r"(?i)\bgame[- ]?changer\b"),
+        ("article_before_team", "error", FR_ARTICLE + r"{team}\b"),
+        ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|turnover|win)\b"),
+        ("percent_without_space", "warning", r"\d%"),
+    ],
+    "es": [
+        ("forbidden_word", "error", r"(?i)\bswing\w*"),
+        ("forbidden_word", "error", r"(?i)\bmomentum\b"),
+        ("forbidden_word", "error", r"(?i)\bgame[- ]?changer\b"),
+        ("clumsy_phrase", "warning", r"(?i)\ben puntos de diferencia\b"),
+        ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|win)\b"),
+    ],
+}
+
+# Words that speak of a win probability: a sentence that uses one must name a club.
+PROBABILITY_WORDS = {
+    "en": r"(?i)\b(?:win(?:ning)? (?:chances?|probability|odds)|chances? of winning|to win)\b",
+    "fr": r"(?i)\b(?:chances?|probabilités?)\b",
+    "es": r"(?i)\b(?:opciones|probabilidad(?:es)?|posibilidades)\b",
+}
+POINT_WORDS = {"en": r"points?", "fr": r"points?", "es": r"puntos?"}
+
+STRUCTURAL_RULES = {
+    "signed_number": ("error", r"(?<![\w])[+±]\s?\d+"),  # "+24": say the direction with a verb
+    "decimal_percent": ("error", r"\d+[.,]\d+\s?%"),  # "34.5%": percentages are whole numbers
+    "headline_starts_with_number": ("error", r"^\W*\d"),  # "52' ...": the graphic already shows the minute
+    "minute_in_headline": ("warning", r"(?i)\d+(?:\+\d+)?\s?['’′]|\bmin(?:ute|uto)?s?\b"),
+    "probability_without_team": ("error", None),  # a probability word in a sentence that names no club
+    "probability_number_without_team": ("error", None),  # a number from a <team>_wp_ field in a sentence without that team
+    "points_unit_missing": ("error", None),  # a number from a _pts field not followed by the word for points
+    "points_not_from_pts_field": ("error", None),  # "54 points" where 54 is a percentage
+    "too_long": ("warning", None),  # headline over 8 words or why over 25
+}
+HEADLINE_MAX_WORDS, WHY_MAX_WORDS = 8, 25
+
+
+def teams_in(facts: dict) -> list[str]:
+    """The two club names, read from the score line "Rovers 0-2 United"."""
+    found = re.match(r"^(.*\S)\s+\d+-\d+\s+(\S.*)$", str(facts.get("score_before", "")))
+    return [found.group(1), found.group(2)] if found else []
+
+
+def sentences(text: str) -> list[str]:
+    return [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
+
+
+def mentions(sentence: str, team: str) -> bool:
+    return re.search(rf"(?<![\w]){re.escape(team)}(?![\w])", sentence, re.I) is not None
+
+
+def number_spans(text: str) -> list[tuple[float, int, int]]:
+    return [(float(m.group(0).replace(",", ".")), m.start(), m.end()) for m in re.finditer(r"\d+(?:[.,]\d+)?", text)]
+
+
+def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: dict) -> tuple[list[dict], list[dict]]:
+    """Style checks of one draft: (errors, warnings), each issue {"rule", "text"}."""
+    issues: list[tuple[str, str, str]] = []  # (severity, rule, matched text)
+    headline, why = normalise(headline), normalise(why)
+    body = f"{headline} {why}"
+    teams = teams_in(facts)
+
+    def add(rule: str, text: str, severity: str | None = None) -> None:
+        issues.append((severity or STRUCTURAL_RULES[rule][0], rule, text))
+
+    for rule, severity, pattern in LANGUAGE_RULES.get(lang, []):
+        for p in ([pattern.replace("{team}", re.escape(t)) for t in teams] if "{team}" in pattern else [pattern]):
+            for m in re.finditer(p, body):
+                add(rule, m.group(0), severity)
+    for rule in ("signed_number", "decimal_percent"):
+        for m in re.finditer(STRUCTURAL_RULES[rule][1], body):
+            add(rule, m.group(0))
+    for rule in ("headline_starts_with_number", "minute_in_headline"):
+        found = re.search(STRUCTURAL_RULES[rule][1], headline)
+        if found:
+            add(rule, headline)
+    if len(headline.split()) > HEADLINE_MAX_WORDS or len(why.split()) > WHY_MAX_WORDS:
+        add("too_long", f"{len(headline.split())} + {len(why.split())} words")
+
+    wp_teams = {}  # value -> clubs whose win probability has that value
+    pts_values = set()
+    for c in claims:
+        field_name = str(c.get("source_field", ""))
+        if "_wp_" in field_name:
+            slug = field_name.split("_wp_")[0]
+            wp_teams.setdefault(float(c["value"]), set()).update(t for t in teams if t.lower() == slug)
+        if field_name.endswith("_pts"):
+            pts_values.add(float(c["value"]))
+    for sentence in sentences(headline) + sentences(why):
+        named = any(mentions(sentence, t) for t in teams)
+        if lang in PROBABILITY_WORDS and not named and re.search(PROBABILITY_WORDS[lang], sentence):
+            add("probability_without_team", sentence)
+        for value, _, _ in number_spans(sentence):
+            owners = wp_teams.get(value)
+            if owners and not any(mentions(sentence, t) for t in owners):
+                add("probability_number_without_team", sentence)
+                break
+    if lang in POINT_WORDS:
+        point = re.compile(rf"(?i)^{POINT_WORDS[lang]}$")
+        spans = number_spans(body)
+        for value, _, end in spans:
+            following = re.findall(r"[\wÀ-ÿ]+", body[end:end + 40])
+            if following[:1] and point.match(following[0]) and value not in pts_values:
+                add("points_not_from_pts_field", body[max(0, end - 6):end + 8].strip())
+        for value in pts_values:
+            ends = [end for v, _, end in spans if v == value]
+            near = [any(point.match(w) for w in re.findall(r"[\wÀ-ÿ]+", body[end:end + 40])[:3]) for end in ends]
+            if ends and not any(near):
+                add("points_unit_missing", f"{value:g}")
+
+    errors = [{"rule": r, "text": t} for s, r, t in issues if s == "error"]
+    warnings = [{"rule": r, "text": t} for s, r, t in issues if s == "warning"]
+    return errors, warnings
+
+
 def verify(text: str, languages: list[str], facts: dict) -> tuple[list[dict], dict]:
     report: dict[str, Any] = {"json_valid": True, "languages_ok": True, "cards": []}
     try:
@@ -114,7 +271,7 @@ def verify(text: str, languages: list[str], facts: dict) -> tuple[list[dict], di
             drafts = []
     if not isinstance(drafts, list) or not all(isinstance(d, dict) for d in drafts):
         drafts = []
-    report["languages_ok"] = sorted(d.get("lang") for d in drafts) == sorted(languages)
+    report["languages_ok"] = sorted(str(d.get("lang")) for d in drafts) == sorted(languages)
     for d in drafts:
         body = f"{d.get('headline', '')} {d.get('why', '')}"
         claims = d.get("claims") if isinstance(d.get("claims"), list) else []
@@ -126,43 +283,62 @@ def verify(text: str, languages: list[str], facts: dict) -> tuple[list[dict], di
                 unclaimed.append(value)
             elif is_pct and not any(c["source_field"].endswith("_pct") for c in matches):
                 wrong_unit.append(value)
+        errors, warnings = style_issues(str(d.get("headline", "")), str(d.get("why", "")), str(d.get("lang")), good, facts)
         entry = {
             "lang": d.get("lang"),
             "keys_ok": all(isinstance(d.get(k), str) for k in ("headline", "why", "lang")),
             "bad_claims": [c for c in claims if not claim_ok(c, facts)],
             "unclaimed_numbers": unclaimed,
             "wrong_unit": wrong_unit + [v for v, _ in numbers_in(body) if 0 < v < 1],
-            "unknown_names": names_ok(body, facts),
-            "length_ok": len(str(d.get("headline", "")).split()) <= 8 and len(str(d.get("why", "")).split()) <= 25,
+            "unknown_names": sorted(set(names_ok(str(d.get("headline", "")), facts)) | set(names_ok(str(d.get("why", "")), facts))),  # each starts a sentence
+            "length_ok": len(str(d.get("headline", "")).split()) <= HEADLINE_MAX_WORDS and len(str(d.get("why", "")).split()) <= WHY_MAX_WORDS,
+            "style_errors": errors,
+            "style_warnings": warnings,
         }
-        entry["verified"] = entry["keys_ok"] and not entry["bad_claims"] and not entry["unclaimed_numbers"] and not entry["wrong_unit"]
+        entry["verified"] = entry["keys_ok"] and not entry["bad_claims"] and not entry["unclaimed_numbers"] and not entry["wrong_unit"] and not errors
         report["cards"].append(entry)
     report["verified"] = bool(drafts) and report["languages_ok"] and all(e["verified"] for e in report["cards"])
     return drafts, report
 
 
+def feedback(report: dict) -> str:
+    """What the Verifier rejected, for the retry."""
+    lines = []
+    if not report["json_valid"]:
+        lines.append("the reply was not valid JSON")
+    if not report["languages_ok"]:
+        lines.append("the languages do not match the request")
+    for e in report["cards"]:
+        problems = [f"{k}: {e[k]}" for k in ("bad_claims", "unclaimed_numbers", "wrong_unit") if e[k]]
+        problems += [f"{i['rule']}: {i['text']}" for i in e["style_errors"]]
+        if problems:
+            lines.append(f"{e['lang']}: " + "; ".join(problems))
+    return "The Verifier rejected the previous draft (" + " | ".join(lines)[:600] + "). Write it again following the rules."
+
+
 # --- writers --------------------------------------------------------------------------------------
 
+NB = "\u00a0"  # French typography: a no-break space before % and :
 TEMPLATES = {
     "goal": {
-        "en": ("{scorer} scores for {team}", "{team} go from {before}% to {after}% to win: a swing of {swing} points."),
-        "fr": ("{scorer} marque pour {team}", "{team} passe de {before} % à {after} % de chances de gagner : {swing} points de bascule."),
-        "es": ("{scorer} marca para {team}", "{team} pasa del {before}% al {after}% de opciones de ganar: {swing} puntos de cambio."),
+        "en": ("{scorer} scores for {team}", "{team} go from {before}% to {after}% to win, up {swing} points."),
+        "fr": ("{scorer} marque pour {team}", f"{{team}} passe de {{before}}{NB}% à {{after}}{NB}% de chances de gagner, soit {{swing}} points de mieux."),
+        "es": ("Gol de {scorer} para el {team}", "El {team} pasa del {before}% al {after}% de opciones de ganar: {swing} puntos más."),
     },
     "save": {
-        "en": ("{player} keeps {team} ahead", "The save kept {team} at {before}% to win instead of {other}% if it had gone in: worth {value} points."),
-        "fr": ("{player} garde {team} devant", "L'arrêt laisse {team} à {before} % de victoire, contre {other} % si le tir était entré : {value} points."),
-        "es": ("{player} sostiene a {team}", "La parada dejó a {team} con un {before}% de ganar, frente al {other}% si entraba: vale {value} puntos."),
+        "en": ("Big save from {player}", "{team} stay on {before}% to win instead of {other}% had it gone in: the save is worth {value} points."),
+        "fr": ("{player} s'interpose", f"{{team}} reste à {{before}}{NB}% de chances de gagner, contre {{other}}{NB}% si le tir était entré{NB}: l'arrêt vaut {{value}} points."),
+        "es": ("Paradón de {player}", "El {team} se mantiene en el {before}% de opciones de ganar, frente al {other}% si hubiera entrado: la parada vale {value} puntos."),
     },
     "red_card": {
-        "en": ("{player} sent off", "{team} drop from {before}% to {after}% to win with ten men."),
-        "fr": ("{player} expulsé", "{team} passe de {before} % à {after} % de chances de gagner à dix."),
-        "es": ("{player}, expulsado", "{team} baja del {before}% al {after}% de opciones de ganar con diez."),
+        "en": ("{player} sent off", "Down to ten men, {team} go from {before}% to {after}% to win."),
+        "fr": ("{player} expulsé", f"Réduit à dix, {{team}} passe de {{before}}{NB}% à {{after}}{NB}% de chances de gagner."),
+        "es": ("{player}, expulsado", "Con diez, el {team} pasa del {before}% al {after}% de opciones de ganar."),
     },
     "chance": {
         "en": ("Big chance for {team}", "A goal would have taken {team} from {before}% to {other}% to win."),
-        "fr": ("Grosse occasion pour {team}", "Un but aurait fait passer {team} de {before} % à {other} % de chances de gagner."),
-        "es": ("Ocasión clara para {team}", "Un gol habría llevado a {team} del {before}% al {other}% de opciones de ganar."),
+        "fr": ("Grosse occasion pour {team}", f"Un but aurait fait passer {{team}} de {{before}}{NB}% à {{other}}{NB}% de chances de gagner."),
+        "es": ("Ocasión clara del {team}", "Un gol habría llevado al {team} del {before}% al {other}% de opciones de ganar."),
     },
 }
 
@@ -241,18 +417,20 @@ class Draft:
 
 
 async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2) -> Draft:
-    """Writes and verifies a card: the model, one retry, then the template. `calls_left` caps the model calls this card may still make."""
+    """Writes and verifies a card: the model, one retry told what the Verifier rejected, then the template. `calls_left` caps the model calls this card may still make."""
     facts, meanings = card_facts(card, teams)
     attempts = 0
+    note = None
     if not isinstance(writer, TemplateWriter):
         for _ in range(min(2, calls_left)):
             attempts += 1
             try:
-                text = await writer.write_async(card, (facts, meanings), languages)
+                text = await (writer.write_async(card, (facts, meanings), languages, note=note) if note else writer.write_async(card, (facts, meanings), languages))
             except Exception as error:  # a model or network failure falls through to the template
                 text = json.dumps({"error": f"{type(error).__name__}: {error}"[:300]})
             texts, report = verify(text, languages, facts)
             if report["verified"]:
                 return Draft(card["id"], card["version"], writer.name, attempts, texts, report, sorted(MACHINE_TRANSLATED & set(languages)))
+            note = feedback(report)
     texts, report = verify(TemplateWriter().write(card, facts, languages), languages, facts)
     return Draft(card["id"], card["version"], "template", attempts, texts, report, sorted(MACHINE_TRANSLATED & set(languages)))
