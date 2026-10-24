@@ -194,7 +194,7 @@ Python 3.12 or later. Nothing below needs Azure.
 ```
 python -m venv .venv
 .venv\Scripts\activate            # Windows; source .venv/bin/activate elsewhere
-pip install -e ".[azure,agents,dev]"
+pip install -e ".[azure,agents,web,dev]"
 pytest                                                   # about 2 minutes: 200 generated matches are checked
 python -m generator --story demo --out data/replay       # regenerate the demo match, its truth and its CDF files
 python -m generator --calibrate 200                      # the calibration table above
