@@ -26,15 +26,15 @@ class Spotter:
     model: WinProbModel
     threshold: float = 0.08
     cards: dict[str, dict] = field(default_factory=dict)  # event id -> card
-    saves: dict[str, tuple] = field(default_factory=dict)  # team that made the save -> (shot, value, before, if goal), waiting for the keeper's action
+    saves: dict[int, tuple] = field(default_factory=dict)  # sequence number of the keeper's action -> (shot, value, before, if goal)
 
     def process(self, m: dict) -> list[dict]:
         """What message `m` changes for the desk: new cards, and actions on existing ones."""
         if m["type"] == "action":
-            if m["action_type"] == "keeper_save" and m["team"] in self.saves:
-                shot, value, before, if_goal = self.saves.pop(m["team"])
+            if m["action_type"] == "keeper_save" and m["seq"] in self.saves:
+                shot, value, before, if_goal = self.saves.pop(m["seq"])
                 return [self._card(m, "save", value, before, if_goal, "if_goal", shot=shot)]
-            card = self._moment(m)
+            card = self._moment(self.match.versions.get(m["event_id"], m))  # as corrected, if a correction came first
             return [card] if card else []
         if m["type"] == "var_check" and m["target_event_id"] in self.cards:
             card = self.cards[m["target_event_id"]]
@@ -62,14 +62,19 @@ class Spotter:
         if kind.startswith(SHOT_PREFIX):
             before = model.predict(match.state(a))
             if a["shot"]["outcome"] == "goal":
+                if a["event_id"] in match.voided:  # its void overtook it: the goal never counted
+                    return None
                 after = model.predict(match.state(a, after=True))
                 return self._card(a, "goal", swing(before, after), before, after, "after")
             if_goal = model.predict(match.state(a).with_goal(a["team"]))
             value = a["shot"]["xg"] * swing(before, if_goal)
             if value < self.threshold:
                 return None
-            if a["shot"]["outcome"] == "saved":  # the card credits the keeper: it waits for his action
-                self.saves["away" if a["team"] == "home" else "home"] = (a, value, before, if_goal)
+            if a["shot"]["outcome"] == "saved":  # the card credits the keeper: his save is the next message of the feed
+                keeper = self.match.by_seq.get(a["seq"] + 1)
+                if keeper is not None and keeper["type"] == "action" and keeper["action_type"] == "keeper_save":
+                    return self._card(keeper, "save", value, before, if_goal, "if_goal", shot=a)  # it arrived first
+                self.saves[a["seq"] + 1] = (a, value, before, if_goal)
                 return None
             return self._card(a, "chance", value, before, if_goal, "if_goal")
         if kind == "foul" and a.get("card") in ("red", "second_yellow"):

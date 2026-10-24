@@ -28,6 +28,7 @@ class Match:
     late: int = 0
     versions: dict[str, dict] = field(default_factory=dict)  # event id -> action as it now stands
     voided: set[str] = field(default_factory=set)
+    early: dict[str, list[dict]] = field(default_factory=dict)  # corrections that arrived before their action
     info: dict | None = None
     goals: dict[str, tuple[int, str]] = field(default_factory=dict)  # event id -> (seq, team) of each goal that counts
     red_cards: dict[str, tuple[int, str]] = field(default_factory=dict)  # event id -> (seq, team) of each sending-off
@@ -78,7 +79,12 @@ class Match:
         if kind == "match_info":
             self.info = m
         elif kind == "action":
-            self.versions[m["event_id"]] = dict(m)
+            version = dict(m)
+            for c in self.early.pop(m["event_id"], []):  # a correction that overtook its action
+                if c["op"] != "void":
+                    version.update(c["changes"])
+                    version["version"] = c["new_version"]
+            self.versions[m["event_id"]] = version
             self._index(m["event_id"])
         elif kind == "correction":
             target = self.versions.get(m["target_event_id"])
@@ -87,6 +93,8 @@ class Match:
             elif target is not None:
                 target.update(m["changes"])
                 target["version"] = m["new_version"]
+            else:
+                self.early.setdefault(m["target_event_id"], []).append(m)
             self._index(m["target_event_id"])
         elif kind == "added_time":
             self.boards.setdefault(m["period"], []).append((m["seq"], float(m["minutes"])))

@@ -39,9 +39,15 @@ def test_demo_is_identical_under_random_network_trouble(demo):
     assert all(not d for name, d in demo["robustness"].items() if name != "goal_after_correction"), demo["robustness"]
 
 
-@pytest.mark.xfail(reason="Match._apply drops a reassign or update whose target action has not arrived yet, and the Spotter cards a goal that is already voided (docs/notes/evaluation.md)", strict=False)
-def test_a_goal_that_arrives_after_its_correction_still_gets_the_right_card_action(demo):
-    assert demo["robustness"]["goal_after_correction"] == []
+def test_a_goal_that_arrives_after_its_correction_ends_with_the_right_cards():
+    """When a correction overtakes its goal, the card is born corrected: a voided goal gets no card (nothing to retract), a reassigned goal gets the right scorer at once. What a viewer could see must be the same."""
+    stream, truth = generate_match(7, "demo", frames=False)
+
+    def on_air(result):
+        cards = snapshot(result)["cards"]
+        return {cid: (c[0], c[3], c[4]) for cid, c in cards.items() if c[1] != "retracted"}  # moment, team, player
+
+    assert on_air(run(arrivals(stream), desk=False)) == on_air(run(perturb(stream, "goal_after_correction", 7), desk=False))
 
 
 def test_the_targeted_perturbation_skips_matches_without_a_corrected_goal():
@@ -72,7 +78,6 @@ def test_the_report_is_deterministic():
     assert "## 1. Moments and cards" in render(r1) and json.loads(to_json(r1))["unscripted"]["matches"] == 2
 
 
-@pytest.mark.xfail(reason="Spotter.saves keeps a save waiting for any later keeper action: a late shot after its keeper save is credited to a save 46 minutes later (docs/notes/evaluation.md)", strict=False)
 def test_a_save_card_credits_the_keeper_action_right_after_its_shot():
     m = evaluate_match(*generate_match(53, frames=False), robustness=False)
     assert "mispaired_save" not in m["card_class"]
