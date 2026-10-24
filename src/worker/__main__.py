@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--truth", type=Path, help="ground truth of the replay, to score the cards against it")
     parser.add_argument("--live", action="store_true", help="read the Service Bus subscription instead of a file")
     parser.add_argument("--cosmos", action="store_true", help="write events, cards and the audit trail to Cosmos DB")
+    parser.add_argument("--desk-dir", type=Path, help="write cards, match state and audit as JSON files here (what the console reads without Cosmos DB)")
     parser.add_argument("--writer", choices=("none", "template", "foundry"), default="none", help="write the cards: fixed templates, or the Writer agent on Foundry")
     parser.add_argument("--auto-approve", action="store_true", help="put every written card on air without a producer (judging mode)")
     parser.add_argument("--threshold", type=float, default=0.08, help="minimum value of a chance that is not a goal, as a share of the result probabilities")
@@ -31,6 +32,10 @@ def main() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     sink = MemorySink()
+    if args.desk_dir:
+        from worker.pipeline import JsonFileSink
+
+        sink = JsonFileSink(args.desk_dir)
     if args.cosmos:
         from worker.azure_io import cosmos_from_env
 
