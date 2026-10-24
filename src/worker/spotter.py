@@ -84,6 +84,7 @@ class Spotter:
         score = self.match.score(shot["seq"])
         card = {
             "id": f"card-{a['event_id']}",
+            "type": "card",
             "match_id": self.match.match_id,
             "event_id": a["event_id"],
             "shot_event_id": shot["event_id"] if "shot" in shot else None,

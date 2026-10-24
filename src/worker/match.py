@@ -33,6 +33,8 @@ class Match:
     red_cards: dict[str, tuple[int, str]] = field(default_factory=dict)  # event id -> (seq, team) of each sending-off
     boards: dict[int, list[tuple[int, float]]] = field(default_factory=dict)  # period -> (seq, minutes) of each added-time board, in the order applied
     full_time_seq: int | None = None  # lowest sequence number of a final whistle
+    max_seq: int = 0  # highest sequence number applied
+    clock_seq: int | None = None  # highest sequence number applied of a message with a match clock
 
     # --- intake ---------------------------------------------------------------------------------
 
@@ -69,6 +71,9 @@ class Match:
 
     def _apply(self, m: dict) -> dict:
         self.by_seq[m["seq"]] = m
+        self.max_seq = max(self.max_seq, m["seq"])
+        if "clock_s" in m and (self.clock_seq is None or m["seq"] >= self.clock_seq):
+            self.clock_seq = m["seq"]
         kind = m["type"]
         if kind == "match_info":
             self.info = m

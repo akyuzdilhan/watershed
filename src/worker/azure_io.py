@@ -88,6 +88,9 @@ class CosmosSink:
     def audit_entry(self, entry: dict) -> None:
         self._upsert(self.audit, entry)
 
+    def state(self, doc: dict) -> None:
+        self._upsert(self.cards, doc)  # the match state lives next to the cards, with type "match_state"
+
 
 def cosmos_from_env() -> CosmosSink:
     return CosmosSink(os.environ["COSMOS_ENDPOINT"], os.environ.get("COSMOS_DATABASE", "watershed"))

@@ -514,3 +514,34 @@ def test_retries_give_up_after_the_last_attempt():
     with pytest.raises(HttpError):
         with_retry(down, attempts=4, sleep=lambda s: None)
     assert len(attempts) == 4
+
+
+def test_match_state_document_matches_a_full_scan(demo):
+    stream, truth = demo
+    pipeline, _ = offline(disorder(stream, random.Random(4)))
+    match = next(iter(pipeline.matches.values()))
+    doc = pipeline.sink.states[match.match_id]
+    clock = next(m for s, m in sorted(match.by_seq.items(), reverse=True) if "clock_s" in m)
+    assert doc["last_seq"] == max(match.by_seq) and doc["clock_s"] == clock["clock_s"] and doc["minute_label"] == clock["minute_label"]
+    assert doc["final"] and doc["score"] == truth["final_score"] == scan_score(match)
+    assert len(doc["wp_timeline"]) == sum(m["type"] == "action" for m in match.by_seq.values())
+
+
+def test_a_failed_completion_releases_the_session_and_the_loop_goes_on(demo):
+    stream, _ = demo
+    clock, log = FakeClock(), {}
+    sessions = {"lost": bodies(stream[:150]), "next": bodies(generate_match(3, frames=False)[0][:50])}
+    bus = fake_bus(sessions, clock, log)
+
+    def open_session(wait_s):
+        receiver = bus(wait_s)
+        if receiver.session.session_id == "lost":
+            def lock_lost(msg):
+                raise RuntimeError("session lock lost")
+            receiver.complete_message = lock_lost
+        return receiver
+
+    errors = ErrorLog()
+    stats = consume(Pipeline(), open_session, idle_s=30, clock=clock, errors=errors)
+    assert errors.counts[("session", "RuntimeError")] == 1
+    assert log["closed"] == ["lost", "next"] and stats["completed"] == 50
