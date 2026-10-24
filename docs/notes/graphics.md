@@ -1,0 +1,71 @@
+# Match graphics, tactical details, insights and storyline panels
+
+Everything here is computed from the feed's actions and their 360 freeze frames, with corrections applied (`src/web/matchfeed.py`: `update` and `reassign` merge their changes, `void` marks the action `voided` so a goal ruled out is still drawn as such). No model call, no Azure.
+
+## Graphics (`src/web/graphics.py`)
+
+| Function | What it shows |
+|---|---|
+| `shot_map` | Every shot on one pitch, home attacking right. Marker area grows with xG (size = 8 + 34 √xG px). Outcome by colour and shape: goal (yellow, filled), goal ruled out by VAR (purple cross), saved, post, blocked, off target. Header per team: goals, shots, xG. |
+| `buildup_figure` | The possession behind a goal or a big chance (xG ≥ 0.2), last 10 actions, as arrows over the players at the final action. Arrow width = threat added by the action (1.5 px for none, up to 12 px); the shot arrow's width is its xG, its colour its outcome. |
+| `set_piece_figure` | A corner or free kick animated in up to three steps: the frame at the delivery, the frame at the first contact, then what the contact did. The delivery arrow's width is the value of where it landed; a contact won by the attackers is sized by its threat added, a defensive contact is thin and grey. |
+| `set_pieces_map` | Every corner and crossed free kick of a team: arrow width by the value of the landing point, team colour when the attackers won the first contact, grey when they lost it. |
+| `momentum_figure` | Threat added per 5 minutes per team as mirrored bars (home up, away down), goals labelled (x for ruled out), and the desk's win-probability curve in a second panel with its own axis. The second half starts after the first half's added time. |
+| `shot_on_goal_figure` | A penalty or a direct free kick seen from behind the taker: where the ball crossed the goal line (`end_y`, `end_z`) and where the keeper stood in the frame. |
+| `line_break_figure`, `run_figure`, `space_figure`, `line_height_figure`, `pressing_figure` | The tactical details below. `run_figure` reuses `pitch.offside_figure` with the runner. |
+| `insight_figure(insight, feed)` | The figure an insight names in its `figure` field. |
+
+"Threat" is `worker.tactics.location_value`: the xG of an unblocked footed shot from a location, with the generator's provider xG constants. A pass's threat added is the value where it ended minus where it started. It is a simple, explainable surface, not a fitted expected-threat grid: it is near zero outside the final third, so the momentum bars mostly measure entries into dangerous areas.
+
+## Tactical details (`src/worker/tactics.py`)
+
+Pure functions on actions with frames. Frames are in the acting team's frame (it attacks towards x = 105).
+
+| Detector | Definition |
+|---|---|
+| `line_breaks` | Completed passes (the next action is a team-mate's, starting within 2 m of the pass end) and the outfield opponents standing strictly between the passer's x and the pass end's x. Keepers' passes are left out (a long ball from the keeper bypasses everyone by construction). This is the "packing" count, lateral position ignored. |
+| `runs_behind` | Passes in the opposition half that end beyond the offside line (second-last defender, keeper included). Runner: the player named by a VAR offside update, else the team-mate nearest the end of the pass. Margin positive = beyond the line. The official VAR figure is used when the feed has one (0.25 m at 63'; the frame shows 0.20 m because locations are rounded to 0.1 m). |
+| `space_at_reception` | Distance from the receiver (actor of the next action) to the nearest opponent, keeper included, in the frame of that next action. |
+| `pressure` | Opponents within 5 m of the player on the ball, open play only. |
+| `line_heights` | Each team's deepest outfield player, in metres from its own goal line. The figure plots it when the opponent has the ball. |
+
+`insight_candidates(actions, info, match_id)` builds documents per `docs/contracts.md` ("Lot 2 additions"), kind `tactical`, best first: the pass that bypassed the most defenders in the build-up of a goal (two at most), the tightest run behind the line before a goal (the 63' run 0.25 m beyond the line comes out at 88 points), the scorer with the most space at reception (when at least twice the match median), a defensive line that moved 3 m or more between the halves, a change of 20 % or more in pressing. Every number shown is in `headline_facts`, every field has its meaning in `field_meanings` (the function refuses a fact without one), `rarity` is measured within the match ("7 defenders bypassed: 26 of 930 completed passes in this match"), `value` (0 to 100) is a hand-set ranking, and `figure` names the figure to draw. On the demo: the 82' pass by #10 that bypassed 7 defenders before #20's fourth goal, the 63' run, the 57' pass that bypassed 6 before #20's second goal, United's 14' run 0.40 m inside the line, United's line 3.1 m deeper after the break.
+
+The insight engine (another lot) owns the history-based insights; these candidates are for it or for the Writer to take. They carry `status: proposed` and no texts.
+
+## Console and overlay
+
+The console (`/`) has a view switch in its header: Desk (unchanged), Match graphics, Insights and storyline (`src/web/panels.py`).
+
+- **Match graphics**: a kind (shot map, momentum and win probability, build-ups, corners and free kicks, penalties and direct free kicks, tactical details) and an item (which goal, which set piece, which line break, run or reception). The 8 biggest line breaks, the 8 tightest runs and the 6 freest receptions are listed.
+- **Insights and storyline**: the insight documents of the desk (`insights.json` or Cosmos docs with `type: insight`), highest value first, with texts, commentary duo lines, facts with their meanings, rarity basis and figure; Approve and Reject. When the desk holds no insight, the list shows the candidates computed from the feed, labelled as such, with nothing to approve. The storyline (`storyline.json` or `storyline-<match_id>`) with texts, duo, facts and meanings, Approve and Reject.
+- **Cards**: the selected card shows its `duo` lines under "Commentary" when present.
+- **Decisions on insights and storyline**: `Store.decide_doc` calls the desk's `approve_insight` / `reject_insight` (or `_storyline`) if it has them, else the generic `approve` / `reject`; the local sink files the document by its `type` (insights.json, storyline.json, cards.json), the audit entry carries the document id as `card_id`. A desk with neither shows "The desk cannot decide insights or storylines yet".
+- **Overlay**: an approved insight with texts can take the lower-third, tagged "The detail" (fr "Le détail", es "El detalle"), purple border. Same rule as cards: the latest approval in the audit. The overlay still imports only `web.store` (which now imports `web.matchfeed`, plain Python); a test checks it never loads `worker`, `web.graphics`, `web.panels` or `web.console`.
+
+Where the feed comes from: locally `<DESK_DIR>/<match>/feed.jsonl[.gz]`, else `<REPLAY_DIR>/<match>.jsonl[.gz]` (`REPLAY_DIR` defaults to `data/replay`); in Azure the `events` container, read incrementally by `_ts`. While the match state is not final, the feed is cut at its `last_seq`, so a replay file does not show what the desk has not reached yet. The feed is cached 5 s per process.
+
+Rate limit: the desk already ticks every 1.5 s (about 80 requests a minute for two callbacks). The graphics and insights panels refresh every 5 s with their own timers, enabled only while their view is shown. Before that change, four callbacks on the shared tick went past the 120 per minute limit and the console got 429s.
+
+## How to view
+
+```
+set PYTHONPATH=src
+.venv\Scripts\python.exe -m worker data/replay/demo-0007.jsonl.gz --writer template --desk-dir data/desk
+set DESK_DIR=data/desk
+set PUBLIC_MODE=0
+.venv\Scripts\python.exe -m web.app        # http://127.0.0.1:8050/, header: Match graphics, Insights and storyline
+```
+
+Standalone HTML of any figure: `graphics.shot_map(matchfeed.build(matchfeed.load(path))).write_html("shots.html", include_plotlyjs="cdn")`.
+
+## Limits
+
+- The frames come from the generator's `Shape`, not tracking data. The nearest defender always closes the ball down to 1.2 to 5 m when within 15 m, so pressing is almost always one player (the pressing figure is flat and the pressing insight rarely fires) and space at reception has a median near 3 m. Attackers stay onside unless a run is planted. Locations are rounded to 0.1 m.
+- The packing count ignores lateral distance: a defender 30 m away across the pitch counts if he is between the passer and the receiver along its length.
+- Threat added uses a shot-value surface, not a possession-value model; carries count as much as passes.
+- A first contact is the next action in the feed; an aerial duel or a flick-on that the feed does not record is invisible.
+- The build-up title carries the feed's score at the shot, so a goal later ruled out shows the score with it.
+- Insight `value` weights are hand-set; `rarity` is within the match, not against a history.
+- In Cosmos the first read of a match's events reads every message (about 1,800 for a match, frames included); later reads are incremental.
+- Not checked in a deployed container; the web image already ships `src/` (it needs `worker/tactics.py`).

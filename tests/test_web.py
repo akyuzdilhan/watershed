@@ -9,7 +9,7 @@ from dash import no_update
 from flask import Flask
 
 from generator import generate_match
-from web import console, overlay, security, store
+from web import console, overlay, panels, security, store
 from web.app import app, route
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, Pipeline
@@ -275,3 +275,141 @@ def test_rate_limit_answers_429_on_pages_and_callbacks_only():
     assert client.get("/", headers=other).status_code == 200  # the address the ingress appended
     spoofed = {"X-Forwarded-For": "1.1.1.1, 127.0.0.1"}
     assert client.get("/", headers=spoofed).status_code == 429  # a forged first entry does not reset the count
+
+
+# --- match graphics, insights and storyline -------------------------------------------------------
+
+REPLAY_DIR = Path(__file__).resolve().parents[1] / "data" / "replay"
+
+
+@pytest.fixture
+def feed_desk(desk):
+    desk.replay_dir = REPLAY_DIR
+    return desk
+
+
+def component_ids(component) -> set:
+    out = set()
+    if isinstance(component, (list, tuple)):
+        for c in component:
+            out |= component_ids(c)
+        return out
+    if hasattr(component, "to_plotly_json"):
+        if getattr(component, "id", None):
+            out.add(component.id)
+        out |= component_ids(getattr(component, "children", None))
+    return out
+
+
+def write_docs(s: store.FileStore, with_texts: bool = True) -> list[dict]:
+    from worker.tactics import insight_candidates
+
+    feed = s.feed(MATCH)
+    docs = insight_candidates(feed["actions"], feed["info"], MATCH)
+    for d in docs:
+        d["status"] = "pending"
+        if with_texts:
+            d["texts"] = [{"lang": "en", "headline": f"Detail {d['key']}", "why": "Checked against the frames.", "claims": []}]
+            d["duo"] = [{"speaker": "Ada", "lang": "en", "line": "Look at that run!", "claims": []}, {"speaker": "Bram", "lang": "en", "line": "A quarter of a metre.", "claims": []}]
+    (s.root / MATCH / "insights.json").write_text(json.dumps(docs), encoding="utf-8")
+    (s.root / MATCH / "storyline.json").write_text(json.dumps({"id": f"storyline-{MATCH}", "type": "storyline", "match_id": MATCH, "status": "pending",
+                                                               "facts": {"home_position": 4}, "field_meanings": {"home_position": "Rovers table position"},
+                                                               "texts": [{"lang": "en", "headline": "Fourth against sixth", "why": "A top-four duel."}]}), encoding="utf-8")
+    return docs
+
+
+def test_console_layout_has_the_view_switch_and_the_new_panels():
+    ids = component_ids(console.layout("producer-1"))
+    assert {"c-view", "c-pane-desk", "c-pane-graphics", "c-pane-insights", "c-g-figure", "c-i-list", "c-s-detail", "c-g-tick", "c-i-tick"} <= ids
+    desk_style, graphics_style, insights_style, g_off, i_off = panels.view_styles("graphics")
+    assert graphics_style == {} and desk_style == insights_style == {"display": "none"} and (g_off, i_off) == (False, True)
+    assert panels.view_styles(None)[3:] == (True, True)  # a hidden panel sends no request
+
+
+def test_graphics_tab_draws_every_kind_from_the_feed(feed_desk):
+    for kind in [k["value"] for k in panels.KINDS]:
+        options, value, fig, note, sig = panels.graphics(MATCH, kind, None, "graphics", None, feed_desk)
+        assert sig and note and len(fig.data) >= 1, kind
+        if kind not in ("shots", "momentum"):
+            assert options and value == (options[-1]["value"] if kind == "buildups" else options[0]["value"]), kind
+        assert panels.graphics(MATCH, kind, value if value is not no_update else None, "graphics", sig, feed_desk)[2] is no_update  # unchanged: nothing re-sent
+    _, _, fig, _, _ = panels.graphics(MATCH, "momentum", None, "graphics", None, feed_desk)
+    assert len(fig.data) == 5  # threat bars and the desk's win-probability curve
+    _, _, fig, _, _ = panels.graphics(MATCH, "tactics", "run:demo-0007-v2-a01178:home-20", "graphics", None, feed_desk)
+    assert fig.layout.meta["offside"]["margin_m"] == 0.25
+    assert panels.graphics(MATCH, "shots", None, "desk", None, feed_desk) == (no_update,) * 5  # hidden tab
+
+
+def test_graphics_tab_without_a_feed_says_so(desk, tmp_path):
+    desk.replay_dir = tmp_path
+    _, _, fig, _, _ = panels.graphics(MATCH, "shots", None, "graphics", None, desk)
+    assert "No feed" in fig.layout.annotations[0].text
+
+
+def test_a_running_match_shows_only_what_the_desk_has_seen(feed_desk):
+    path = feed_desk.root / MATCH / "state.json"
+    state = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps(dict(state, final=False, last_seq=600)), encoding="utf-8")
+    feed = feed_desk.feed(MATCH)
+    assert feed["last_seq"] <= 600 and not any(a.get("voided") for a in feed["actions"])
+
+
+def test_insights_panel_without_files_lists_the_feed_candidates(feed_desk):
+    options, value, detail, fig, story, a_off, r_off, sa_off, sr_off, sig = panels.insights(MATCH, None, "insights", None, store=feed_desk)
+    assert options and value and a_off and r_off and sa_off and sr_off
+    assert "Candidate computed from the feed" in texts_in(detail) and "No storyline" in texts_in(story)
+    assert len(fig.data) > 0
+
+
+def test_insights_without_any_feed_or_file(desk, tmp_path):
+    desk.replay_dir = tmp_path
+    options, value, detail, *_ = panels.insights(MATCH, None, "insights", None, store=desk)
+    assert options == [] and value is no_update and "No insight yet" in texts_in(detail)  # nothing to select: the selection is left alone
+
+
+def test_insights_and_storyline_are_decided_through_the_desk_and_reach_the_overlay(feed_desk):
+    docs = write_docs(feed_desk)
+    run = next(d for d in docs if d["key"] == "run-demo-0007-v2-a01178")
+    options, value, detail, fig, story, a_off, r_off, sa_off, sr_off, _ = panels.insights(MATCH, run["id"], "insights", None, store=feed_desk)
+    assert [o["value"] for o in options] == [d["id"] for d in sorted(docs, key=lambda d: -d["value"])]
+    assert not a_off and not r_off and not sa_off and "Fourth against sixth" in texts_in(story)
+    assert "A quarter of a metre." in texts_in(detail) and fig.layout.meta["offside"]["margin_m"] == 0.25
+    assert panels.decide_doc("approve", MATCH, run["id"], None, feed_desk) == ("Sign in to approve or reject.", False)
+    message, done = panels.decide_doc("approve", MATCH, run["id"], "producer-1", feed_desk)
+    assert done, message
+    stored = {d["id"]: d for d in json.loads((feed_desk.root / MATCH / "insights.json").read_text(encoding="utf-8"))}
+    assert stored[run["id"]]["status"] == "approved" and len(stored) == len(docs)
+    assert len(json.loads((feed_desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))) == 11  # cards untouched
+    assert ("approved", "producer-1") in audit_of(feed_desk, run["id"])
+    shown = overlay.render(f"?match={MATCH}&lang=en", store=feed_desk)
+    assert f"Detail {run['key']}" in texts_in(shown) and "The detail" in texts_in(shown)
+    assert panels.decide_doc("approve", MATCH, f"storyline-{MATCH}", "producer-1", feed_desk)[1]
+    assert json.loads((feed_desk.root / MATCH / "storyline.json").read_text(encoding="utf-8"))["status"] == "approved"
+    assert panels.decide_doc("approve", MATCH, "insight-unknown", "producer-1", feed_desk)[1] is False
+
+
+def test_an_insight_without_texts_never_reaches_the_overlay(feed_desk):
+    docs = write_docs(feed_desk, with_texts=False)
+    assert panels.decide_doc("approve", MATCH, docs[0]["id"], "producer-1", feed_desk)[1]
+    assert "ov-empty" in overlay.render(f"?match={MATCH}", store=feed_desk)[-1].className
+
+
+def test_decisions_degrade_when_the_desk_cannot_decide_insights(feed_desk):
+    docs = write_docs(feed_desk)
+    feed_desk._desk = object()  # a desk without approve or reject
+    message, done = panels.decide_doc("approve", MATCH, docs[0]["id"], "producer-1", feed_desk)
+    assert not done and "cannot decide" in message
+
+
+def test_card_detail_shows_the_commentary_duo(desk):
+    card = dict(card_at(desk, "66'"), duo=[{"speaker": "Ada", "lang": "en", "line": "He has done it again!", "claims": []},
+                                           {"speaker": "Bram", "lang": "fr", "line": "Troisième but.", "claims": []}])
+    text = texts_in(console.detail(card, []))
+    assert "He has done it again!" in text and "Troisième but." in text and "Commentary" in text
+    assert "Commentary" not in texts_in(console.detail(card_at(desk, "66'"), []))
+
+
+def test_overlay_never_loads_the_graphics_or_the_worker():
+    code = "import sys, json, web.overlay; print(json.dumps(sorted(m for m in sys.modules if m.startswith(('worker', 'web.graphics', 'web.panels', 'web.console')))))"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env={**os.environ, "PYTHONPATH": str(SRC)}).stdout
+    assert json.loads(out) == []

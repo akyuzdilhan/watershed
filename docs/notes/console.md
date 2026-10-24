@@ -53,4 +53,4 @@ Build: `azure.yaml` must build the web service from the repository root with `sr
 - The win-probability curve plots the timeline as recorded: a goal later ruled out still shows its spike, then the drop.
 - The decision message stays under the buttons when another card is selected.
 - The overlay picks the latest approval by audit order; with Cosmos the order uses `at` (desk entries) or `_ts`.
-- No pitch view: `src/web/pitch.py` (another branch) is not wired in.
+- Pitch views, match graphics, insights and storyline are in the console since lot 2: see `docs/notes/graphics.md`.

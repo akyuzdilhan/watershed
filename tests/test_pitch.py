@@ -1,4 +1,5 @@
 import json
+import math
 import re
 import socket
 from pathlib import Path
@@ -128,3 +129,104 @@ def test_export_writes_html(match, tmp_path):
     names = {p.name for p in written}
     assert {"goal-63-offside.html", "goal-63-offside-zoom.html", "goal-63-buildup.html"} <= names
     assert all(p.stat().st_size < 200_000 for p in written if p.suffix == ".html")
+
+
+# --- match graphics ------------------------------------------------------------------------------------
+
+from generator import generate_match  # noqa: E402
+from web import graphics, matchfeed  # noqa: E402
+from worker import tactics  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def demo_feed():
+    return matchfeed.build(load(REPLAY))
+
+
+def annotation_arrows(fig) -> list:
+    return [a for a in fig.layout.annotations if a.showarrow and a.axref == "x"]
+
+
+def test_shot_map_puts_every_shot_in_its_outcome_and_sets_voided_goals_apart(demo_feed):
+    fig = graphics.shot_map(demo_feed)
+    by_name = {t.name: t for t in fig.data}
+    assert sum(len(t.x) for t in fig.data) == len(graphics.shots(demo_feed)) == 22
+    assert len(by_name["Goal ruled out (VAR)"].x) == 2 and len(by_name["Goal"].x) == 7
+    xgs = [a["shot"]["xg"] for a in demo_feed["actions"] if tactics.counted_goal(a)]
+    assert sorted(by_name["Goal"].marker.size) == pytest.approx(sorted(8 + 34 * math.sqrt(xg) for xg in xgs))
+    on_pitch(fig)
+
+
+def test_buildup_arrows_widen_with_the_threat_added(demo_feed):
+    for m in graphics.moments(demo_feed):
+        fig = graphics.buildup_figure(demo_feed, m["event_id"])
+        assert fig.layout.meta["buildup"][-1] == m["event_id"]
+        assert annotation_arrows(fig)
+    assert graphics.arrow_width(0) == 1.5 and graphics.arrow_width(0.05) > graphics.arrow_width(0.01) and graphics.arrow_width(5) == 12
+    assert "ruled out by VAR" in graphics.buildup_figure(demo_feed, "demo-0007-v2-a01179").layout.title.text
+
+
+def test_set_piece_animation_runs_from_delivery_to_first_contact(demo_feed):
+    corners = [a for a in demo_feed["actions"] if a["action_type"] == "corner_crossed"]
+    assert corners
+    for c in corners:
+        fig = graphics.set_piece_figure(demo_feed, c["event_id"])
+        assert fig.layout.meta["steps"][0] == c["event_id"] and len(fig.frames) >= 2
+        widths = [a.arrowwidth for a in fig.frames[-1].layout.annotations]
+        assert widths and widths[0] == graphics.arrow_width(tactics.location_value(c["end_x"], c["end_y"]))
+    for side in ("home", "away"):
+        assert graphics.set_pieces_map(demo_feed, side).layout.title.text
+
+
+def test_momentum_bars_sum_the_threat_added_and_carry_the_curve(demo_feed):
+    series = graphics.momentum_series(demo_feed)
+    total = sum(max(tactics.threat_added(a), 0) for a in demo_feed["actions"] if a["team"] == "home")
+    assert math.isclose(sum(p["threat"] for p in series["home"]), total, abs_tol=0.01)
+    timeline = [{"seq": a["seq"], "event_id": a["event_id"], "clock_s": a["clock_s"], "minute_label": a["minute_label"], "home": 0.4, "draw": 0.3, "away": 0.3}
+                for a in demo_feed["actions"][::50]]
+    fig = graphics.momentum_figure(demo_feed, timeline)
+    assert [t.type for t in fig.data] == ["bar", "bar", "scatter", "scatter", "scatter"]
+    xs = list(fig.data[2].x)
+    assert xs == sorted(xs)  # the second half continues after the first-half added time
+    assert len(graphics.momentum_figure(demo_feed, None).data) == 2
+
+
+def test_penalty_and_direct_free_kick_views():
+    stream, _ = generate_match(14)  # an unscripted match with a penalty
+    feed = matchfeed.build(stream)
+    pen = next(a for a in feed["actions"] if a["action_type"] == "shot_penalty")
+    fig = graphics.shot_on_goal_figure(feed, pen["event_id"])
+    assert math.isclose(fig.layout.meta["ball_h"], (pitch.WIDTH - pen["end_y"]) - pitch.MID_Y, abs_tol=0.01)
+    assert "Penalty" in fig.layout.title.text
+    fk = next(a for a in feed["actions"] if a["action_type"] == "shot_freekick")
+    assert "Free kick" in graphics.shot_on_goal_figure(feed, fk["event_id"]).layout.title.text
+
+
+def test_tactical_figures_show_the_measured_numbers(demo_feed):
+    assert len(graphics.line_break_figure(demo_feed, "demo-0007-v2-a01454").layout.meta["bypassed_ids"]) == 7
+    assert graphics.run_figure(demo_feed, "demo-0007-v2-a01178", "home-20").layout.meta["offside"]["margin_m"] == 0.25
+    reception = tactics.space_at_reception(demo_feed["actions"])[0]
+    assert graphics.space_figure(demo_feed, reception["event_id"]).layout.meta["space_m"] == reception["space_m"]
+    assert len(graphics.line_height_figure(demo_feed).data) == 2 and len(graphics.pressing_figure(demo_feed).data) == 2
+
+
+@pytest.mark.parametrize("seed", [2, 5, 14, 21])
+def test_every_graphic_builds_on_unscripted_seeds(seed):
+    stream, _ = generate_match(seed)
+    feed = matchfeed.build(stream)
+    figs = [graphics.shot_map(feed), graphics.momentum_figure(feed), graphics.line_height_figure(feed), graphics.pressing_figure(feed)]
+    figs += [graphics.buildup_figure(feed, m["event_id"]) for m in graphics.moments(feed)]
+    figs += [graphics.set_piece_figure(feed, a["event_id"]) for a in graphics.set_pieces(feed) if a["action_type"] in graphics.SET_PIECES][:5]
+    figs += [graphics.shot_on_goal_figure(feed, a["event_id"]) for a in graphics.set_pieces(feed) if a["action_type"] in graphics.DIRECT]
+    for d in tactics.insight_candidates(feed["actions"], feed["info"]):
+        fig = graphics.insight_figure(d, feed)
+        assert fig is not None, d["key"]
+        figs.append(fig)
+    for fig in figs:
+        fig.to_json()
+
+
+def test_insight_figures_on_the_demo(demo_feed):
+    docs = tactics.insight_candidates(demo_feed["actions"], demo_feed["info"], "demo-0007")
+    assert docs and all(graphics.insight_figure(d, demo_feed) is not None for d in docs)
+    assert graphics.insight_figure({"figure": {"kind": "line_break", "event_id": "missing"}}, demo_feed) is None
