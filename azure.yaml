@@ -1,10 +1,21 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 name: watershed
 services:
+  # Both images build from the repository root (docker.context is relative to the project folder),
+  # so they can install the watershed package from pyproject.toml and src/. See .dockerignore.
   web:
     project: ./src/web
     language: py
     host: containerapp
     docker:
       path: Dockerfile
+      context: ../..
+      remoteBuild: true
+  worker:
+    project: ./src/worker
+    language: py
+    host: containerapp
+    docker:
+      path: Dockerfile
+      context: ../..
       remoteBuild: true
