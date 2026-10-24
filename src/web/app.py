@@ -1,18 +1,36 @@
-"""Watershed web console. First deployment: a single page that proves the hosting works."""
+"""Watershed web app: the producer console at `/`, the public overlay at `/overlay`.
 
-from dash import Dash, html
+Run locally: `DESK_DIR=data/desk PUBLIC_MODE=0 python -m web.app` (from `src/`, or with `src` on the path). In the container, gunicorn serves `web.app:server`.
+"""
 
-app = Dash(__name__, title="Watershed")
+import os
+
+from dash import Dash, Input, Output, dcc, html
+
+from web import console, overlay, security
+
+app = Dash(__name__, title="Watershed", update_title=None, suppress_callback_exceptions=True)
 server = app.server
+security.install(server)
 
-app.layout = html.Main(
-    [
-        html.H1("Watershed"),
-        html.P("Football's fine margins, measured live and explained to you."),
-        html.P("Work in progress. Synthetic data only."),
-    ],
-    style={"fontFamily": "system-ui, sans-serif", "maxWidth": "720px", "margin": "48px auto", "padding": "0 16px"},
-)
+app.layout = html.Div([dcc.Location(id="url", refresh=False), html.Div(id="page")])
+
+
+def route(pathname: str | None):
+    path = (pathname or "/").rstrip("/") or "/"
+    if path == "/overlay":
+        return overlay.layout()
+    if path == "/":
+        user = security.producer()
+        return console.layout(user) if user else console.sign_in()
+    return html.Div([html.H1("Not found"), html.A("Overlay", href="/overlay")], className="sign-in")
+
+
+app.callback(Output("page", "children"), Input("url", "pathname"))(route)
+console.register(app)
+overlay.register(app)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    os.environ.setdefault("PUBLIC_MODE", "0")
+    # load_dotenv off: Flask would otherwise pick up a parent .env with COSMOS_ENDPOINT and read the cloud desk
+    app.run(debug=os.environ.get("DASH_DEBUG", "0") == "1", port=int(os.environ.get("PORT", "8050")), load_dotenv=False)
