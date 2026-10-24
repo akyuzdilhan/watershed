@@ -425,7 +425,7 @@ def test_storyline_goes_through_the_same_path():
 ENGINE_FACTS = {  # the headline facts the insight engine gives a substitute's four goals and a comeback
     "scorer-home-20-4": {"player": "Dorian Lightfoot", "team": "Rovers", "goals": 4, "goal_minutes": "52', 57', 66', 83'", "substitute": True, "came_on": "46'",
                          "history_count": 0, "history_opportunities": 19000, "history_since": "1976/77", "history_seasons": 50},
-    "comeback-home-2-3": {"team": "Rovers", "opponent": "United", "deficit_goals": 2, "trailing_score": "0-2", "stage": "won", "score": "5-2", "club_last_season": "2019/20",
+    "comeback-home-2-3": {"team": "Rovers", "opponent": "United", "deficit_goals": 2, "trailing_score": "0-2", "stage": "won", "score": "5-2", "club_last_season": "2019/20", "club_seasons_since": 7,
                           "history_count": 114, "history_opportunities": 9579, "history_since": "1976/77", "history_seasons": 50, "history_per_season": 2.3, "one_in": 83,
                           "last_season": "2025/26", "last_match": "Stellbury 4-3 Netherwick"},
 }
@@ -438,7 +438,7 @@ def test_engine_insights_get_texts_with_their_numbers():
         out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(doc, TEAMS)
         assert out["verification"]["verified"] and out["duo"]
         en = next(t for t in out["texts"] if t["lang"] == "en")
-        assert {c["source_field"] for c in en["claims"]} & {"history_seasons", "history_per_season"}  # rarity told in seasons
+        assert {c["source_field"] for c in en["claims"]} & {"history_seasons", "club_seasons_since"}  # rarity told in seasons, for who did it
         whys = " ".join(t["why"] for t in out["texts"]).replace("\u202f", " ")
         assert not any(n in whys for n in ("9,579", "19,000", "9 579", "19 000", "9.579", "19.000"))  # never in matches
 

@@ -859,16 +859,16 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
     vals, fields = it.values(facts, lang)
 
     def pool(templates: list[str]) -> list[str]:
-        return [it.with_extras(x, vals, lang, facts) for x in templates if it.usable(x, facts)]
+        return [it.clean(x) for x in templates if it.usable(x, facts)]
 
-    headline = pick.headline([pool(it.headlines(t, facts))], vals, fields, "headline")
-    why = pick.line(pool(t["whys"]), vals, fields, "why")
+    headline = pick.headline([pool(it.part(t, "headlines", facts))], vals, fields, "headline")
+    why = pick.line(pool(it.part(t, "whys", facts)), vals, fields, "why")
     if not headline or not why:
         return None
     text, claims = headline[0], headline[1]
     body, body_claims = why
     if "top_fact" in facts:  # the stat of the match
-        names = " ".join(str(v) for v in facts.values() if isinstance(v, str))
+        names = {w for v in facts.values() if isinstance(v, str) for w in v.split()}
         text = it.STAT_PREFIX[lang] + (text if text.split()[0] in names else text[:1].lower() + text[1:])
         extra = fill(it.STAT_WHY[lang], vals, fields)
         if extra:
@@ -876,8 +876,8 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
     out = {"headline": text, "why": body, "lang": lang, "claims": claims + body_claims}
     lines = []
     if duo:
-        heart = pick.line(pool(t["heart"]), vals, fields, "heart")
-        eye = pick.line(pool(t["eye"]), vals, fields, "eye")
+        heart = pick.line(pool(it.part(t, "heart", facts)), vals, fields, "heart")
+        eye = pick.line(pool(it.part(t, "eye", facts)), vals, fields, "eye")
         if not heart or not eye:
             return None
         lines = [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]

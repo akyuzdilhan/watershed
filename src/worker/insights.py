@@ -211,6 +211,8 @@ class InsightEngine:
         if r["occurrences"] is not None:
             seasons = len(self.view.seasons)
             facts |= {"history_count": r["occurrences"], "history_opportunities": r["opportunities"], "history_since": self.view.first_season, "history_seasons": seasons}
+            facts["history_rank"] = r["occurrences"] + 1
+            meanings["history_rank"] = "this one's rank in the league history, counting it: 6 means the sixth time"
             if seasons and r["occurrences"] >= seasons:  # "about 2.3 times a season" speaks to a viewer; "114 in 9,579" does not
                 per = r["occurrences"] / seasons
                 facts["history_per_season"] = int(round(per)) if per >= 10 else round(per, 1)
