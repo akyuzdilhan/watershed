@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from worker.duo import fr_de
-from worker.writer import LANGUAGES, MACHINE_TRANSLATED, names_ok, sentences, shown, verify
+from worker.writer import LANGUAGES, MACHINE_TRANSLATED, names_ok, offside_call, sentences, shown, verify
 
 MAX_WORDS = {"recap": 80, "fan": 50, "analyst": 60}
 HALF_TIME_GAP_S = 120  # the match clock goes back to 45:00 at the start of the second half
@@ -211,9 +211,9 @@ def recap_facts(analysis: dict, fan_side: str | None = None) -> tuple[dict, dict
         facts |= {f"disallowed_{i}_minute": g["minute_label"], f"disallowed_{i}_team": teams[g["team"]], f"disallowed_{i}_player": g["player"], f"disallowed_{i}_reason": g["reason"]}
         meanings |= {f"disallowed_{i}_minute": f"minute of goal {i} that VAR ruled out: it does not count", f"disallowed_{i}_team": f"team whose goal {i} was ruled out",
                      f"disallowed_{i}_player": f"player whose goal {i} was ruled out", f"disallowed_{i}_reason": f"why VAR ruled goal {i} out (offside, handball or other)"}
-        if g.get("margin_cm") is not None:
-            facts[f"disallowed_{i}_margin_cm"] = g["margin_cm"]
-            meanings[f"disallowed_{i}_margin_cm"] = f"by how much the player was offside for goal {i}, in centimetres"
+        if g.get("margin_cm") is not None and g["reason"] == "offside":
+            facts[f"disallowed_{i}_offside_call"] = offside_call(g["margin_cm"])
+            meanings[f"disallowed_{i}_offside_call"] = f"how close the offside was for goal {i}: tight or clear (the margin in cm stays off air)"
 
     roles = {"F": s[fan], "R": s[analyst], "W": s[winner] if winner else None, "T": s[tp["side"]] if tp else None,
              "fan_result": "draw" if not winner else "won" if fan == winner else "lost", "tp_moment": tp["moment"] if tp else None,
@@ -315,7 +315,8 @@ DISALLOWED = {  # goals ruled out by VAR: one sentence in the recap, one in the 
     "recap": {"en": ("VAR ruled out {items}.", "{player}'s goal at {minute}", " and "), "fr": ("La VAR a refusé {items}.", "le but {de_player} à {minute}", " et "),
               "es": ("El VAR anuló {items}.", "el gol de {player} en el {minute}", " y ")},
     "analyst": {"en": ("VAR: {items}.", "{minute}{reason}", ", "), "fr": ("VAR : {items}.", "{minute}{reason}", ", "), "es": ("VAR: {items}.", "{minute}{reason}", ", ")},
-    "with_margin": {"en": " ({reason} by {margin} cm)", "fr": " ({reason} de {margin} cm)", "es": " ({reason} por {margin} cm)"},
+    "offside_call": {"en": {"tight": " (offside by a whisker)", "clear": " (clear offside)"}, "fr": {"tight": " (hors-jeu d'un rien)", "clear": " (hors-jeu net)"},
+                     "es": {"tight": " (fuera de juego por muy poco)", "clear": " (fuera de juego claro)"}},
     "reason_only": {"en": " ({reason})", "fr": " ({reason})", "es": " ({reason})"},
 }
 
@@ -330,8 +331,8 @@ def disallowed_sentence(section: str, lang: str, facts: dict, count: int) -> str
         reason = REASONS.get(facts.get(f"disallowed_{i}_reason"), {}).get(lang)
         text = item.replace("{de_player}", de_player).replace("{player}", player).replace("{minute}", "{disallowed_%d_minute}" % i)
         detail = ""
-        if reason and f"disallowed_{i}_margin_cm" in facts:
-            detail = DISALLOWED["with_margin"][lang].replace("{reason}", reason).replace("{margin}", "{disallowed_%d_margin_cm}" % i)
+        if f"disallowed_{i}_offside_call" in facts:
+            detail = DISALLOWED["offside_call"][lang][facts[f"disallowed_{i}_offside_call"]]
         elif reason:
             detail = DISALLOWED["reason_only"][lang].replace("{reason}", reason)
         items.append(text.replace("{reason}", detail) if "{reason}" in text else text + detail)

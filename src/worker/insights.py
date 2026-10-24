@@ -209,10 +209,15 @@ class InsightEngine:
         meanings |= {"one_in": "how rare the fact is: it happens about once in this many opportunities (Laplace-smoothed frequency, or the model probability)",
                      "surprisal_bits": "rarity in bits, -log2 of the probability: one more bit is twice as rare"}
         if r["occurrences"] is not None:
-            facts |= {"history_count": r["occurrences"], "history_opportunities": r["opportunities"], "history_since": self.view.first_season}
+            seasons = len(self.view.seasons)
+            facts |= {"history_count": r["occurrences"], "history_opportunities": r["opportunities"], "history_since": self.view.first_season, "history_seasons": seasons}
+            if seasons and r["occurrences"] >= seasons:  # "about 2.3 times a season" speaks to a viewer; "114 in 9,579" does not
+                per = r["occurrences"] / seasons
+                facts["history_per_season"] = int(round(per)) if per >= 10 else round(per, 1)
+                meanings["history_per_season"] = "how many times a season it happens on average in the league history"
             meanings |= {"history_count": f"how many times it happened in the league history ({f.query.what})",
                          "history_opportunities": f"how many {f.query.unit} the history counts",
-                         "history_since": "first season of the league history"}
+                         "history_since": "first season of the league history", "history_seasons": "how many seasons the league history covers"}
         if r["last"]:
             facts |= {"last_season": r["last"]["season"], "last_match": r["last"]["match"]}
             meanings |= {"last_season": "season of the last time it happened", "last_match": "the match it last happened in, with its final score"}

@@ -1,6 +1,6 @@
 """Fallback texts and duo lines of the insights the engine produces, by family of fact, with the numbers of `headline_facts`.
 
-The generic lines of `writer.INSIGHT_TEMPLATES` stay for the kinds not covered here. Each number is a placeholder named after its fact field, so `duo.fill` claims it against that field and the Verifier checks it.
+The generic lines of `writer.INSIGHT_TEMPLATES` stay for the kinds not covered here. Each number is a placeholder named after its fact field, so `duo.fill` claims it against that field and the Verifier checks it. Rarity is told in seasons, a unit a viewer can picture ("never in 50 seasons", "about twice a season"), not in matches ("0 in 19,000").
 """
 
 from worker.duo import fr_typography
@@ -31,60 +31,81 @@ class Dec(float):
         return f"{float(self):g}".replace(".", DEC[self.lang])
 
 
-STAGE = {  # what a comeback or a lost lead reached, as a verb phrase
-    "en": {"level": "drew level", "ahead": "went ahead", "won": "won", "behind": "fell behind", "lost": "lost", "drawn": "only drew"},
-    "fr": {"level": "ont égalisé", "ahead": "sont passées devant", "won": "ont gagné", "behind": "sont passées derrière", "lost": "ont perdu", "drawn": "ont été rejointes"},
-    "es": {"level": "empataron", "ahead": "se pusieron por delante", "won": "ganaron", "behind": "se vieron por detrás", "lost": "perdieron", "drawn": "acabaron empatando"},
+STAGE = {  # what one team reached after a comeback or a lost lead, as a verb in the singular
+    "en": {"level": "draws level", "ahead": "goes ahead", "won": "wins", "behind": "falls behind", "lost": "loses", "drawn": "is pegged back"},
+    "fr": {"level": "égalise", "ahead": "passe devant", "won": "gagne", "behind": "passe derrière", "lost": "perd", "drawn": "se fait rejoindre"},
+    "es": {"level": "empata", "ahead": "se pone por delante", "won": "gana", "behind": "se ve por detrás", "lost": "pierde", "drawn": "se deja empatar"},
 }
 
 T = {  # family -> lang -> {headlines, whys, heart, eye}; a template whose placeholder is missing from the facts is skipped
     "scorer": {
         "en": {"headlines": ["{player}: {goals} goals off the bench", "On at {came_on}, {player} now has {goals}", "{player} reaches {goals}"],
-               "whys": ["On at {came_on}, {player} has scored: {goal_minutes}. No substitute had done it in {history_opportunities} league matches since {history_since}.{never}",
-                        "{player} has scored: {goal_minutes}. A substitute had done it in {history_count} of {history_opportunities} league matches since {history_since}.{seen}"],
-               "heart": ["{player} again! Joss, has anyone ever done this?", "{goals} for {player}! {player} only came on at {came_on}!"],
-               "eye": ["Not once, Wren: {history_opportunities} matches since {history_since}, and no substitute had scored {goals}.{never}",
-                       "{history_count} times in {history_opportunities} matches since {history_since}. Rare company.{seen}"]},
+               "whys": ["On at {came_on}, {player} has scored: {goal_minutes}. No substitute had done it in {history_seasons} seasons of this league.{never}",
+                        "{player} has scored: {goal_minutes}. A substitute does it {history_per_season} times a season in this league.{seen}",
+                        "{player} has scored: {goal_minutes}. A substitute had done it {history_count} times in {history_seasons} seasons.{seen}"],
+               "heart": ["{player} again! Joss, has anyone ever done this?", "{goals} for {player}! And {player} only came on at {came_on}!"],
+               "eye": ["Never, Wren. Not once in {history_seasons} seasons had a substitute scored {goals}.{never}",
+                       "{history_count} times in {history_seasons} seasons. Rare company.{seen}", "It happens {history_per_season} times a season. This one will be remembered.{seen}"]},
         "fr": {"headlines": ["{player}, {goals} buts en sortie de banc", "Entré à la {came_on}, {player} en met {goals}", "{player} atteint les {goals} buts"],
-               "whys": ["Entré à la {came_on}, {player} a marqué : {goal_minutes}. Aucun remplaçant ne l'avait fait en {history_opportunities} matchs de championnat depuis {history_since}.{never}",
-                        "{player} a marqué : {goal_minutes}. Un remplaçant l'avait fait dans {history_count} matchs sur {history_opportunities} depuis {history_since}.{seen}"],
+               "whys": ["Entré à la {came_on}, {player} a marqué : {goal_minutes}. Aucun remplaçant ne l'avait fait en {history_seasons} saisons de championnat.{never}",
+                        "{player} a marqué : {goal_minutes}. Un remplaçant le fait {history_per_season} fois par saison dans ce championnat.{seen}",
+                        "{player} a marqué : {goal_minutes}. Un remplaçant l'avait fait {history_count} fois en {history_seasons} saisons.{seen}"],
                "heart": ["Encore {player} ! Joss, quelqu'un a déjà fait ça ?", "{goals} buts pour {player} ! Et il n'est entré qu'à la {came_on} !"],
-               "eye": ["Jamais, Wren : {history_opportunities} matchs depuis {history_since}, et aucun remplaçant n'avait marqué {goals} fois.{never}",
-                       "{history_count} fois en {history_opportunities} matchs depuis {history_since}. Il entre dans un club très fermé.{seen}"]},
+               "eye": ["Jamais, Wren. En {history_seasons} saisons, aucun remplaçant n'avait marqué {goals} fois.{never}",
+                       "{history_count} fois en {history_seasons} saisons. Un club très fermé.{seen}", "Ça arrive {history_per_season} fois par saison. Celui-là, on s'en souviendra.{seen}"]},
         "es": {"headlines": ["{player}, {goals} goles desde el banquillo", "Entró en el {came_on} y {player} ya lleva {goals}", "{player} llega a {goals}"],
-               "whys": ["Entró en el {came_on} y marcó: {goal_minutes}. Ningún suplente lo había hecho en {history_opportunities} partidos de liga desde {history_since}.{never}",
-                        "{player} marcó: {goal_minutes}. Un suplente lo había hecho en {history_count} de {history_opportunities} partidos desde {history_since}.{seen}"],
+               "whys": ["Entró en el {came_on} y marcó: {goal_minutes}. Ningún suplente lo había hecho en {history_seasons} temporadas de liga.{never}",
+                        "{player} marcó: {goal_minutes}. Un suplente lo hace {history_per_season} veces por temporada en esta liga.{seen}",
+                        "{player} marcó: {goal_minutes}. Un suplente lo había hecho {history_count} veces en {history_seasons} temporadas.{seen}"],
                "heart": ["¡Otra vez {player}! Joss, ¿alguien había hecho esto?", "¡{goals} goles de {player}! ¡Y entró en el {came_on}!"],
-               "eye": ["Nunca, Wren: {history_opportunities} partidos desde {history_since} y ningún suplente había marcado {goals}.{never}",
-                       "{history_count} veces en {history_opportunities} partidos desde {history_since}. Un club muy pequeño.{seen}"]},
+               "eye": ["Nunca, Wren. En {history_seasons} temporadas, ningún suplente había marcado {goals}.{never}",
+                       "{history_count} veces en {history_seasons} temporadas. Un club muy pequeño.{seen}", "Pasa {history_per_season} veces por temporada. Este se recordará.{seen}"]},
     },
     "comeback": {
-        "en": {"headlines": ["{team} come back from {trailing_score}", "{team} turn {trailing_score} around", "From {trailing_score} down, {team} {stage}"],
-               "whys": ["Of {history_opportunities} teams {deficit_goals} goals down since {history_since}, {history_count} {stage}.{club}"],
+        "en": {"headlines": {"level": ["{team} draw level from {trailing_score} down", "{team} back on terms after {trailing_score}"],
+                             "ahead": ["{team} turn {trailing_score} around", "{team} now lead after trailing {trailing_score}"],
+                             "won": ["{team} win from {trailing_score} down", "{team} complete the comeback from {trailing_score}"], "any": ["{team} come back from {trailing_score}"]},
+               "whys": ["A team {deficit_goals} goals down {stage} about once in {one_in}: {history_per_season} times a season in this league.{club}",
+                        "A team {deficit_goals} goals down {stage} about once in {one_in}: {history_count} times in {history_seasons} seasons.{club}"],
                "heart": ["{trailing_score} down, and look at {team} now!", "Who saw this coming at {trailing_score}?"],
-               "eye": ["Only {history_count} of {history_opportunities} teams {deficit_goals} goals down {stage}. That is the size of it.{club}"]},
-        "fr": {"headlines": ["{team} remonte de {trailing_score}", "{team} renverse un {trailing_score}", "Mené {trailing_score}, {team} renverse tout"],
-               "whys": ["Sur {history_opportunities} équipes menées de {deficit_goals} buts depuis {history_since}, {history_count} {stage}.{club}"],
+               "eye": ["Once in {one_in}, Wren. That is the size of it.{club}"]},
+        "fr": {"headlines": {"level": ["{team} recolle après avoir été mené {trailing_score}", "{team} revient de {trailing_score}"],
+                             "ahead": ["Mené {trailing_score}, {team} passe devant", "{team} renverse un {trailing_score}"],
+                             "won": ["{team} gagne après avoir été mené {trailing_score}", "Mené {trailing_score}, {team} renverse tout"], "any": ["{team} remonte de {trailing_score}"]},
+               "whys": ["Une équipe menée de {deficit_goals} buts {stage} environ une fois sur {one_in}, soit {history_per_season} fois par saison dans ce championnat.{club}",
+                        "Une équipe menée de {deficit_goals} buts {stage} environ une fois sur {one_in} : {history_count} fois en {history_seasons} saisons.{club}"],
                "heart": ["Mené {trailing_score}, et regarde {team} maintenant !", "Qui y croyait à {trailing_score} ?"],
-               "eye": ["Seulement {history_count} équipes sur {history_opportunities} menées de {deficit_goals} buts {stage}. Voilà la taille de l'exploit.{club}"]},
-        "es": {"headlines": ["El {team} remonta un {trailing_score}", "El {team} le da la vuelta al {trailing_score}", "Del {trailing_score} a la remontada del {team}"],
-               "whys": ["De {history_opportunities} equipos que perdían por {deficit_goals} goles desde {history_since}, {history_count} {stage}.{club}"],
+               "eye": ["Une fois sur {one_in}, Wren. Voilà la taille de l'exploit.{club}"]},
+        "es": {"headlines": {"level": ["El {team} empata tras ir {trailing_score}", "El {team} iguala un {trailing_score}"],
+                             "ahead": ["El {team} le da la vuelta al {trailing_score}", "El {team} ya gana tras ir {trailing_score}"],
+                             "won": ["El {team} gana tras ir perdiendo {trailing_score}", "El {team} completa la remontada del {trailing_score}"], "any": ["El {team} remonta un {trailing_score}"]},
+               "whys": ["Un equipo que pierde por {deficit_goals} goles {stage} más o menos una vez de cada {one_in}: {history_per_season} veces por temporada en esta liga.{club}",
+                        "Un equipo que pierde por {deficit_goals} goles {stage} más o menos una vez de cada {one_in}: {history_count} veces en {history_seasons} temporadas.{club}"],
                "heart": ["¡Perdían {trailing_score} y mira al {team} ahora!", "¿Quién lo veía venir con el {trailing_score}?"],
-               "eye": ["Solo {history_count} de {history_opportunities} equipos con {deficit_goals} goles en contra {stage}. Ese es el tamaño de la gesta.{club}"]},
+               "eye": ["Una vez de cada {one_in}, Wren. Ese es el tamaño de la gesta.{club}"]},
     },
     "ht-lead-lost": {
-        "en": {"headlines": ["{team} let a {half_time_score} half-time lead slip", "{team} led {half_time_score} at the break, and lost it"],
-               "whys": ["Of {history_opportunities} teams leading by two or more at half-time since {history_since}, {history_count} {stage}.{club_lead}"],
-               "heart": ["{half_time_score} at the break, and {team} have nothing to show for it.", "How did {team} lose this from {half_time_score}?"],
-               "eye": ["{history_count} of {history_opportunities} half-time leads like that one were lost. {team} join a short list.{club_lead}"]},
-        "fr": {"headlines": ["{team} laisse filer son avance de la pause", "{team} menait {half_time_score} à la pause, et a tout perdu"],
-               "whys": ["Sur {history_opportunities} équipes qui menaient de deux buts ou plus à la pause depuis {history_since}, {history_count} {stage}.{club_lead}"],
-               "heart": ["{half_time_score} à la pause, et {team} repart les mains vides.", "Comment {team} a pu perdre ça en menant {half_time_score} ?"],
-               "eye": ["{history_count} avances de ce genre sur {history_opportunities} ont été perdues. {team} entre dans une liste courte.{club_lead}"]},
-        "es": {"headlines": ["El {team} deja escapar su ventaja del descanso", "El {team} ganaba {half_time_score} al descanso y lo perdió"],
-               "whys": ["De {history_opportunities} equipos que ganaban por dos o más al descanso desde {history_since}, {history_count} {stage}.{club_lead}"],
-               "heart": ["{half_time_score} al descanso, y el {team} se va con las manos vacías.", "¿Cómo perdió esto el {team} ganando {half_time_score}?"],
-               "eye": ["{history_count} ventajas así de {history_opportunities} se perdieron. El {team} entra en una lista corta.{club_lead}"]},
+        "en": {"headlines": {"behind": ["{team} led {half_time_score} at the break, now trail", "{team} let a {half_time_score} half-time lead slip"],
+                             "lost": ["{team} led {half_time_score} at the break, and lost", "{team} lose after leading {half_time_score} at half-time"],
+                             "any": ["{team} let a {half_time_score} half-time lead slip"]},
+               "whys": ["A team leading by two or more at half-time {stage} about once in {one_in}: {history_per_season} times a season.{club_lead}",
+                        "A team leading by two or more at half-time {stage} about once in {one_in}: {history_count} times in {history_seasons} seasons.{club_lead}"],
+               "heart": ["{half_time_score} at the break, and look at {team} now.", "How has this got away from {team}?"],
+               "eye": ["Once in {one_in}. {team} join a short list.{club_lead}"]},
+        "fr": {"headlines": {"behind": ["{team} menait {half_time_score} à la pause, le voilà mené", "{team} laisse filer son avance de la pause"],
+                             "lost": ["{team} menait {half_time_score} à la pause, et a perdu", "{team} perd après avoir mené {half_time_score}"],
+                             "any": ["{team} laisse filer son avance de la pause"]},
+               "whys": ["Une équipe qui mène de deux buts ou plus à la pause {stage} environ une fois sur {one_in}, soit {history_per_season} fois par saison.{club_lead}",
+                        "Une équipe qui mène de deux buts ou plus à la pause {stage} environ une fois sur {one_in} : {history_count} fois en {history_seasons} saisons.{club_lead}"],
+               "heart": ["{half_time_score} à la pause, et regarde où en est {team}.", "Comment {team} a pu laisser filer ça ?"],
+               "eye": ["Une fois sur {one_in}. {team} entre dans une liste courte.{club_lead}"]},
+        "es": {"headlines": {"behind": ["El {team} ganaba {half_time_score} al descanso y ahora pierde", "El {team} deja escapar su ventaja del descanso"],
+                             "lost": ["El {team} ganaba {half_time_score} al descanso y perdió", "El {team} pierde tras ganar {half_time_score} al descanso"],
+                             "any": ["El {team} deja escapar su ventaja del descanso"]},
+               "whys": ["Un equipo que gana por dos o más al descanso {stage} más o menos una vez de cada {one_in}: {history_per_season} veces por temporada.{club_lead}",
+                        "Un equipo que gana por dos o más al descanso {stage} más o menos una vez de cada {one_in}: {history_count} veces en {history_seasons} temporadas.{club_lead}"],
+               "heart": ["{half_time_score} al descanso, y mira al {team} ahora.", "¿Cómo se le ha escapado esto al {team}?"],
+               "eye": ["Una vez de cada {one_in}. El {team} entra en una lista corta.{club_lead}"]},
     },
     "xg-ft": {
         "en": {"headlines": ["{team}: {goals} goals from {xg} xG", "{team} beat their {xg} xG by a mile"],
@@ -146,8 +167,14 @@ def values(facts: dict, lang: str) -> tuple[dict, dict]:
     return vals, fields
 
 
+def headlines(t: dict, facts: dict) -> list[str]:
+    """The headline templates of a family, those of the stage the fact reached when they depend on it (a comeback that drew level is not yet a win)."""
+    h = t["headlines"]
+    return h if isinstance(h, list) else h.get(facts.get("stage"), h["any"])
+
+
 def with_extras(template: str, vals: dict, lang: str, facts: dict) -> str:
-    """Puts the optional sentences in place: the 'never' or 'seen' one depending on the history count, the club one when the facts have it."""
+    """Puts the optional sentences in place: the 'seen' one when the history has a last time, the club one when the facts have it."""
     out = template
     for name, by_lang in EXTRA.items():
         tag = "{" + name + "}"
@@ -162,12 +189,14 @@ def with_extras(template: str, vals: dict, lang: str, facts: dict) -> str:
 
 
 def usable(template: str, facts: dict) -> bool:
-    """A 'never before' variant needs a zero count; a 'seen' variant needs a positive one."""
-    count = facts.get("history_count")
+    """A 'never before' variant needs a zero count, a 'seen' one a positive count, a count over seasons fewer occurrences than seasons (from one a season on, the rate per season says it better)."""
+    count, seasons = facts.get("history_count"), facts.get("history_seasons")
     if not facts.get("substitute") and any(w in template for w in BENCH_WORDS):
         return False
-    if "{never}" in template:
-        return count == 0
-    if "{seen}" in template or "{history_count}" in template:
-        return isinstance(count, int) and count > 0
+    if "{never}" in template and count != 0:
+        return False
+    if "{seen}" in template and not (isinstance(count, int) and count > 0):
+        return False
+    if "{history_count}" in template and not (isinstance(count, int) and isinstance(seasons, int) and 0 < count < seasons):
+        return False
     return True

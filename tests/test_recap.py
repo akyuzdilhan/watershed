@@ -69,12 +69,12 @@ def test_recap_tells_the_goals_ruled_out_and_why(demo):
     assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
         ("63'", "Dorian Lightfoot", "offside", 25), ("69'", "Vito Valtonen", "handball", None)]
     texts = {t["lang"]: t for t in recap["texts"]}
-    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside by 25 cm) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
-    assert "hors-jeu de 25" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
-    assert "fuera de juego por 25 cm" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
+    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside by a whisker) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
+    assert "hors-jeu d'un rien" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
+    assert "fuera de juego por muy poco" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]
     claims = {(c["source_field"], c["value"]) for t in recap["texts"] for c in t["claims"]}
-    assert ("disallowed_1_margin_cm", 25) in claims and ("disallowed_2_minute", 69) in claims
+    assert ("disallowed_2_minute", 69) in claims and not any("25" in t["recap"] for t in recap["texts"])
 
 
 def test_disallowed_goals_can_be_passed_explicitly(demo):
@@ -84,7 +84,7 @@ def test_disallowed_goals_can_be_passed_explicitly(demo):
     given = [{"minute_label": "63'", "team": "home", "player": "Dorian Lightfoot", "reason": "offside", "margin_cm": 25}]
     recap = build_recap(plain, state, disallowed=given)
     en = next(t for t in recap["texts"] if t["lang"] == "en")
-    assert "offside by 25 cm" in en["recap"] and recap["verification"]["verified"]
+    assert "offside by a whisker" in en["recap"] and recap["verification"]["verified"]
 
 
 def test_points_mean_only_a_change_in_win_probability(demo):

@@ -170,15 +170,22 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
     return facts, meanings
 
 
+TIGHT_OFFSIDE_CM = 30  # a player at 7.5 m/s covers 30 cm between two frames at 25 Hz: below that, a number would be false precision
+
+
+def offside_call(margin_cm: int) -> str:
+    return "tight" if margin_cm <= TIGHT_OFFSIDE_CM else "clear"
+
+
 def ruling_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
-    """A goal card's facts plus why VAR ruled it out: the reason, and the offside margin in centimetres when the feed gives it."""
+    """A goal card's facts plus why VAR ruled it out: the reason, and for offside whether it was tight or clear (the margin in centimetres stays on the card for the console, never on air)."""
     facts, meanings = card_facts(card, teams)
     ruled = card.get("ruled_out") or {}
     facts["ruled_out_reason"] = ruled.get("reason") or "other"
     meanings["ruled_out_reason"] = "why VAR ruled the goal out: offside, handball or other"
     if isinstance(ruled.get("margin_cm"), int):
-        facts["offside_margin_cm"] = ruled["margin_cm"]
-        meanings["offside_margin_cm"] = "by how much the scorer was offside, in centimetres"
+        facts["offside_call"] = offside_call(ruled["margin_cm"])
+        meanings["offside_call"] = "how close the offside was: tight (within the distance a sprinting player covers between two frames) or clear"
     return facts, meanings
 
 
@@ -646,14 +653,13 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
         "team": card["team_name"], "other_team": next((t for t in teams if t != card["team_name"]), None), "scorer": facts.get("scorer"), "player": player,
         "before": facts.get(before_field), "after": facts.get(f"{slug}_wp_after_pct"), "other": facts.get(f"{slug}_wp_if_goal_pct"),
         "swing": facts.get("swing_pts"), "value": facts.get("save_value_pts"), "xg": facts.get("shot_xg_pct"), "minute": facts.get("minute"),
-        "margin_cm": facts.get("offside_margin_cm"),
         "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player),
     }
     team_n, scorer_n = count_words(lang, facts.get("team_goals_after")), count_words(lang, facts.get("scorer_match_goals"))
     values |= {"team_nth": team_n.get("nth"), "team_nth_adj": team_n.get("nth_adj"), "team_count": team_n.get("count"),
                "team_count_cap": team_n.get("count", "").capitalize() or None, "scorer_nth": scorer_n.get("nth") if facts.get("scorer_match_goals", 0) >= 2 else None, "scorer_count": scorer_n.get("count")}
     fields = {"before": before_field, "after": f"{slug}_wp_after_pct", "other": f"{slug}_wp_if_goal_pct", "swing": "swing_pts", "value": "save_value_pts",
-              "xg": "shot_xg_pct", "minute": "minute", "margin_cm": "offside_margin_cm"}
+              "xg": "shot_xg_pct", "minute": "minute"}
     return values, fields
 
 
@@ -793,10 +799,10 @@ class TemplateWriter:
             slots = LINES["ruling"][lang]
             pick = _Picker(memory, card["id"] + "#ruling", lang, facts)
             reason = facts.get("ruled_out_reason", "other")
-            key = "offside_margin" if reason == "offside" and facts.get("offside_margin_cm") is not None else reason if reason in slots["eye"] else "other"
+            key = f"offside_{facts['offside_call']}" if reason == "offside" and facts.get("offside_call") else reason if reason in slots["eye"] else "other"
             heart = pick.line(slots["heart"], values, fields, "heart")
             eye = pick.line(slots["eye"][key], values, fields, "eye")
-            if key == "offside_margin" and eye:
+            if key == "offside_tight" and eye:
                 tic = PERSONAS[EYE].voices[lang].tics[0]  # "Look at the line."
                 if tic not in pick.tics:
                     eye = (f"{tic} {eye[0]}", eye[1])
@@ -816,6 +822,9 @@ class TemplateWriter:
             mine = own.get(lang)
             if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], facts)[1]["verified"] and memory_key_free(pick, mine):
                 texts.append(mine)
+                if duo and (own_lines := insight_fact_text(doc, facts, lang, pick, duo)):
+                    lines += own_lines[1]  # the document's text, the family's duo lines
+                    continue
             elif fact_text := insight_fact_text(doc, facts, lang, pick, duo):
                 texts.append(fact_text[0])
                 lines += fact_text[1]
@@ -852,7 +861,7 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
     def pool(templates: list[str]) -> list[str]:
         return [it.with_extras(x, vals, lang, facts) for x in templates if it.usable(x, facts)]
 
-    headline = pick.headline([pool(t["headlines"])], vals, fields, "headline")
+    headline = pick.headline([pool(it.headlines(t, facts))], vals, fields, "headline")
     why = pick.line(pool(t["whys"]), vals, fields, "why")
     if not headline or not why:
         return None
