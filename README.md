@@ -16,9 +16,12 @@ All match data is synthetic, produced by the match engine in this repository. No
 | Win-probability model (Skellam, with expected added time) behind a replaceable interface | Done, tested | `src/winprob/` |
 | Worker: deduplication, reordering, match state, Spotter, card actions on corrections | Done, tested offline; run against Service Bus and Cosmos DB from a developer machine | `src/worker/match.py`, `spotter.py`, `pipeline.py`, `azure_io.py` |
 | Writer agent (Agent Framework on Microsoft Foundry), deterministic Verifier, approval desk with audit trail | Done, tested offline with templates; one measured live run | `src/worker/writer.py`, `desk.py` |
+| Desk data contract: cards, match state with the win-probability curve, audit trail, in Cosmos DB or in local JSON files | Done | `docs/contracts.md`, `src/worker/pipeline.py` (`JsonFileSink`, `match_state`) |
 | Infrastructure as code (azd and Bicep): Service Bus, Cosmos DB, Container Apps, Container Registry, Log Analytics, Application Insights | Done | `infra/` |
+| Worker as a Container App scaled by KEDA on the Service Bus subscription, replay as a Container Apps Job, one managed identity per app, Easy Auth hooks (off until an app registration exists) | Built, merging | `infra/`, `src/worker/` |
+| Pitch figures from the 360 frames, including the 63' offside frame with the offside line and the margin | Built, merging | |
 | Producer console and public overlay | Planned. The deployed web app is a placeholder page today | `src/web/app.py` |
-| Worker as a Container App, cost kill switch, CI | Planned | |
+| Cost kill switch, CI | Planned | |
 
 ## Why it matters
 
@@ -54,16 +57,17 @@ Final score 5-2. Against the ground truth, the worker finds all 11 moments that 
 ```mermaid
 flowchart LR
     GEN["Match engine<br/>src/generator"] --> FILE[("Replay file<br/>JSON Lines, gzip")]
-    FILE --> PUB["Publisher<br/>generator.publish"]
+    FILE --> PUB["Publisher<br/>generator.publish<br/>Container Apps Job"]
     PUB -->|"one session per match"| SB[("Azure Service Bus<br/>topic match-events")]
-    SB -->|"subscription worker"| W["Worker<br/>dedup, reorder, match state,<br/>win probability, Spotter"]
+    SB -->|"subscription worker,<br/>KEDA scaling"| W["Worker, Container App<br/>dedup, reorder, match state,<br/>win probability, Spotter"]
     FILE -.->|"offline run or fallback"| W
     W -->|"card facts"| WR["Writer agent<br/>Agent Framework on Microsoft Foundry"]
     WR -->|"draft and claims"| V["Verifier<br/>deterministic"]
     V -->|"verified, or template after one retry"| D["Desk<br/>pending, approved, rejected, retracted"]
     PROD(["Producer"]) -->|"approve, edit, reject"| D
-    W -->|"events, card actions"| DB[("Azure Cosmos DB<br/>events, cards, audit")]
+    W -->|"events, card actions,<br/>match state and curve"| DB[("Azure Cosmos DB<br/>events, cards, audit")]
     D --> DB
+    W -.->|"local run"| JF[("JSON files<br/>data/desk/match")]
     DB --> CON["Producer console<br/>planned"]
     DB --> OV["Public overlay, read-only<br/>planned"]
     W -.->|"VAR check: hold, release<br/>void: retract<br/>reassign: rewrite"| D
@@ -72,10 +76,10 @@ flowchart LR
 1. The engine writes a match as a feed of JSON messages with a common envelope (schema version, message id, provider sequence number, broadcast clock) and a hidden ground truth.
 2. The publisher replays the feed on a Service Bus topic, with the match id as session id so one receiver gets a match in order. Key moments play in real time, the rest faster, so a card can air before the feed corrects it.
 3. The worker deduplicates by message id, restores provider order with a 3-second buffer, derives the match state from the set of messages (so a late or repeated message cannot corrupt it), computes the win probability before and after each action, and lets the Spotter decide which moments deserve a card.
-4. The Writer agent gets the facts of a card through a function tool and writes it in English, French and Spanish; the Verifier checks every number; the desk stages the card for the producer and writes everything to Cosmos DB.
+4. The Writer agent gets the facts of a card through a function tool and writes it in English, French and Spanish; the Verifier checks every number; the desk stages the card for the producer and writes everything to Cosmos DB, with a match-state document that carries the score, the clock and the win-probability curve (or to JSON files in `data/desk/<match_id>/` when run locally).
 5. A VAR check or a correction in the feed becomes an action on the card already proposed or on air.
 
-Details, message types, the temporal contract of corrections, identities and failure modes: [`docs/architecture.md`](docs/architecture.md).
+Details, message types, the temporal contract of corrections, identities and failure modes: [`docs/architecture.md`](docs/architecture.md). What the console and the overlay read: [`docs/contracts.md`](docs/contracts.md).
 
 ## Microsoft and Azure technologies
 
@@ -85,7 +89,7 @@ Details, message types, the temporal contract of corrections, identities and fai
 | Microsoft Agent Framework | The Writer agent, with `get_moment` as a function tool; a spike also runs Spotter, Writer and Verifier as a workflow with a human approval pause (`request_info`) | [`src/worker/writer.py`](src/worker/writer.py), [`spikes/af_trial.py`](spikes/af_trial.py) |
 | Azure Service Bus | Transport: topic `match-events`, session-enabled subscription `worker`, dead-letter queue for unreadable messages | [`infra/resources.bicep`](infra/resources.bicep), [`src/generator/publish.py`](src/generator/publish.py), [`src/worker/azure_io.py`](src/worker/azure_io.py) |
 | Azure Cosmos DB (NoSQL) | Events, cards and audit trail, partitioned by match id, free tier | [`infra/resources.bicep`](infra/resources.bicep), [`src/worker/azure_io.py`](src/worker/azure_io.py) |
-| Azure Container Apps | Hosts the web app (scale 0 to 2) | [`infra/resources.bicep`](infra/resources.bicep), [`src/web/`](src/web/) |
+| Azure Container Apps | Hosts the web app (scale 0 to 2); the worker, scaled by a KEDA rule on the Service Bus subscription, and the replay as a Container Apps Job are merging | [`infra/resources.bicep`](infra/resources.bicep), [`src/web/`](src/web/) |
 | Azure Container Registry | Image built remotely by azd, pulled by managed identity | [`infra/resources.bicep`](infra/resources.bicep), [`azure.yaml`](azure.yaml) |
 | Log Analytics and Application Insights | Container logs, with a daily ingestion cap | [`infra/resources.bicep`](infra/resources.bicep) |
 | Microsoft Entra ID | Every data-plane call uses `DefaultAzureCredential` or a managed identity; Service Bus and Cosmos DB have key authentication disabled | [`infra/resources.bicep`](infra/resources.bicep), [`src/worker/azure_io.py`](src/worker/azure_io.py) |
@@ -148,7 +152,8 @@ Effects whose evidence is weak (momentum between matches, a built-in new-manager
 | No keys or connection strings for data access | Service Bus and Cosmos DB have local (key) authentication disabled; the code authenticates with `DefaultAzureCredential` (Azure CLI login locally, managed identity in Azure) | `infra/resources.bicep` (`disableLocalAuth: true`), `src/worker/azure_io.py`, `src/generator/publish.py` |
 | No registry password | Container Registry admin user disabled; the web app pulls with its managed identity (AcrPull) | `infra/resources.bicep` |
 | Foundry without keys in code | The Writer authenticates with a managed identity, or the Azure CLI login locally | `src/worker/writer.py` |
-| Roles | The web identity has AcrPull on the registry and the Cosmos DB Built-in Data Contributor role; the developer account gets Cosmos DB data access and Service Bus Data Sender and Receiver, only when azd passes its id | `infra/resources.bicep` |
+| Roles | One managed identity per app, each with the roles it uses (table in [`docs/architecture.md`](docs/architecture.md#identities-and-roles)): the worker receives on its subscription only, the replay job sends on the topic only; the developer account gets Cosmos DB data access and Service Bus Data Sender and Receiver, only when azd passes its id | `infra/resources.bicep` (worker and replay identities merging) |
+| Console sign-in | Easy Auth hooks in the templates, off until an app registration exists | Merging |
 | Output length | 3,000 output tokens at most per model call | `src/worker/writer.py` (`max_tokens`) |
 | Model calls per match | 40 at most; beyond that, cards use the fixed template | `src/worker/desk.py` (`max_calls_per_match`) |
 | Retries | One retry per card, then the template, so a model failure never blocks a card | `src/worker/writer.py` (`draft`) |
@@ -159,7 +164,7 @@ Effects whose evidence is weak (momentum between matches, a built-in new-manager
 
 Configured on the Azure subscription by hand, outside these templates, and therefore not verifiable from this repository: a rate limit of 20K tokens per minute on the model deployment, key authentication disabled on the Foundry resource, and cost budgets with alerts.
 
-Planned, not in this repository yet: a public overlay that only reads approved cards and never calls the model, a dedicated worker identity with receive-only rights on its subscription, a kill switch tied to the budget, and CI (tests, Bicep build, secret scanning).
+Planned, not in this repository yet: a public overlay that only reads approved cards and never calls the model, a kill switch tied to the budget, and CI (tests, Bicep build, secret scanning).
 
 ## Run locally
 
@@ -173,6 +178,7 @@ pytest                                                   # about 2 minutes: 200 
 python -m generator --story demo --out data/replay       # regenerate the demo match, its truth and its CDF files
 python -m generator --calibrate 200                      # the calibration table above
 python -m worker data/replay/demo-0007.jsonl.gz --truth data/replay/demo-0007.truth.json --writer template --auto-approve
+python -m worker data/replay/demo-0007.jsonl.gz --writer template --desk-dir data/desk   # cards.json, state.json, audit.jsonl for the console
 python -m generator.publish data/replay/demo-0007.jsonl.gz --dry --speed 10    # print the replay with the live pacing
 ```
 
@@ -188,7 +194,7 @@ azd up
 
 `azd up` creates a resource group with Service Bus (Standard), Cosmos DB (free tier), a Container Apps environment and the web app, a Container Registry, Log Analytics and Application Insights, and grants your account data access to Service Bus and Cosmos DB. The outputs (`azd env get-values`) give `SERVICE_BUS_FQDN`, `SERVICE_BUS_TOPIC`, `COSMOS_ENDPOINT` and `COSMOS_DATABASE`. The Foundry project and its model deployment are not in the templates: create them in the Foundry portal and copy the endpoint into `.env`.
 
-Then, from your machine (the worker is not deployed as a Container App yet):
+Once the worker Container App and the replay job are merged, `azd up` deploys them too, and publishing a replay is enough: KEDA starts the worker when the subscription has messages. Until then, from your machine:
 
 ```
 python -m worker --live --cosmos --writer foundry --auto-approve     # Service Bus in, Cosmos DB out
@@ -219,7 +225,7 @@ All tests run without Azure and without model calls (the Writer is replaced by t
 - **No model fallback in code.** `.env.example` names a fallback deployment (`gpt-5-mini`), but the code does not switch to it: after one failed retry, the fixed template takes over.
 - **Worker state lives in memory.** A restarted worker does not reload a match in progress from Cosmos DB, and the live listener stops after 30 seconds without a session.
 - **A VAR check flags a card but does not lock it.** A producer can still approve a card under review; only a retracted card is locked.
-- **Roles are broader than they will be.** The web identity has data-contributor rights on Cosmos DB, more than a read-only overlay needs; the Container Apps environment reads the Log Analytics shared key at deployment, as Azure requires for that setting.
+- **Some roles are broader than a read-only overlay needs.** The web identity has data-contributor rights on Cosmos DB and can send on the Service Bus topic, because the same app is meant to host the producer console; the Container Apps environment reads the Log Analytics shared key at deployment, as Azure requires for that setting.
 - **Languages.** English and French are generated natively; Spanish is labelled machine-translated on every card.
 
 ## Repository layout
@@ -234,7 +240,7 @@ All tests run without Azure and without model calls (the Writer is replaced by t
 | `infra/` | Bicep templates used by azd |
 | `tests/` | Unit and scenario tests |
 | `spikes/` | Technical trials: Agent Framework workflow with human approval, model benchmark report |
-| `docs/` | Architecture |
+| `docs/` | Architecture, data contracts |
 
 ## Third-party and open source
 
