@@ -7,6 +7,31 @@ param principalId string = ''
 @description('Cosmos DB free tier (1000 RU/s, 25 GB). Only one account per subscription can use it.')
 param cosmosFreeTier bool = true
 
+@description('Image of the web app. azd writes SERVICE_WEB_IMAGE_NAME after the first deploy, so a later provision keeps it instead of going back to the placeholder.')
+param webImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Image of the worker, also used by the replay job (SERVICE_WORKER_IMAGE_NAME after the first deploy).')
+param workerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+@description('Resource id of the Foundry account (created outside this template). Empty: no Foundry role is granted.')
+param foundryAccountId string = ''
+
+@description('Foundry project endpoint, model deployments and reasoning effort, passed to the worker.')
+param foundryProjectEndpoint string = ''
+
+param foundryModel string = 'gpt-5.4-nano'
+param foundryModelFallback string = 'gpt-5-mini'
+param foundryReasoningEffort string = 'medium'
+
+@description('Role granted to the worker on the Foundry account. Default: Foundry User (formerly Azure AI User), the role Microsoft documents for calling models through a Foundry project.')
+param foundryRoleId string = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
+
+@description('Extra arguments for the worker, for example --auto-approve in judging mode.')
+param workerExtraArgs string = ''
+
+@description('Client id of the Entra app registration for Easy Auth on the web app. Empty: Easy Auth is off.')
+param webAuthClientId string = ''
+
 var suffix = uniqueString(resourceGroup().id)
 var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 var serviceBusSenderRoleId = '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'
@@ -14,8 +39,16 @@ var serviceBusReceiverRoleId = '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0'
 // Built-in Cosmos DB data-plane role: Cosmos DB Built-in Data Contributor
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'
 var topicName = 'match-events'
+var workerSubscriptionName = 'worker'
 var cosmosDatabaseName = 'watershed'
 var cosmosContainers = [ 'events', 'cards', 'audit' ]
+var serviceBusFqdn = '${serviceBus.name}.servicebus.windows.net'
+var easyAuthEnabled = !empty(webAuthClientId)
+// /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.CognitiveServices/accounts/{name}
+var foundryParts = split(foundryAccountId, '/')
+var foundrySubscriptionId = empty(foundryAccountId) ? subscription().subscriptionId : foundryParts[2]
+var foundryResourceGroup = empty(foundryAccountId) ? resourceGroup().name : foundryParts[4]
+var foundryAccountName = empty(foundryAccountId) ? '' : last(foundryParts)
 
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: 'log-${suffix}'
@@ -48,8 +81,21 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   properties: { adminUserEnabled: false }
 }
 
+// One identity per workload, so each gets only the roles it needs
 resource webIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-web-${suffix}'
+  location: location
+  tags: tags
+}
+
+resource workerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-worker-${suffix}'
+  location: location
+  tags: tags
+}
+
+resource replayIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-replay-${suffix}'
   location: location
   tags: tags
 }
@@ -60,6 +106,26 @@ resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
     principalId: webIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource workerAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, workerIdentity.id, acrPullRoleId)
+  scope: registry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
+    principalId: workerIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource replayAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, replayIdentity.id, acrPullRoleId)
+  scope: registry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
+    principalId: replayIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
@@ -86,12 +152,44 @@ resource topic 'Microsoft.ServiceBus/namespaces/topics@2024-01-01' = {
 
 resource workerSubscription 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2024-01-01' = {
   parent: topic
-  name: 'worker'
+  name: workerSubscriptionName
   properties: {
     requiresSession: true
     maxDeliveryCount: 10
     deadLetteringOnMessageExpiration: true
     lockDuration: 'PT1M'
+  }
+}
+
+// Worker reads its own subscription only; the KEDA scaler uses the same identity to read the message count
+resource workerReceiver 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(workerSubscription.id, workerIdentity.id, serviceBusReceiverRoleId)
+  scope: workerSubscription
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusReceiverRoleId)
+    principalId: workerIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Web console (replay button) and replay job publish to the topic only
+resource webSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(topic.id, webIdentity.id, serviceBusSenderRoleId)
+  scope: topic
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusSenderRoleId)
+    principalId: webIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource replaySender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(topic.id, replayIdentity.id, serviceBusSenderRoleId)
+  scope: topic
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusSenderRoleId)
+    principalId: replayIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
@@ -154,6 +252,17 @@ resource webCosmosAccess 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignmen
   }
 }
 
+// Worker: data access limited to the watershed database
+resource workerCosmosAccess 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11-15' = {
+  parent: cosmos
+  name: guid(cosmos.id, workerIdentity.id, cosmosDataContributorRoleId)
+  properties: {
+    roleDefinitionId: '${cosmos.id}/sqlRoleDefinitions/${cosmosDataContributorRoleId}'
+    principalId: workerIdentity.properties.principalId
+    scope: '${cosmos.id}/dbs/${cosmosDatabaseName}'
+  }
+}
+
 resource devCosmosAccess 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11-15' = if (!empty(principalId)) {
   parent: cosmos
   name: guid(cosmos.id, principalId, cosmosDataContributorRoleId)
@@ -174,6 +283,17 @@ resource devServiceBusRoles 'Microsoft.Authorization/roleAssignments@2022-04-01'
   }
 }]
 
+// Foundry is in another resource group: the role assignment is deployed there
+module workerFoundryAccess 'modules/foundry-role.bicep' = if (!empty(foundryAccountId)) {
+  name: 'worker-foundry-role'
+  scope: resourceGroup(foundrySubscriptionId, foundryResourceGroup)
+  params: {
+    accountName: foundryAccountName
+    principalId: workerIdentity.properties.principalId
+    roleDefinitionId: foundryRoleId
+  }
+}
+
 resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: 'cae-${suffix}'
   location: location
@@ -189,7 +309,7 @@ resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource web 'Microsoft.App/containerApps@2024-03-01' = {
+resource web 'Microsoft.App/containerApps@2025-01-01' = {
   name: 'ca-web-${suffix}'
   location: location
   tags: union(tags, { 'azd-service-name': 'web' })
@@ -217,8 +337,8 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'web'
-          // Placeholder until `azd deploy` pushes the real image.
-          image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+          // Placeholder until `azd deploy` pushes the real image (port 80 matches it).
+          image: webImage
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
@@ -241,6 +361,23 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'COSMOS_DATABASE'
               value: cosmosDatabaseName
             }
+            {
+              name: 'DESK'
+              value: 'cosmos'
+            }
+            {
+              name: 'SERVICE_BUS_FQDN'
+              value: serviceBusFqdn
+            }
+            {
+              name: 'SERVICE_BUS_TOPIC'
+              value: topicName
+            }
+            {
+              // Trust X-MS-CLIENT-PRINCIPAL-NAME only when Easy Auth is on: without it, a client can send the header itself.
+              name: 'EASY_AUTH_ENABLED'
+              value: string(easyAuthEnabled)
+            }
           ]
         }
       ]
@@ -252,10 +389,196 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
+// Easy Auth, off unless webAuthClientId is set. Anonymous requests pass through so the overlay stays public;
+// signed-in requests carry X-MS-CLIENT-PRINCIPAL-NAME, which the app checks on producer routes.
+// No client secret: the provider uses the ID token (OpenID Connect), enough to know who the producer is.
+resource webAuth 'Microsoft.App/containerApps/authConfigs@2025-01-01' = if (easyAuthEnabled) {
+  parent: web
+  name: 'current'
+  properties: {
+    platform: { enabled: true }
+    globalValidation: {
+      unauthenticatedClientAction: 'AllowAnonymous'
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: webAuthClientId
+          openIdIssuer: '${environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
+        }
+        validation: {
+          allowedAudiences: [ 'api://${webAuthClientId}' ]
+        }
+      }
+    }
+  }
+}
+
+var workerEnv = [
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: workerIdentity.properties.clientId
+  }
+  {
+    name: 'SERVICE_BUS_FQDN'
+    value: serviceBusFqdn
+  }
+  {
+    name: 'SERVICE_BUS_TOPIC'
+    value: topicName
+  }
+  {
+    name: 'COSMOS_ENDPOINT'
+    value: cosmos.properties.documentEndpoint
+  }
+  {
+    name: 'COSMOS_DATABASE'
+    value: cosmosDatabaseName
+  }
+  {
+    name: 'FOUNDRY_PROJECT_ENDPOINT'
+    value: foundryProjectEndpoint
+  }
+  {
+    name: 'FOUNDRY_MODEL'
+    value: foundryModel
+  }
+  {
+    name: 'FOUNDRY_MODEL_FALLBACK'
+    value: foundryModelFallback
+  }
+  {
+    name: 'FOUNDRY_REASONING_EFFORT'
+    value: foundryReasoningEffort
+  }
+  {
+    name: 'WORKER_ARGS'
+    value: workerExtraArgs
+  }
+]
+
+// Worker: no ingress, scaled by KEDA on the worker subscription (0 when idle, 1 at most so one consumer owns each match)
+resource worker 'Microsoft.App/containerApps@2025-01-01' = {
+  name: 'ca-worker-${suffix}'
+  location: location
+  tags: union(tags, { 'azd-service-name': 'worker' })
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${workerIdentity.id}': {} }
+  }
+  dependsOn: [ workerAcrPull, workerReceiver ]
+  properties: {
+    managedEnvironmentId: env.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [
+        {
+          server: registry.properties.loginServer
+          identity: workerIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'worker'
+          image: workerImage
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: workerEnv
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 1
+        rules: [
+          {
+            name: 'match-events'
+            custom: {
+              type: 'azure-servicebus'
+              metadata: {
+                namespace: serviceBus.name
+                topicName: topicName
+                subscriptionName: workerSubscriptionName
+                messageCount: '1'
+              }
+              identity: workerIdentity.id
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+
+// Replay: one manual run publishes the demo match to the topic, with the worker image
+resource replayJob 'Microsoft.App/jobs@2025-01-01' = {
+  name: 'caj-replay-${suffix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${replayIdentity.id}': {} }
+  }
+  dependsOn: [ replayAcrPull, replaySender ]
+  properties: {
+    environmentId: env.id
+    configuration: {
+      triggerType: 'Manual'
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      // Key moments play in real time: the whole match takes about half an hour at speed 10
+      replicaTimeout: 3600
+      replicaRetryLimit: 0
+      registries: [
+        {
+          server: registry.properties.loginServer
+          identity: replayIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'replay'
+          image: workerImage
+          command: [ 'python', '-m', 'generator.publish', 'data/replay/demo-0007.jsonl.gz', '--speed', '10' ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            {
+              name: 'AZURE_CLIENT_ID'
+              value: replayIdentity.properties.clientId
+            }
+            {
+              name: 'SERVICE_BUS_FQDN'
+              value: serviceBusFqdn
+            }
+            {
+              name: 'SERVICE_BUS_TOPIC'
+              value: topicName
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 output registryLoginServer string = registry.properties.loginServer
 output registryName string = registry.name
-output serviceBusFqdn string = '${serviceBus.name}.servicebus.windows.net'
+output serviceBusFqdn string = serviceBusFqdn
 output serviceBusTopic string = topicName
 output cosmosEndpoint string = cosmos.properties.documentEndpoint
 output cosmosDatabase string = cosmosDatabaseName
 output webUri string = 'https://${web.properties.configuration.ingress.fqdn}'
+output webAppName string = web.name
+output workerAppName string = worker.name
+output replayJobName string = replayJob.name

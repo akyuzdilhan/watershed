@@ -4,6 +4,15 @@
   "parameters": {
     "environmentName": { "value": "${AZURE_ENV_NAME}" },
     "location": { "value": "${AZURE_LOCATION}" },
-    "principalId": { "value": "${AZURE_PRINCIPAL_ID}" }
+    "principalId": { "value": "${AZURE_PRINCIPAL_ID}" },
+    "webImage": { "value": "${SERVICE_WEB_IMAGE_NAME=}" },
+    "workerImage": { "value": "${SERVICE_WORKER_IMAGE_NAME=}" },
+    "foundryAccountId": { "value": "${FOUNDRY_ACCOUNT_ID=}" },
+    "foundryProjectEndpoint": { "value": "${FOUNDRY_PROJECT_ENDPOINT=}" },
+    "foundryModel": { "value": "${FOUNDRY_MODEL=gpt-5.4-nano}" },
+    "foundryModelFallback": { "value": "${FOUNDRY_MODEL_FALLBACK=gpt-5-mini}" },
+    "foundryReasoningEffort": { "value": "${FOUNDRY_REASONING_EFFORT=medium}" },
+    "workerExtraArgs": { "value": "${WORKER_EXTRA_ARGS=}" },
+    "webAuthClientId": { "value": "${WEB_AUTH_CLIENT_ID=}" }
   }
 }

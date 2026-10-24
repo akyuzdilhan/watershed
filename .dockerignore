@@ -1,0 +1,24 @@
+# Build context is the repository root (azure.yaml, docker.context). Keep it small and free of local secrets.
+.git
+.github
+.claude
+.azure
+.env
+.env.*
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+**/*.egg-info
+*.parquet
+prep-*
+docs
+spikes
+tests
+infra
+
+# Local data stays out; only the versioned demo replay goes in
+data/*
+!data/replay
