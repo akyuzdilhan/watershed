@@ -1,0 +1,1038 @@
+{
+  "schema_version": "2.0",
+  "generator_version": "2.0.0",
+  "match_id": "demo-0007",
+  "seed": 7,
+  "story": "demo",
+  "teams": {
+    "home": {
+      "name": "Rovers",
+      "formation": "4-3-3",
+      "expected_goals": 1.5,
+      "squad": [
+        {
+          "id": "home-1",
+          "shirt": 1,
+          "name": "Umberto Valtonen",
+          "role": "GK"
+        },
+        {
+          "id": "home-2",
+          "shirt": 2,
+          "name": "Bastien Hepworth",
+          "role": "RB"
+        },
+        {
+          "id": "home-5",
+          "shirt": 5,
+          "name": "Caius Varga",
+          "role": "CB"
+        },
+        {
+          "id": "home-4",
+          "shirt": 4,
+          "name": "Silas Achterberg",
+          "role": "CB"
+        },
+        {
+          "id": "home-3",
+          "shirt": 3,
+          "name": "Gideon Jagger",
+          "role": "LB"
+        },
+        {
+          "id": "home-6",
+          "shirt": 6,
+          "name": "Nevan Varga",
+          "role": "DM"
+        },
+        {
+          "id": "home-8",
+          "shirt": 8,
+          "name": "Ivo Selwood",
+          "role": "CM"
+        },
+        {
+          "id": "home-10",
+          "shirt": 10,
+          "name": "Wendell Moravec",
+          "role": "CM"
+        },
+        {
+          "id": "home-7",
+          "shirt": 7,
+          "name": "Yanis Ackroyd",
+          "role": "RW"
+        },
+        {
+          "id": "home-9",
+          "shirt": 9,
+          "name": "Hugo Uribe",
+          "role": "ST"
+        },
+        {
+          "id": "home-11",
+          "shirt": 11,
+          "name": "Wendell Pennick",
+          "role": "LW"
+        },
+        {
+          "id": "home-13",
+          "shirt": 13,
+          "name": "Piers Uribe",
+          "role": "GK"
+        },
+        {
+          "id": "home-12",
+          "shirt": 12,
+          "name": "Vito Calloway",
+          "role": "CB"
+        },
+        {
+          "id": "home-15",
+          "shirt": 15,
+          "name": "Valen Jaramillo",
+          "role": "RB"
+        },
+        {
+          "id": "home-16",
+          "shirt": 16,
+          "name": "Nevan Valtonen",
+          "role": "DM"
+        },
+        {
+          "id": "home-18",
+          "shirt": 18,
+          "name": "Matteo Lindqvist",
+          "role": "CM"
+        },
+        {
+          "id": "home-21",
+          "shirt": 21,
+          "name": "Wilmer Achterberg",
+          "role": "AM"
+        },
+        {
+          "id": "home-17",
+          "shirt": 17,
+          "name": "Valen Blackwood",
+          "role": "RW"
+        },
+        {
+          "id": "home-19",
+          "shirt": 19,
+          "name": "Ivo Castellan",
+          "role": "LW"
+        },
+        {
+          "id": "home-20",
+          "shirt": 20,
+          "name": "Dorian Lightfoot",
+          "role": "ST"
+        }
+      ]
+    },
+    "away": {
+      "name": "United",
+      "formation": "4-2-3-1",
+      "expected_goals": 1.2,
+      "squad": [
+        {
+          "id": "away-1",
+          "shirt": 1,
+          "name": "Zeke Thackeray",
+          "role": "GK"
+        },
+        {
+          "id": "away-2",
+          "shirt": 2,
+          "name": "Ilan Moravec",
+          "role": "RB"
+        },
+        {
+          "id": "away-5",
+          "shirt": 5,
+          "name": "Hugo Wojcik",
+          "role": "CB"
+        },
+        {
+          "id": "away-6",
+          "shirt": 6,
+          "name": "Wendell Garside",
+          "role": "CB"
+        },
+        {
+          "id": "away-3",
+          "shirt": 3,
+          "name": "Ivo Moravec",
+          "role": "LB"
+        },
+        {
+          "id": "away-4",
+          "shirt": 4,
+          "name": "Emeric Tavares",
+          "role": "DM"
+        },
+        {
+          "id": "away-8",
+          "shirt": 8,
+          "name": "Florin Delacroix",
+          "role": "DM"
+        },
+        {
+          "id": "away-7",
+          "shirt": 7,
+          "name": "Kester Kettering",
+          "role": "RW"
+        },
+        {
+          "id": "away-10",
+          "shirt": 10,
+          "name": "Tobin Delacroix",
+          "role": "AM"
+        },
+        {
+          "id": "away-11",
+          "shirt": 11,
+          "name": "Soren Szabo",
+          "role": "LW"
+        },
+        {
+          "id": "away-9",
+          "shirt": 9,
+          "name": "Vito Valtonen",
+          "role": "ST"
+        },
+        {
+          "id": "away-13",
+          "shirt": 13,
+          "name": "Umberto Kettering",
+          "role": "GK"
+        },
+        {
+          "id": "away-12",
+          "shirt": 12,
+          "name": "Remy Ravensworth",
+          "role": "CB"
+        },
+        {
+          "id": "away-15",
+          "shirt": 15,
+          "name": "Nevan Garside",
+          "role": "RB"
+        },
+        {
+          "id": "away-16",
+          "shirt": 16,
+          "name": "Umberto Pennick",
+          "role": "DM"
+        },
+        {
+          "id": "away-18",
+          "shirt": 18,
+          "name": "Aldo Varga",
+          "role": "CM"
+        },
+        {
+          "id": "away-21",
+          "shirt": 21,
+          "name": "Elio Zielinski",
+          "role": "AM"
+        },
+        {
+          "id": "away-17",
+          "shirt": 17,
+          "name": "Oskar Mossley",
+          "role": "RW"
+        },
+        {
+          "id": "away-19",
+          "shirt": 19,
+          "name": "Dorian Shacklock",
+          "role": "LW"
+        },
+        {
+          "id": "away-20",
+          "shirt": 20,
+          "name": "Nils Kettering",
+          "role": "ST"
+        }
+      ]
+    }
+  },
+  "final_score": {
+    "home": 1,
+    "away": 2
+  },
+  "moments": [
+    {
+      "key": "goal-23",
+      "kind": "goal",
+      "team": "home",
+      "player": {
+        "id": "home-9",
+        "shirt": 9,
+        "name": "Hugo Uribe"
+      },
+      "event_id": "demo-0007-v2-a00422",
+      "minute_label": "23'",
+      "clock_s": 1354.0,
+      "wall_s": 1354.0,
+      "expected_card_action": "rewrite",
+      "affected_event_ids": [
+        "demo-0007-v2-a00422"
+      ],
+      "score_after": "1-0"
+    },
+    {
+      "key": "goal-54",
+      "kind": "goal",
+      "team": "away",
+      "player": {
+        "id": "away-11",
+        "shirt": 11,
+        "name": "Soren Szabo"
+      },
+      "event_id": "demo-0007-v2-a00984",
+      "minute_label": "54'",
+      "clock_s": 3192.0,
+      "wall_s": 4265.23,
+      "expected_card_action": "none",
+      "affected_event_ids": [
+        "demo-0007-v2-a00984"
+      ],
+      "score_after": "1-1"
+    },
+    {
+      "key": "goal-67",
+      "kind": "goal",
+      "team": "home",
+      "player": {
+        "id": "home-9",
+        "shirt": 9,
+        "name": "Hugo Uribe"
+      },
+      "event_id": "demo-0007-v2-a01195",
+      "minute_label": "67'",
+      "clock_s": 3991.0,
+      "wall_s": 5064.23,
+      "expected_card_action": "retract",
+      "affected_event_ids": [
+        "demo-0007-v2-a01194",
+        "demo-0007-v2-a01195"
+      ],
+      "score_after": "1-1"
+    },
+    {
+      "key": "save-74",
+      "kind": "save",
+      "team": "home",
+      "player": {
+        "id": "home-10",
+        "shirt": 10,
+        "name": "Wendell Moravec"
+      },
+      "event_id": "demo-0007-v2-a01298",
+      "minute_label": "74'",
+      "clock_s": 4420.0,
+      "wall_s": 5493.23,
+      "expected_card_action": "none",
+      "affected_event_ids": [
+        "demo-0007-v2-a01298"
+      ],
+      "score_after": "1-1"
+    },
+    {
+      "key": "red-81",
+      "kind": "red_card",
+      "team": "away",
+      "player": {
+        "id": "home-4",
+        "shirt": 4,
+        "name": "Silas Achterberg"
+      },
+      "event_id": "demo-0007-v2-a01395",
+      "minute_label": "81'",
+      "clock_s": 4820.0,
+      "wall_s": 5893.23,
+      "expected_card_action": "none",
+      "affected_event_ids": [
+        "demo-0007-v2-a01395"
+      ],
+      "score_after": "1-1"
+    },
+    {
+      "key": "goal-88",
+      "kind": "goal",
+      "team": "away",
+      "player": {
+        "id": "away-9",
+        "shirt": 9,
+        "name": "Vito Valtonen"
+      },
+      "event_id": "demo-0007-v2-a01461",
+      "minute_label": "88'",
+      "clock_s": 5235.0,
+      "wall_s": 6308.23,
+      "expected_card_action": "none",
+      "affected_event_ids": [
+        "demo-0007-v2-a01461"
+      ],
+      "score_after": "1-2"
+    }
+  ],
+  "goals": [
+    {
+      "event_id": "demo-0007-v2-a00422",
+      "minute_label": "23'",
+      "clock_s": 1354.0,
+      "wall_s": 1354.0,
+      "team": "home",
+      "player_id": "home-9",
+      "planted": "goal-23",
+      "counts": true,
+      "expected_card_action": "rewrite",
+      "affected_event_ids": [
+        "demo-0007-v2-a00422"
+      ],
+      "score_after": "1-0"
+    },
+    {
+      "event_id": "demo-0007-v2-a00984",
+      "minute_label": "54'",
+      "clock_s": 3192.0,
+      "wall_s": 4265.23,
+      "team": "away",
+      "player_id": "away-11",
+      "planted": "goal-54",
+      "counts": true,
+      "expected_card_action": "none",
+      "affected_event_ids": [
+        "demo-0007-v2-a00984"
+      ],
+      "score_after": "1-1"
+    },
+    {
+      "event_id": "demo-0007-v2-a01195",
+      "minute_label": "67'",
+      "clock_s": 3991.0,
+      "wall_s": 5064.23,
+      "team": "home",
+      "player_id": "home-9",
+      "planted": "goal-67",
+      "counts": false,
+      "expected_card_action": "retract",
+      "affected_event_ids": [
+        "demo-0007-v2-a01194",
+        "demo-0007-v2-a01195"
+      ],
+      "score_after": "1-1"
+    },
+    {
+      "event_id": "demo-0007-v2-a01461",
+      "minute_label": "88'",
+      "clock_s": 5235.0,
+      "wall_s": 6308.23,
+      "team": "away",
+      "player_id": "away-9",
+      "planted": "goal-88",
+      "counts": true,
+      "expected_card_action": "none",
+      "affected_event_ids": [
+        "demo-0007-v2-a01461"
+      ],
+      "score_after": "1-2"
+    }
+  ],
+  "shots": [
+    {
+      "event_id": "demo-0007-v2-a00076",
+      "minute_label": "4'",
+      "clock_s": 222.5,
+      "wall_s": 222.5,
+      "team": "home",
+      "player_id": "home-10",
+      "action_type": "shot",
+      "xg": 0.091,
+      "outcome": "saved",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00137",
+      "minute_label": "8'",
+      "clock_s": 425.6,
+      "wall_s": 425.63,
+      "team": "away",
+      "player_id": "away-10",
+      "action_type": "shot",
+      "xg": 0.06,
+      "outcome": "blocked",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00186",
+      "minute_label": "10'",
+      "clock_s": 557.2,
+      "wall_s": 557.18,
+      "team": "home",
+      "player_id": "home-9",
+      "action_type": "shot",
+      "xg": 0.032,
+      "outcome": "off_target",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00231",
+      "minute_label": "13'",
+      "clock_s": 774.7,
+      "wall_s": 774.74,
+      "team": "home",
+      "player_id": "home-8",
+      "action_type": "shot",
+      "xg": 0.071,
+      "outcome": "off_target",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00278",
+      "minute_label": "16'",
+      "clock_s": 938.1,
+      "wall_s": 938.14,
+      "team": "home",
+      "player_id": "home-9",
+      "action_type": "shot",
+      "xg": 0.074,
+      "outcome": "off_target",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00346",
+      "minute_label": "20'",
+      "clock_s": 1167.8,
+      "wall_s": 1167.81,
+      "team": "home",
+      "player_id": "home-8",
+      "action_type": "shot",
+      "xg": 0.031,
+      "outcome": "post",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00422",
+      "minute_label": "23'",
+      "clock_s": 1354.0,
+      "wall_s": 1354.0,
+      "team": "home",
+      "player_id": "home-9",
+      "action_type": "shot",
+      "xg": 0.171,
+      "outcome": "goal",
+      "score_before": {
+        "home": 0,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": "goal-23"
+    },
+    {
+      "event_id": "demo-0007-v2-a00562",
+      "minute_label": "32'",
+      "clock_s": 1875.0,
+      "wall_s": 1875.02,
+      "team": "away",
+      "player_id": "away-9",
+      "action_type": "shot",
+      "xg": 0.097,
+      "outcome": "off_target",
+      "score_before": {
+        "home": 1,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00671",
+      "minute_label": "39'",
+      "clock_s": 2289.1,
+      "wall_s": 2289.07,
+      "team": "away",
+      "player_id": "away-10",
+      "action_type": "shot",
+      "xg": 0.024,
+      "outcome": "blocked",
+      "score_before": {
+        "home": 1,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a00984",
+      "minute_label": "54'",
+      "clock_s": 3192.0,
+      "wall_s": 4265.23,
+      "team": "away",
+      "player_id": "away-11",
+      "action_type": "shot",
+      "xg": 0.103,
+      "outcome": "goal",
+      "score_before": {
+        "home": 1,
+        "away": 0
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": "goal-54"
+    },
+    {
+      "event_id": "demo-0007-v2-a01125",
+      "minute_label": "64'",
+      "clock_s": 3790.4,
+      "wall_s": 4863.66,
+      "team": "home",
+      "player_id": "home-9",
+      "action_type": "shot",
+      "xg": 0.092,
+      "outcome": "off_target",
+      "score_before": {
+        "home": 1,
+        "away": 1
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a01195",
+      "minute_label": "67'",
+      "clock_s": 3991.0,
+      "wall_s": 5064.23,
+      "team": "home",
+      "player_id": "home-9",
+      "action_type": "shot",
+      "xg": 0.265,
+      "outcome": "goal",
+      "score_before": {
+        "home": 1,
+        "away": 1
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": "goal-67"
+    },
+    {
+      "event_id": "demo-0007-v2-a01298",
+      "minute_label": "74'",
+      "clock_s": 4420.0,
+      "wall_s": 5493.23,
+      "team": "home",
+      "player_id": "home-10",
+      "action_type": "shot",
+      "xg": 0.226,
+      "outcome": "saved",
+      "score_before": {
+        "home": 1,
+        "away": 1
+      },
+      "reds_before": {
+        "home": 0,
+        "away": 0
+      },
+      "planted": "save-74"
+    },
+    {
+      "event_id": "demo-0007-v2-a01402",
+      "minute_label": "83'",
+      "clock_s": 4973.0,
+      "wall_s": 6046.2,
+      "team": "away",
+      "player_id": "away-7",
+      "action_type": "shot",
+      "xg": 0.04,
+      "outcome": "saved",
+      "score_before": {
+        "home": 1,
+        "away": 1
+      },
+      "reds_before": {
+        "home": 1,
+        "away": 0
+      },
+      "planted": null
+    },
+    {
+      "event_id": "demo-0007-v2-a01461",
+      "minute_label": "88'",
+      "clock_s": 5235.0,
+      "wall_s": 6308.23,
+      "team": "away",
+      "player_id": "away-9",
+      "action_type": "shot",
+      "xg": 0.16,
+      "outcome": "goal",
+      "score_before": {
+        "home": 1,
+        "away": 1
+      },
+      "reds_before": {
+        "home": 1,
+        "away": 0
+      },
+      "planted": "goal-88"
+    }
+  ],
+  "var_checks": [
+    {
+      "check_id": "demo-0007-v2-var01",
+      "target_event_id": "demo-0007-v2-a01195",
+      "reason": "possible offside",
+      "decision": "overturned",
+      "started_wall_s": 5083.02,
+      "completed_wall_s": 5165.02,
+      "completed_minute_label": "69'"
+    },
+    {
+      "check_id": "demo-0007-v2-var02",
+      "target_event_id": "demo-0007-v2-a01461",
+      "reason": "possible handball",
+      "decision": "stands",
+      "started_wall_s": 6328.79,
+      "completed_wall_s": 6383.79,
+      "completed_minute_label": "89'"
+    }
+  ],
+  "offsides": [
+    {
+      "event_id": "demo-0007-v2-a00288",
+      "player_id": "away-9",
+      "margin_m": 0.95,
+      "flagged": true,
+      "minute_label": "17'"
+    },
+    {
+      "event_id": "demo-0007-v2-a00331",
+      "player_id": "home-9",
+      "margin_m": 1.34,
+      "flagged": true,
+      "minute_label": "19'"
+    },
+    {
+      "event_id": "demo-0007-v2-a00665",
+      "player_id": "home-9",
+      "margin_m": 0.53,
+      "flagged": false,
+      "minute_label": "38'"
+    },
+    {
+      "event_id": "demo-0007-v2-a00710",
+      "player_id": "home-9",
+      "margin_m": 0.7,
+      "flagged": true,
+      "minute_label": "42'"
+    },
+    {
+      "event_id": "demo-0007-v2-a00743",
+      "player_id": "home-7",
+      "margin_m": 0.16,
+      "flagged": true,
+      "minute_label": "44'"
+    },
+    {
+      "event_id": "demo-0007-v2-a01194",
+      "player_id": "home-9",
+      "margin_m": 0.25,
+      "flagged": false,
+      "minute_label": "67'"
+    }
+  ],
+  "cards": [
+    {
+      "event_id": "demo-0007-v2-a00702",
+      "minute_label": "41'",
+      "clock_s": 2407.5,
+      "wall_s": 2407.53,
+      "team": "away",
+      "player_id": "away-2",
+      "card": "yellow"
+    },
+    {
+      "event_id": "demo-0007-v2-a00825",
+      "minute_label": "45+3'",
+      "clock_s": 2826.0,
+      "wall_s": 2826.03,
+      "team": "home",
+      "player_id": "home-9",
+      "card": "yellow"
+    },
+    {
+      "event_id": "demo-0007-v2-a01395",
+      "minute_label": "81'",
+      "clock_s": 4820.0,
+      "wall_s": 5893.23,
+      "team": "home",
+      "player_id": "home-4",
+      "card": "red"
+    }
+  ],
+  "corrections": [
+    {
+      "message_id": "demo-0007-v2-c001",
+      "op": "update",
+      "target_event_id": "demo-0007-v2-a00316",
+      "cause": "provider_review",
+      "wall_s": 1222.3,
+      "minute_label": "21'",
+      "related_message_id": null,
+      "score": {
+        "home": 0,
+        "away": 0
+      },
+      "card_relevant": false
+    },
+    {
+      "message_id": "demo-0007-v2-c002",
+      "op": "reassign",
+      "target_event_id": "demo-0007-v2-a00422",
+      "cause": "deflection",
+      "wall_s": 1471.01,
+      "minute_label": "25'",
+      "related_message_id": null,
+      "score": {
+        "home": 1,
+        "away": 0
+      },
+      "card_relevant": true
+    },
+    {
+      "message_id": "demo-0007-v2-c003",
+      "op": "update",
+      "target_event_id": "demo-0007-v2-a01098",
+      "cause": "provider_review",
+      "wall_s": 4925.13,
+      "minute_label": "65'",
+      "related_message_id": null,
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "card_relevant": false
+    },
+    {
+      "message_id": "demo-0007-v2-c004",
+      "op": "update",
+      "target_event_id": "demo-0007-v2-a01194",
+      "cause": "var_offside",
+      "wall_s": 5165.02,
+      "minute_label": "69'",
+      "related_message_id": "demo-0007-v2-m0009",
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "card_relevant": true
+    },
+    {
+      "message_id": "demo-0007-v2-c005",
+      "op": "void",
+      "target_event_id": "demo-0007-v2-a01195",
+      "cause": "var_offside",
+      "wall_s": 5165.02,
+      "minute_label": "69'",
+      "related_message_id": "demo-0007-v2-m0009",
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "card_relevant": true
+    },
+    {
+      "message_id": "demo-0007-v2-c006",
+      "op": "update",
+      "target_event_id": "demo-0007-v2-a01178",
+      "cause": "provider_review",
+      "wall_s": 5165.02,
+      "minute_label": "69'",
+      "related_message_id": null,
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "card_relevant": false
+    },
+    {
+      "message_id": "demo-0007-v2-c007",
+      "op": "update",
+      "target_event_id": "demo-0007-v2-a01409",
+      "cause": "provider_review",
+      "wall_s": 6301.03,
+      "minute_label": "88'",
+      "related_message_id": null,
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "card_relevant": false
+    },
+    {
+      "message_id": "demo-0007-v2-c008",
+      "op": "update",
+      "target_event_id": "demo-0007-v2-a01541",
+      "cause": "provider_review",
+      "wall_s": 6852.1,
+      "minute_label": "90+7'",
+      "related_message_id": null,
+      "score": {
+        "home": 1,
+        "away": 2
+      },
+      "card_relevant": false
+    }
+  ],
+  "incidents": {
+    "late": [
+      "demo-0007-v2-a00003",
+      "demo-0007-v2-a00009",
+      "demo-0007-v2-a00041",
+      "demo-0007-v2-a00133",
+      "demo-0007-v2-a00258",
+      "demo-0007-v2-a00308",
+      "demo-0007-v2-a00323",
+      "demo-0007-v2-a00368",
+      "demo-0007-v2-a00370",
+      "demo-0007-v2-a00389",
+      "demo-0007-v2-a00514",
+      "demo-0007-v2-a00523",
+      "demo-0007-v2-a00527",
+      "demo-0007-v2-a00549",
+      "demo-0007-v2-a00636",
+      "demo-0007-v2-a00665",
+      "demo-0007-v2-a00712",
+      "demo-0007-v2-a00719",
+      "demo-0007-v2-a00744",
+      "demo-0007-v2-a00827",
+      "demo-0007-v2-a00852",
+      "demo-0007-v2-a00907",
+      "demo-0007-v2-a00973",
+      "demo-0007-v2-a01070",
+      "demo-0007-v2-a01209",
+      "demo-0007-v2-a01229",
+      "demo-0007-v2-a01247",
+      "demo-0007-v2-a01249",
+      "demo-0007-v2-a01272",
+      "demo-0007-v2-a01349",
+      "demo-0007-v2-a01377",
+      "demo-0007-v2-a01383",
+      "demo-0007-v2-a01435",
+      "demo-0007-v2-a01502",
+      "demo-0007-v2-a01524",
+      "demo-0007-v2-a01623"
+    ],
+    "duplicates": [
+      "demo-0007-v2-a00037",
+      "demo-0007-v2-a00045",
+      "demo-0007-v2-a00105",
+      "demo-0007-v2-a00405",
+      "demo-0007-v2-a00435",
+      "demo-0007-v2-a00821",
+      "demo-0007-v2-a00890",
+      "demo-0007-v2-a00897",
+      "demo-0007-v2-a00975",
+      "demo-0007-v2-a01042",
+      "demo-0007-v2-a01387",
+      "demo-0007-v2-a01680"
+    ]
+  },
+  "counts": {
+    "actions": 1680,
+    "goals": 3,
+    "xg": 1.54,
+    "shots": 15,
+    "shots_outside_box": 0.267,
+    "passes": 1061,
+    "pass_completion": 0.827,
+    "pass_length": 20.6,
+    "fouls": 13,
+    "yellow_cards": 2,
+    "red_cards": 1,
+    "tackles": 37,
+    "interceptions": 20,
+    "take_ons": 23,
+    "dribbles": 431,
+    "clearances": 35,
+    "throw_ins": 25,
+    "goal_kicks": 16,
+    "corners": 10,
+    "penalties": 0,
+    "offsides": 4,
+    "possession_changes": 180,
+    "added_minutes": 12,
+    "substitutions": 9,
+    "var_checks": 2,
+    "corrections": 8
+  }
+}

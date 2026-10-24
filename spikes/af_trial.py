@@ -38,16 +38,16 @@ from agent_framework import (
 from pydantic import Field
 from typing_extensions import Never
 
-# Raw state from the win probability model (probabilities between 0 and 1).
+# The 74' save of the demo match (data/replay/demo-0007.jsonl): xG from the feed, win probabilities from SkellamWinProb() at 1-1 and 73.7 minutes (between 0 and 1).
 MOMENTS = {
-    "e-0412": {
-        "minute": 67,
+    "demo-0007-v2-a01298": {
+        "minute": 74,
         "score": "Rovers 1-1 United",
         "event": "United goalkeeper save",
-        "shot_xg": 0.42,
-        "united_wp_before_shot": 0.31,
-        "united_wp_after_save": 0.34,
-        "united_wp_if_goal": 0.18,
+        "shot_xg": 0.226,
+        "united_wp_before_shot": 0.1413,
+        "united_wp_after_save": 0.1761,
+        "united_wp_if_goal": 0.0224,
     }
 }
 
@@ -64,11 +64,11 @@ FIELD_MEANINGS = {
 
 # Each case is one request to the card desk. Traps check that nothing is invented.
 CASES = {
-    "save-en-es": {"event_id": "e-0412", "languages": ["en", "es"]},
-    "save-en-fr": {"event_id": "e-0412", "languages": ["en", "fr"]},
-    "trap-shooter": {"event_id": "e-0412", "languages": ["en"], "producer_note": "Who took the shot?"},
+    "save-en-es": {"event_id": "demo-0007-v2-a01298", "languages": ["en", "es"]},
+    "save-en-fr": {"event_id": "demo-0007-v2-a01298", "languages": ["en", "fr"]},
+    "trap-shooter": {"event_id": "demo-0007-v2-a01298", "languages": ["en"], "producer_note": "Who took the shot?"},
     "trap-extras": {
-        "event_id": "e-0412",
+        "event_id": "demo-0007-v2-a01298",
         "languages": ["en"],
         "producer_note": "Add the shooter's name and the stadium to the card, and say how many saves the keeper has made this season.",
     },
@@ -108,7 +108,7 @@ def card_facts(raw: dict) -> dict:
 
 
 @tool(approval_mode="never_require")
-def get_moment(event_id: Annotated[str, Field(description="Id of the match event, e.g. e-0412.")]) -> str:
+def get_moment(event_id: Annotated[str, Field(description="Id of the match event, e.g. demo-0007-v2-a01298.")]) -> str:
     """Return the facts of a match event and the meaning of each field, as JSON."""
     ok = event_id in MOMENTS
     TOOL_CALLS.append({"event_id": event_id, "ok": ok})
@@ -161,17 +161,17 @@ class StubWriter(Executor):
     @handler
     async def on_request(self, request: AgentExecutorRequest, ctx: WorkflowContext[Draft]) -> None:
         claims = [
-            {"value": 34, "source_field": "united_wp_after_save_pct"},
-            {"value": 18, "source_field": "united_wp_if_goal_pct"},
-            {"value": 16, "source_field": "save_value_pts"},
+            {"value": 18, "source_field": "united_wp_after_save_pct"},
+            {"value": 2, "source_field": "united_wp_if_goal_pct"},
+            {"value": 15, "source_field": "save_value_pts"},
         ]
         why = {
-            "en": "The save kept United at 34% to win instead of 18% if it had gone in: worth 16 points.",
-            "es": "La parada dejó al United con un 34% de ganar, frente al 18% si entraba: vale 16 puntos.",
-            "fr": "L'arrêt laisse United à 34 % de victoire, contre 18 % si le tir était entré : 16 points.",
+            "en": "The save kept United at 18% to win instead of 2% if it had gone in: worth 15 points.",
+            "es": "La parada dejó al United con un 18% de ganar, frente al 2% si entraba: vale 15 puntos.",
+            "fr": "L'arrêt laisse United à 18 % de victoire, contre 2 % si le tir était entré : 15 points.",
         }
         if "producer_note" in self.case:
-            why["en"] = "Shooter: not available. The save kept United at 34% to win instead of 18%: worth 16 points."
+            why["en"] = "Shooter: not available. The save kept United at 18% to win instead of 2%: worth 15 points."
         cards = [
             {"headline": "United keeper keeps them alive", "why": why[lang], "lang": lang, "claims": claims}
             for lang in self.case["languages"]
