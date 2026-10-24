@@ -25,6 +25,7 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=0.08, help="minimum value of a chance that is not a goal, as a share of the result probabilities")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    logging.getLogger("azure").setLevel(logging.WARNING)  # the SDKs log every HTTP request and AMQP link change at INFO
 
     sink = MemorySink()
     if args.cosmos:

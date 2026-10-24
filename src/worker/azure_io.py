@@ -39,16 +39,19 @@ def cosmos_from_env() -> CosmosSink:
 def listen(pipeline: Pipeline, fqdn: str, topic: str, subscription: str = "worker", idle_s: float = 30.0) -> None:
     """Receives sessions one after the other until none has a message for `idle_s` seconds."""
     from azure.identity import DefaultAzureCredential
-    from azure.servicebus import NEXT_AVAILABLE_SESSION, ServiceBusClient
+    from azure.servicebus import NEXT_AVAILABLE_SESSION, AutoLockRenewer, ServiceBusClient
     from azure.servicebus.exceptions import OperationTimeoutError
 
-    with ServiceBusClient(fqdn, credential=DefaultAzureCredential()) as client:
+    # A session lock lasts one minute and a whole match takes longer to process (each message is written to Cosmos DB): the renewer keeps it alive.
+    with ServiceBusClient(fqdn, credential=DefaultAzureCredential()) as client, AutoLockRenewer(max_lock_renewal_duration=4 * 3600) as renewer:
         while True:
             try:
-                receiver = client.get_subscription_receiver(topic, subscription, session_id=NEXT_AVAILABLE_SESSION, max_wait_time=idle_s)
+                receiver = client.get_subscription_receiver(topic, subscription, session_id=NEXT_AVAILABLE_SESSION, max_wait_time=idle_s, prefetch_count=100, auto_lock_renewer=renewer)
                 with receiver:
                     log.info("session %s", receiver.session.session_id)
-                    for msg in receiver:
+                    for n, msg in enumerate(receiver, start=1):
+                        if n % 200 == 0:
+                            log.info("%d messages processed", n)
                         try:
                             body = json.loads(str(msg))
                             for result in pipeline.handle(body):
