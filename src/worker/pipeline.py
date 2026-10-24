@@ -98,6 +98,13 @@ class JsonFileSink(MemorySink):
         docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"] and d.get("type") != "storyline"]
         (self._dir(doc["match_id"]) / "insights.json").write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
 
+    def feedback(self, doc: dict) -> None:
+        """A producer's judgement on one sentence: appended to feedback.jsonl, never into cards.json."""
+        self.feedbacks = getattr(self, "feedbacks", [])
+        self.feedbacks.append(dict(doc))
+        with (self._dir(doc["match_id"]) / "feedback.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(doc, ensure_ascii=False) + "\n")
+
     def load_insight(self, match_id: str, insight_id: str) -> dict | None:
         """Reads the file, where the console writes the producer's decisions."""
         path = self._dir(match_id) / "insights.json"
