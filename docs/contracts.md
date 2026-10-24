@@ -55,3 +55,33 @@ Card actions from the Spotter: `{id, match_id, card_id, event_id, action (hold, 
 ## Feed and CDF
 
 The feed contract is in `src/generator/feed.py`; the at-rest export in `src/generator/cdf.py` (Common Data Format 0.3.2).
+
+## Lot 2 additions
+
+### History (`league.history`)
+
+A fictional league history of 50 seasons, deterministic for a seed, stored at `data/history/<seed>/` (gitignored, regenerated on demand; a small sample may be committed for the demo). Players have a stable id `P000001` to `P100000`, a fictional name, a birth season, a position and a career (clubs by season). Matches carry the score, the scorers with minute, the assists, the substitutions with minute, the cards and the half-time score.
+
+The worker and the insight engine only use this read API (a `History` object; tests may use a small fake with the same methods):
+
+| Method | Returns |
+|---|---|
+| `seasons()` | list of season labels, oldest first (`"1976/77"` ... `"2025/26"`) |
+| `club(name)` | `{name, founded_season, seasons_in_league, titles, best_finish}` |
+| `head_to_head(home, away)` | list of past matches between the two clubs, newest first: `{season, matchday, home, away, home_goals, away_goals, half_time}` |
+| `matches(where)` | every past match that satisfies `where(match) -> bool` (a full scan is fine: about 19,000 matches) |
+| `player(player_id)` | `{id, name, position, born, clubs: [{season, club}], goals, appearances, sub_appearances}` |
+| `count(event, where)` | how many past `event`s (`"match"`, `"goal"`, `"substitution"`, `"card"`) satisfy `where` |
+| `last(event, where)` | the most recent such event, with its season and match, or None |
+
+### Insight (`type: "insight"`, id `insight-<match_id>-<key>`)
+
+A fact about the match in progress or just finished, compared with the history: `{id, type, match_id, key, kind (record, rarity, streak, milestone, storyline, tactical), minute_label, clock_s, event_id (or null), headline_facts: {field: value}, field_meanings: {field: meaning}, rarity: {p, surprisal_bits, basis}, value (0 to 100, the ranking key), status (proposed, pending, approved, rejected, superseded), texts (as cards), history}`. `rarity.basis` says what was counted ("4 goals by a substitute: 0 in 18,620 matches since 1976/77"). Every number shown comes from `headline_facts`. Insights go through the same Writer, Verifier and desk as cards.
+
+### Storyline (`type: "storyline"`, id `storyline-<match_id>`)
+
+Written before kick-off: the context of the match (table positions, stakes in % with explicit fields, form, head-to-head summary, players to watch, milestones within reach) as `facts` and `field_meanings`, plus the texts of a pre-match card.
+
+### Commentary duo (`duo` field of cards and insights)
+
+Two fictional commentators with complementary personalities, defined in `src/worker/duo.py` (no real person, no imitation of a real commentator). A card or insight may carry `duo: [{speaker, lang, line, claims}]`, two to four lines per language, every number claimed like `texts`. Personas: one carried by emotion and the story, one by the detail and the numbers.
