@@ -144,6 +144,23 @@ T = {  # family -> lang -> part -> templates, or {stage: templates, "any": templ
                "eye": {"lost": ["Hacía {club_seasons_since} temporadas que no le pasaba al {team}, Wren.", "Nunca en {history_seasons} temporadas, Wren.{club_first}"],
                        "behind": ["No ha terminado, pero el {team} no pierde uno así desde {club_last_season}.", "No ha terminado, pero el {team} nunca ha perdido uno así.{club_first}"]}},
     },
+    "storyline": {  # before kick-off, both clubs fighting relegation (the storyline's own verified texts are used first; these give the duo its numbers)
+        "en": {"headlines": ["{home_club} v {away_club}: a relegation battle"],
+               "whys": ["{away_club} are on {away_relegation_chance_pct}% to go down: {away_relegation_chance_if_win_pct}% with a win, {away_relegation_chance_if_loss_pct}% with a defeat."],
+               "heart": ["{home_club} {home_rank_ord}, {away_club} {away_rank_ord}. Tonight is about staying up, Joss."],
+               "eye": ["A win lifts {home_club} to {home_rank_if_win_ord}. A defeat drops them to {home_rank_if_loss_ord}.",
+                       "{away_club} have a {away_relegation_chance_pct}% chance of going down. A win cuts it to {away_relegation_chance_if_win_pct}%."]},
+        "fr": {"headlines": ["{home_club} - {away_club}, duel pour le maintien"],
+               "whys": ["{away_club} a {away_relegation_chance_pct} % de risques de descendre : {away_relegation_chance_if_win_pct} % en cas de victoire, {away_relegation_chance_if_loss_pct} % en cas de défaite."],
+               "heart": ["{home_club} {home_rank_ord}, {away_club} {away_rank_ord}. Ce soir, on joue le maintien, Joss."],
+               "eye": ["Une victoire et {home_club} remonte {home_rank_if_win_ord}. Une défaite, et il passe {home_rank_if_loss_ord}.",
+                       "{away_club} a {away_relegation_chance_pct} % de risques de descendre. Avec une victoire, ça tombe à {away_relegation_chance_if_win_pct} %."]},
+        "es": {"headlines": ["{home_club}-{away_club}, duelo por la permanencia"],
+               "whys": ["El {away_club} tiene un {away_relegation_chance_pct}% de opciones de descender: {away_relegation_chance_if_win_pct}% si gana, {away_relegation_chance_if_loss_pct}% si pierde."],
+               "heart": ["El {home_club}, {home_rank_ord}; el {away_club}, {away_rank_ord}. Esta noche se juega la permanencia, Joss."],
+               "eye": ["Si gana, el {home_club} sube al {home_rank_if_win_ord} puesto. Si pierde, cae al {home_rank_if_loss_ord}.",
+                       "El {away_club} tiene un {away_relegation_chance_pct}% de opciones de descender. Si gana, baja al {away_relegation_chance_if_win_pct}%."]},
+    },
     "xg-ft": {
         "en": {"headlines": ["{team}: {goals} goals from {xg} xG", "{team} beat their {xg} xG by a mile"],
                "whys": ["{team} scored {goals} from chances worth {xg} expected goals: about one match in {one_in} goes that way."],
@@ -169,7 +186,10 @@ STAT_PREFIX["fr"], STAT_WHY["fr"] = fr_typography(STAT_PREFIX["fr"]), fr_typogra
 
 
 def family(doc: dict) -> str | None:
-    """The family of an insight, from its key (`scorer-home-20-4`, `comeback-home-2-3`); the stat of the match takes the family of its top fact."""
+    """The family of an insight, from its key (`scorer-home-20-4`, `comeback-home-2-3`); the stat of the match takes the family of its top fact; a storyline of two clubs fighting relegation has its own."""
+    if doc.get("type") == "storyline":
+        focus = doc.get("focus") or {}
+        return "storyline" if focus and all(v == "relegation" for v in focus.values()) else None
     key = str((doc.get("headline_facts") or {}).get("top_fact") or doc.get("key") or "")
     return next((f for f in T if key.startswith(f + "-")), None)
 
@@ -194,6 +214,18 @@ def values(facts: dict, lang: str) -> tuple[dict, dict]:
             vals[k] = v
         if isinstance(v, (int, float)) or any(c.isdigit() for c in str(v)):
             fields[k] = k
+    for side in ("home", "away"):  # storyline facts are keyed by club slug (rovers_rank): give them a side alias, ranks as ordinals
+        club = facts.get(f"{side}_club")
+        if not isinstance(club, str):
+            continue
+        prefix = club.lower().replace(" ", "_") + "_"  # storyline.slug
+        for k, v in facts.items():
+            if k.startswith(prefix) and isinstance(v, (int, float)) and not isinstance(v, bool):
+                alias = side + "_" + k[len(prefix):]
+                vals[alias], fields[alias] = vals[k], k
+                if "_rank" in alias and isinstance(v, int):
+                    vals[alias + "_ord"] = Ord(v, lang)
+                    fields[alias + "_ord"] = k
     if isinstance(facts.get("goals"), int) and facts["goals"] >= 2:
         vals["feat"] = FEAT[lang][min(facts["goals"], 5)]
     count, seasons = facts.get("history_count"), facts.get("history_seasons")

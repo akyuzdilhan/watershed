@@ -90,8 +90,12 @@ class JsonFileSink(MemorySink):
         (self._dir(doc["match_id"]) / "state.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
 
     def insight(self, doc: dict) -> None:
+        """Insights go to insights.json; the storyline, which goes through the same desk path, to storyline.json."""
         super().insight(doc)
-        docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"]]
+        if doc.get("type") == "storyline":
+            (self._dir(doc["match_id"]) / "storyline.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+            return
+        docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"] and d.get("type") != "storyline"]
         (self._dir(doc["match_id"]) / "insights.json").write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
 
     def load_insight(self, match_id: str, insight_id: str) -> dict | None:
@@ -236,6 +240,8 @@ class Pipeline:
     insight_min_value: int = 40
     engines: dict[str, object] = field(default_factory=dict)
     _history_view: object | None = None
+    storyline_for: object | None = None  # callable(match_id, teams) -> storyline document, built once when the match information arrives
+    storylines: dict[str, dict] = field(default_factory=dict)
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
         """Processes one message off the wire; returns the cards and card actions it produced."""
@@ -257,6 +263,7 @@ class Pipeline:
             spotter = self.spotters.get(match.match_id)
             if spotter is None and match.info is not None:
                 spotter = self.spotters[match.match_id] = Spotter(match, make_model(match, SkellamWinProb), self.threshold)
+                self._storyline(match)
             if spotter is None:
                 continue  # nothing to evaluate before the match information
             teams = {side: t["name"] for side, t in match.info["teams"].items()}
@@ -306,6 +313,22 @@ class Pipeline:
                 write(doc, teams)
                 if store is not None:
                     store(doc)  # the texts and the status the desk set, whether or not it stored them itself
+
+    def _storyline(self, match: Match) -> None:
+        """Before kick-off: the context of the match, written and checked by the desk like an insight, stored next to the cards."""
+        if self.storyline_for is None:
+            return
+        teams = {side: t["name"] for side, t in match.info["teams"].items()}
+        doc = self.storyline_for(match.match_id, teams)
+        if doc is None:
+            return
+        self.storylines[match.match_id] = doc
+        store = getattr(self.sink, "insight", None)
+        write = getattr(self.desk, "write_insight", None) if self.desk is not None else None
+        if write is not None:
+            write(doc, teams)
+        if store is not None:
+            store(doc)
 
     def insights(self, match_id: str) -> list[dict]:
         """Every insight written for a match, superseded ones included."""

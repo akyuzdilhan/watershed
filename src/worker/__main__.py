@@ -47,6 +47,8 @@ def main() -> None:
     parser.add_argument("--idle", type=float, default=30.0, help="with --live: seconds without a message before a session is released (and, without --forever, the worker stops)")
     parser.add_argument("--workers", type=int, default=8, help="with --cosmos: concurrent event writes")
     parser.add_argument("--history", type=Path, help="league history (data/history/<seed>/): surface insights against it")
+    parser.add_argument("--league-seed", type=int, help="league season of the match (e.g. 9): write the pre-match storyline and the season context")
+    parser.add_argument("--matchday", type=int, default=30, help="matchday of the match in that season")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     for noisy in ("azure", "agent_framework", "httpx"):  # the SDKs log every HTTP request, AMQP link change and tool call at INFO
@@ -71,7 +73,13 @@ def main() -> None:
             service_bus_settings()  # loads .env (Foundry endpoint and model)
         desk = Desk(sink, FoundryWriter() if args.writer == "foundry" else TemplateWriter(), auto_approve=args.auto_approve)
     history = load_history(args.history) if args.history else None
-    pipeline = Pipeline(sink=sink, desk=desk, threshold=args.threshold, history=history)
+    storyline_for = None
+    if args.league_seed is not None:
+        from worker.storyline import build_storyline
+
+        def storyline_for(match_id: str, teams: dict) -> dict:
+            return build_storyline(args.league_seed, args.matchday, history, match_id, home=teams["home"], away=teams["away"])
+    pipeline = Pipeline(sink=sink, desk=desk, threshold=args.threshold, history=history, storyline_for=storyline_for)
 
     if args.live:
         from worker.azure_io import listen

@@ -15,10 +15,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from worker.duo import fr_de
+from worker.duo import fr_de, fr_typography
 from worker.writer import LANGUAGES, MACHINE_TRANSLATED, names_ok, offside_call, sentences, shown, verify
 
-MAX_WORDS = {"recap": 80, "fan": 50, "analyst": 60}
+MAX_WORDS = {"recap": 100, "fan": 50, "analyst": 60}
 HALF_TIME_GAP_S = 120  # the match clock goes back to 45:00 at the start of the second half
 TOP_MOMENTS = 3
 SPELLED_NUMBERS = {  # numbers must be written in digits, or the Verifier cannot check them
@@ -374,6 +374,17 @@ class RecapTemplateWriter:
             filled.pop()
         return " ".join(t for t, _ in filled), [c for _, cl in filled for c in cl]
 
+    def season_sentence(self, lang: str, facts: dict) -> str:
+        s = self.roles["season_slug"]
+        f = {"rb": f"season_{s}_rank_before", "ra": f"season_{s}_rank_after", "cb": f"season_{s}_relegation_chance_before_pct", "ca": f"season_{s}_relegation_chance_after_pct"}
+        same = facts[f["rb"]] == facts[f["ra"]]
+        text = (SEASON_STAY if same else SEASON)[lang].replace("{club}", self.roles["season_club"])
+        for k in ("rb", "ra"):
+            text = text.replace("{o_%s}" % k, _en_ordinal(int(facts[f[k]])))
+        for k, field in f.items():
+            text = text.replace("{%s}" % k, "{%s}" % field)
+        return fr_typography(text) if lang == "fr" else text
+
     def write(self, facts: dict, languages: list[str]) -> str:
         r, out = self.roles, []
         for lang in languages:
@@ -389,6 +400,8 @@ class RecapTemplateWriter:
                 recap.append(disallowed_sentence("recap", lang, facts, r["disallowed"]))
             if r["W"] and facts.get(f"{r['W']}_top_scorer_goals", 0) >= 2:
                 recap.append(scorer)
+            if r.get("season_slug"):
+                recap.append(self.season_sentence(lang, facts))
             fan_t = TEMPLATES["fan"][lang]
             fan = [fan_t[r["fan_result"]]]
             if r["fan_result"] == "won" and facts.get(f"{r['F']}_lowest_wp_pct", 100) <= 25:
@@ -481,10 +494,12 @@ def failures(report: dict) -> str:
 
 
 async def recap_async(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, calls_left: int = 2,
-                      disallowed: list[dict] | None = None) -> dict:
-    """Analyses the match, writes and verifies the texts: the model, one retry, then the template. `disallowed` overrides the goals ruled out read from the cards."""
+                      disallowed: list[dict] | None = None, storyline: dict | None = None) -> dict:
+    """Analyses the match, writes and verifies the texts: the model, one retry, then the template. `disallowed` overrides the goals ruled out read from the cards; `storyline` (the pre-match document) adds what the result changed in the table."""
     analysis = analyse(cards, state, disallowed)
     facts, meanings, roles = recap_facts(analysis, fan_side)
+    if storyline is not None and analysis["final"]:
+        season_facts(storyline, analysis, facts, meanings, roles)
     attempts, note, texts, report, name = 0, None, None, None, "template"
     if writer is not None and not isinstance(writer, RecapTemplateWriter):
         for _ in range(min(2, calls_left)):
@@ -508,8 +523,47 @@ async def recap_async(cards: list[dict], state: dict, writer=None, languages: li
             "analysis": analysis, "facts": facts, "field_meanings": meanings}
 
 
-def build_recap(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, disallowed: list[dict] | None = None) -> dict:
-    return asyncio.run(recap_async(cards, state, writer, languages, fan_side, disallowed=disallowed))
+def build_recap(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, disallowed: list[dict] | None = None,
+                storyline: dict | None = None) -> dict:
+    return asyncio.run(recap_async(cards, state, writer, languages, fan_side, disallowed=disallowed, storyline=storyline))
+
+
+SEASON = {  # what the result changed in the table, for the club whose relegation chance moved the most; {o_*} are ordinal suffixes filled in code
+    "en": "{club} move from {rb}{o_rb} to {ra}{o_ra} with this result, and their chance of going down from {cb}% to {ca}%.",
+    "fr": "Avec ce résultat, {club} passe de la {rb}e à la {ra}e place, et son risque de descente de {cb} % à {ca} %.",
+    "es": "Con este resultado, el {club} pasa del {rb}.º al {ra}.º puesto, y su riesgo de descenso del {cb}% al {ca}%.",
+}
+SEASON_STAY = {  # the same when the rank does not move
+    "en": "{club} stay {ra}{o_ra}, and their chance of going down goes from {cb}% to {ca}%.",
+    "fr": "{club} reste {ra}e, et son risque de descente passe de {cb} % à {ca} %.",
+    "es": "El {club} sigue {ra}.º, y su riesgo de descenso pasa del {cb}% al {ca}%.",
+}
+
+
+def _en_ordinal(n: int) -> str:
+    return "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+def season_facts(storyline: dict, analysis: dict, facts: dict, meanings: dict, roles: dict) -> None:
+    """Adds `storyline.post_match` (rank and relegation chance before and after) to the recap facts, and picks the club the season sentence is about."""
+    from worker.storyline import post_match, slug as club_slug
+
+    score = analysis["score"]
+    extra, extra_meanings = post_match(storyline, score["home"], score["away"])
+    extra.pop("final_score", None)
+    facts |= {f"season_{k}": v for k, v in extra.items()}
+    meanings |= {f"season_{k}": v for k, v in extra_meanings.items() if k != "final_score"}
+    best = None
+    winner = analysis["teams"].get(analysis["winner"]) if analysis.get("winner") else None
+    for club, event in (storyline.get("focus") or {}).items():
+        key = f"season_{club_slug(club)}_{event}_change_pts"
+        if event != "relegation" or not isinstance(facts.get(key), int) or facts[key] < 3:
+            continue
+        rank = (club == winner, facts[key])  # the winner's season first: it is the story of the match
+        if best is None or rank > best[2]:
+            best = (club, key, rank)
+    if best:
+        roles["season_club"], roles["season_slug"] = best[0], club_slug(best[0])
 
 
 def recap_cosmos(match_id: str, writer=None, fan_side: str | None = None) -> dict:
@@ -520,7 +574,8 @@ def recap_cosmos(match_id: str, writer=None, fan_side: str | None = None) -> dic
     docs = list(container.query_items("SELECT * FROM c WHERE c.match_id = @m", parameters=[{"name": "@m", "value": match_id}], partition_key=match_id))
     cards = [d for d in docs if d.get("type") == "card"]
     state = next(d for d in docs if d.get("type") == "match_state")
-    recap = build_recap(cards, state, writer, fan_side=fan_side)
+    storyline = next((d for d in docs if d.get("type") == "storyline"), None)
+    recap = build_recap(cards, state, writer, fan_side=fan_side, storyline=storyline)
     container.upsert_item(recap)
     return recap
 
@@ -546,7 +601,9 @@ def main() -> None:
         if args.desk is None:
             parser.error("give a desk directory, or --cosmos MATCH_ID")
         cards, state = load_desk(args.desk)
-        recap = build_recap(cards, state, writer, fan_side=args.fan_team)
+        story_path = args.desk / "storyline.json"
+        storyline = json.loads(story_path.read_text(encoding="utf-8")) if story_path.exists() else None
+        recap = build_recap(cards, state, writer, fan_side=args.fan_team, storyline=storyline)
     if not recap["final"]:
         print("warning: the match is not over, the recap covers it so far")
     out = args.out or (args.desk / "recap.json" if args.desk else None)

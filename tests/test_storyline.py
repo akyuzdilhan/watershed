@@ -203,3 +203,43 @@ def test_cli(tmp_path):
     sl.main(["--league-seed", "9", "--matchday", "30", "--sims", str(SIMS), "--out", str(out)])
     doc = json.loads(out.read_text(encoding="utf-8"))
     assert doc["type"] == "storyline" and doc["league"] == {"seed": 9, "matchday": 30, "n_sims": SIMS}
+
+
+# --- in the pipeline and the recap ------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def desk_run(tmp_path_factory):
+    from generator import generate_match
+    from worker.desk import Desk
+    from worker.pipeline import JsonFileSink, Pipeline
+    from worker.writer import TemplateWriter
+
+    root = tmp_path_factory.mktemp("desk")
+    sink = JsonFileSink(root)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True),
+                        storyline_for=lambda match_id, teams: sl.build_storyline(9, 30, None, match_id, home=teams["home"], away=teams["away"]))
+    feed, _ = generate_match(7, "demo")
+    for m in feed:
+        pipeline.handle(m)
+    pipeline.flush()
+    return root / feed[0]["match_id"]
+
+
+def test_pipeline_writes_the_storyline_before_kick_off(desk_run):
+    doc = json.loads((desk_run / "storyline.json").read_text(encoding="utf-8"))
+    assert doc["type"] == "storyline" and doc["status"] == "approved" and doc["verification"]["verified"]
+    fr = [l["line"] for l in doc["duo"] if l["lang"] == "fr"]
+    assert any("17e" in l and "18e" in l for l in fr)  # the duo opens on the table, numbers claimed
+    insights = desk_run / "insights.json"
+    assert not insights.exists() or all(d["type"] != "storyline" for d in json.loads(insights.read_text(encoding="utf-8")))
+
+
+def test_recap_says_what_the_result_changed_in_the_table(desk_run):
+    from worker.recap import build_recap, load_desk
+
+    cards, state = load_desk(desk_run)
+    recap = build_recap(cards, state, storyline=json.loads((desk_run / "storyline.json").read_text(encoding="utf-8")))
+    assert recap["verification"]["verified"]
+    texts = {t["lang"]: t["recap"] for t in recap["texts"]}
+    assert "Rovers move from 17th to" in texts["en"] and "risque de descente" in texts["fr"]  # the winner's season, rank and chance
+    assert build_recap(cards, state)["facts"].keys().isdisjoint({k for k in recap["facts"] if k.startswith("season_")})

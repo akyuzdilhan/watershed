@@ -93,8 +93,8 @@ class CosmosSink:
         self._upsert(self.cards, {**doc, "wp_timeline": thin_timeline(doc["wp_timeline"])})
 
     def insight(self, doc: dict) -> None:
-        """Insights live next to the cards, with type "insight" (contract)."""
-        self._upsert(self.cards, {**doc, "type": "insight"})
+        """Insights and the storyline live next to the cards, with type "insight" or "storyline" (contract)."""
+        self._upsert(self.cards, {**doc, "type": "storyline" if doc.get("type") == "storyline" else "insight"})
 
     def load_insight(self, match_id: str, insight_id: str) -> dict | None:
         return self.load_card(match_id, insight_id)
