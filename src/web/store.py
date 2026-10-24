@@ -67,7 +67,7 @@ class Store:
 
     def insights(self, match_id: str) -> list[dict]:
         """Insight documents, the highest `value` first."""
-        return self._cached(("insights", match_id), lambda: sorted(self._insights(match_id), key=lambda d: (-d.get("value", 0), d.get("clock_s") or 0)))
+        return self._cached(("insights", match_id), lambda: sorted(self._insights(match_id), key=lambda d: (d.get("status") in ("superseded", "rejected"), -d.get("value", 0), d.get("clock_s") or 0)))
 
     def storyline(self, match_id: str) -> dict | None:
         return self._cached(("storyline", match_id), lambda: self._storyline(match_id))
