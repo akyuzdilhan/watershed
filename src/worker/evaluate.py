@@ -39,7 +39,7 @@ PERTURBATIONS = {
     "jitter_6s": {"jitter": 6.0, "label": "every message delayed by 0-6 s", "within": False},
     "delay_10s": {"delay": (0.05, 4.0, 10.0), "label": "5 % of messages delayed by 4-10 s", "within": False},
     "delay_120s": {"delay": (0.02, 30.0, 120.0), "label": "2 % of messages delayed by 30-120 s", "within": False},
-    "goal_after_correction": {"after_correction": 5.0, "label": "each corrected goal arrives 5 s after its correction (matches with a corrected goal only)", "within": False},
+    "goal_after_correction": {"after_correction": 5.0, "label": "each corrected goal arrives 5 s after its correction (matches with a corrected goal only; compares the cards a viewer sees)", "within": False},
 }
 
 
@@ -102,6 +102,12 @@ def snapshot(result: dict) -> dict:
     actions = sorted((r["card_id"], r["action"], r["message_id"]) for _, r in result["produced"] if "action" in r)
     match = next(iter(pipeline.matches.values()))
     return {"cards": cards, "actions": actions, "score": match.score()}
+
+
+def on_air(s: dict) -> dict:
+    """The cards a viewer can still see (not retracted), by moment, team and player; actions dropped."""
+    cards = {cid: (c[0], c[3], c[4]) for cid, c in s["cards"].items() if c[1] != "retracted"}
+    return {"cards": cards, "actions": [], "score": s["score"]}
 
 
 def diff(a: dict, b: dict) -> list[str]:
@@ -264,7 +270,9 @@ def evaluate_match(stream: list[dict], truth: dict, robustness: bool = True) -> 
         for name in PERTURBATIONS:
             timed = perturb(stream, name, truth["seed"])
             if timed is not None:
-                out["robustness"][name] = diff(base, snapshot(run(timed, desk=False)))
+                other = snapshot(run(timed, desk=False))
+                # A correction that overtakes its goal gives a card born corrected (no rewrite, no card for a voided goal): compare what a viewer can see.
+                out["robustness"][name] = diff(on_air(base), on_air(other)) if name == "goal_after_correction" else diff(base, other)
     return out
 
 
