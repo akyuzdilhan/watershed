@@ -125,7 +125,7 @@ def reduce(record: dict, index: int, season_idx: dict[str, int]) -> Features:
     goals.sort(key=lambda g: g.minute)
     sub_in = {}
     for s in _first(record, "substitutions", "subs", default=[]) or []:
-        pid = _pid(_first(s, "player_in", "on", "in"))
+        pid = _pid(_first(s, "player_on", "player_in", "on", "in"))
         if pid:
             sub_in[pid] = int(_first(s, "minute", default=0))
     reds = []
