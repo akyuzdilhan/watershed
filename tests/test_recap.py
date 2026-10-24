@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 
 import pytest
@@ -7,8 +8,8 @@ from generator import generate_match
 from worker import recap as recap_cli
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, MemorySink, Pipeline
-from worker.recap import MAX_WORDS, analyse, build_recap, recap_facts, verify_recap
-from worker.writer import TemplateWriter
+from worker.recap import MAX_WORDS, RULED_OUT_WORDS, analyse, build_recap, recap_facts, verify_recap
+from worker.writer import TemplateWriter, sentences
 
 
 def run_desk(seed: int, story: str = "random", sink=None, frames: bool = False):
@@ -53,8 +54,47 @@ def test_no_retracted_card_is_cited(demo):
     assert all(status[i] == "approved" for i in recap["cited_cards"] + recap["analysis"]["cards_on_air"])
     voided = {c["event_id"] for c in retracted}
     assert all(p["minute_label"] not in ("63'", "69'") for p in recap["analysis"]["wp_curve"])
-    text = json.dumps(recap["texts"], ensure_ascii=False) + json.dumps(recap["facts"], ensure_ascii=False)
-    assert "63'" not in text and "69'" not in text and not voided & set(recap["analysis"]["cards_on_air"])
+    assert not voided & set(recap["analysis"]["cards_on_air"])
+    # a retracted minute appears only as a goal ruled out, in a sentence that says so, from the disallowed_* facts
+    assert {k for k, v in recap["facts"].items() if v in ("63'", "69'")} == {"disallowed_1_minute", "disallowed_2_minute"}
+    for t in recap["texts"]:
+        for section in MAX_WORDS:
+            for s in sentences(t[section]):
+                if "63'" in s or "69'" in s:
+                    assert re.search(RULED_OUT_WORDS[t["lang"]], s), s
+
+
+def test_recap_tells_the_goals_ruled_out_and_why(demo):
+    _, _, _, recap = demo
+    assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
+        ("63'", "Dorian Lightfoot", "offside", 25), ("69'", "Vito Valtonen", "handball", None)]
+    texts = {t["lang"]: t for t in recap["texts"]}
+    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside by 25 cm) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
+    assert "hors-jeu de 25" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
+    assert "fuera de juego por 25 cm" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
+    assert recap["verification"]["verified"]
+    claims = {(c["source_field"], c["value"]) for t in recap["texts"] for c in t["claims"]}
+    assert ("disallowed_1_margin_cm", 25) in claims and ("disallowed_2_minute", 69) in claims
+
+
+def test_disallowed_goals_can_be_passed_explicitly(demo):
+    cards, state, _, _ = demo
+    plain = [{k: v for k, v in c.items() if k != "ruled_out"} for c in cards]  # a desk written before the ruled_out record
+    assert build_recap(plain, state)["analysis"]["disallowed_goals"] == []
+    given = [{"minute_label": "63'", "team": "home", "player": "Dorian Lightfoot", "reason": "offside", "margin_cm": 25}]
+    recap = build_recap(plain, state, disallowed=given)
+    en = next(t for t in recap["texts"] if t["lang"] == "en")
+    assert "offside by 25 cm" in en["recap"] and recap["verification"]["verified"]
+
+
+def test_points_mean_only_a_change_in_win_probability(demo):
+    _, _, _, recap = demo
+    assert not [k for k in recap["facts"] if k.endswith("_pts") and "swing" not in k]  # value_pts orders the moments, it is never a fact to write
+    for t in recap["texts"]:
+        for section in MAX_WORDS:
+            assert "pts" not in t[section]
+            for m in re.finditer(r"(\d+) (?:points|puntos)", t[section]):
+                assert int(m.group(1)) == recap["facts"]["turning_point_swing_pts"], t[section]
 
 
 def test_only_approved_cards_count(demo):
@@ -85,7 +125,7 @@ def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
         "retracted goal": "Dorian Lightfoot scored at 63' too.",
         "unknown player": "Rovers won, Umberto Valtonen starred.",
         "spelled number": "Dorian Lightfoot scored four goals.",
-        "too long": " ".join(["Rovers"] * 61),
+        "too long": " ".join(["Rovers"] * (MAX_WORDS["recap"] + 1)),
     }
     for case, text in cases.items():
         bad = [dict(good[0], recap=text)] + good[1:]

@@ -85,3 +85,21 @@ Written before kick-off: the context of the match (table positions, stakes in % 
 ### Commentary duo (`duo` field of cards and insights)
 
 Two fictional commentators with complementary personalities, defined in `src/worker/duo.py` (no real person, no imitation of a real commentator). A card or insight may carry `duo: [{speaker, lang, line, claims}]`, two to four lines per language, every number claimed like `texts`. Personas: one carried by emotion and the story, one by the detail and the numbers.
+
+Speakers are `wren` (Wren Calder, emotion and story) and `joss` (Joss Ferrier, detail and numbers); lines alternate. `duo_writer` says who wrote the lines (model name or `template`; a model's verified texts can come with template lines).
+
+### Writer and desk fields (cards)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `on_air_priority` | `normal` or `low` | `low`: a goal that moves its team's chance of winning by less than 2 points; its texts give no probability (milestone or story line) |
+| `scorer_match_goals` | int | goals cards: the scorer's goals in the match so far, this one included, goals ruled out excluded |
+| `ruled_out` | `{reason, cause, minute_label, margin_cm}` | set by the desk when VAR voids a goal card: `reason` `offside`, `handball` or another cause, `minute_label` of the decision, `margin_cm` the offside margin in centimetres when the feed gives it (else null) |
+| `duo_ruling` | array, as `duo` | what the duo says when VAR rules the goal out (templates only, verified) |
+| `verification.repetition_warnings` | int | phrases, openings or tics already used in the match (warnings; an identical headline fails the draft) |
+
+"Points" on screen means only a change in a team's chance of winning (`swing_pts`, `save_value_pts`, `turning_point_swing_pts`). `value_pts` ranks cards and is never written in a text.
+
+Insights and the storyline are written by `Desk.write_insight(doc, teams)`: same Writer, Verifier, retry and template path, same statuses and audit entries as cards, stored through the sink's `insight` method when it has one, else `card`.
+
+The recap (`type: "recap"`) adds `analysis.disallowed_goals`: `[{card_id, minute_label, team, player, reason, margin_cm}]`, read from the `ruled_out` records of retracted goal cards (or passed to `build_recap(..., disallowed=...)`); the texts name them only as ruled out, with the reason and the margin.
