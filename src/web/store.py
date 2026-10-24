@@ -1,6 +1,8 @@
 """Where the console and the overlay read the desk (layout in docs/contracts.md): JSON files under `DESK_DIR`, or Cosmos DB when `COSMOS_ENDPOINT` is set.
 
 Reads are cached for a second, so that every viewer of the overlay costs one read per process and per second. Producer decisions go through `worker.desk.Desk`, with a sink that writes back to the same store; the desk is imported only when a decision is made, so the overlay never loads the Writer.
+
+Besides cards, the store reads insight and storyline documents (`insights.json` and `storyline.json` locally, `type` insight or storyline in the `cards` container) and the feed itself for the match graphics: locally `<match>/feed.jsonl[.gz]` in the desk folder, else `<REPLAY_DIR>/<match>.jsonl[.gz]` (default data/replay), in Azure the `events` container. While the match is not final, the feed is cut at the match state's `last_seq`, so a replay file never shows what the desk has not seen yet.
 """
 
 import json
@@ -8,6 +10,8 @@ import os
 import threading
 import time
 from pathlib import Path
+
+from web import matchfeed
 
 
 def _clean(doc: dict) -> dict:
@@ -59,6 +63,37 @@ class Store:
         """One card, read fresh (decisions never act on a cached copy)."""
         return next((dict(c) for c in self._cards(match_id) if c["id"] == card_id), None)
 
+    def insights(self, match_id: str) -> list[dict]:
+        """Insight documents, the highest `value` first."""
+        return self._cached(("insights", match_id), lambda: sorted(self._insights(match_id), key=lambda d: (-d.get("value", 0), d.get("clock_s") or 0)))
+
+    def storyline(self, match_id: str) -> dict | None:
+        return self._cached(("storyline", match_id), lambda: self._storyline(match_id))
+
+    def doc(self, match_id: str, doc_id: str) -> dict | None:
+        """A card, insight or storyline document by id, read fresh."""
+        for d in self._cards(match_id) + self._insights(match_id) + [self._storyline(match_id) or {}]:
+            if d.get("id") == doc_id:
+                return dict(d)
+        return None
+
+    feed_cache_s = 5.0
+
+    def feed(self, match_id: str) -> dict | None:
+        """`web.matchfeed.build` of the match's feed (actions with corrections applied), cut at the desk's last seq while the match runs; None without a feed."""
+        now = time.monotonic()
+        hit = self._cache.get(("feed", match_id))
+        if hit and now - hit[0] < max(self.cache_s, self.feed_cache_s):
+            return hit[1]
+        messages = self._feed_messages(match_id)
+        value = None
+        if messages:
+            state = self._state(match_id) or {}
+            upto = None if state.get("final") or not state.get("last_seq") else state["last_seq"]
+            value = matchfeed.build(messages, upto)
+        self._cache[("feed", match_id)] = (now, value)
+        return value
+
     # --- producer decisions -----------------------------------------------------------------------
 
     def desk(self):
@@ -88,10 +123,38 @@ class Store:
             finally:
                 self.invalidate()
 
+    def decide_doc(self, match_id: str, doc_id: str, action: str, by: str) -> dict:
+        """Approves or rejects an insight or storyline through the desk: its own `approve_insight` / `reject_insight` (or `_storyline`) when it has them, else the generic `approve` / `reject`, whose sink files the document by its `type`. Raises NotImplementedError when the desk has neither."""
+        if action not in ("approve", "reject"):
+            raise ValueError(f"unknown action {action}")
+        with self._lock:
+            doc = self.doc(match_id, doc_id)
+            if doc is None:
+                raise KeyError(doc_id)
+            doc.setdefault("version", 1)
+            doc.setdefault("history", [])
+            desk = self.desk()
+            method = getattr(desk, f"{action}_{doc.get('type', 'insight')}", None) or getattr(desk, action, None)
+            if method is None:
+                raise NotImplementedError(f"the desk has no {action} for {doc.get('type')}")
+            try:
+                return method(doc, by)
+            finally:
+                self.invalidate()
+
     # --- backends ---------------------------------------------------------------------------------
 
     def sink(self):
         raise NotImplementedError
+
+    def _insights(self, match_id: str) -> list[dict]:
+        return []
+
+    def _storyline(self, match_id: str) -> dict | None:
+        return None
+
+    def _feed_messages(self, match_id: str) -> list[dict]:
+        return []
 
     def _matches(self) -> list[dict]:
         raise NotImplementedError
@@ -106,19 +169,36 @@ class Store:
         raise NotImplementedError
 
 
+def _write_atomic(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(value, indent=1, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _doc_list(value) -> list[dict]:
+    """insights.json may hold an array or `{"insights": [...]}`."""
+    if isinstance(value, dict):
+        value = value.get("insights", [])
+    return [d for d in value or [] if isinstance(d, dict)]
+
+
 class FileDeskSink:
-    """Writes the producer's decisions back to `root/<match_id>/`: the card replaced in cards.json, the entry appended to audit.jsonl."""
+    """Writes the producer's decisions back to `root/<match_id>/`: the document replaced in cards.json, insights.json or storyline.json (by its `type`), the entry appended to audit.jsonl."""
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 
     def card(self, card: dict) -> None:
-        path = self.root / card["match_id"] / "cards.json"
-        cards = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-        cards = [card if c["id"] == card["id"] else c for c in cards] + ([] if any(c["id"] == card["id"] for c in cards) else [card])
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cards, indent=1, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        kind = card.get("type", "card")
+        folder = self.root / card["match_id"]
+        if kind == "storyline":
+            _write_atomic(folder / "storyline.json", card)
+            return
+        path = folder / ("insights.json" if kind == "insight" else "cards.json")
+        docs = _doc_list(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else []
+        docs = [card if c["id"] == card["id"] else c for c in docs] + ([] if any(c["id"] == card["id"] for c in docs) else [card])
+        _write_atomic(path, docs)
 
     def audit_entry(self, entry: dict) -> None:
         path = self.root / entry["match_id"] / "audit.jsonl"
@@ -130,10 +210,12 @@ class FileDeskSink:
 class FileStore(Store):
     """The desk the worker writes with `--desk-dir`: one folder per match."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, replay_dir: Path | None = None) -> None:
         super().__init__()
         self.root = Path(root)
+        self.replay_dir = Path(replay_dir if replay_dir is not None else os.environ.get("REPLAY_DIR", "data/replay"))
         self._last_good: dict[Path, object] = {}
+        self._feeds: dict[Path, tuple[float, list[dict]]] = {}
 
     def sink(self) -> FileDeskSink:
         return FileDeskSink(self.root)
@@ -164,6 +246,36 @@ class FileStore(Store):
     def _state(self, match_id: str) -> dict | None:
         return self._json(self.root / match_id / "state.json", None)
 
+    def _insights(self, match_id: str) -> list[dict]:
+        return [d for d in _doc_list(self._json(self.root / match_id / "insights.json", [])) if d.get("type", "insight") == "insight"]
+
+    def _storyline(self, match_id: str) -> dict | None:
+        doc = self._json(self.root / match_id / "storyline.json", None)
+        if isinstance(doc, list):
+            doc = next((d for d in doc if isinstance(d, dict)), None)
+        return doc if isinstance(doc, dict) else None
+
+    def feed_path(self, match_id: str) -> Path | None:
+        for path in (self.root / match_id / "feed.jsonl.gz", self.root / match_id / "feed.jsonl", self.replay_dir / f"{match_id}.jsonl.gz", self.replay_dir / f"{match_id}.jsonl"):
+            if path.is_file():
+                return path
+        return None
+
+    def _feed_messages(self, match_id: str) -> list[dict]:
+        path = self.feed_path(match_id)
+        if path is None:
+            return []
+        mtime = path.stat().st_mtime
+        hit = self._feeds.get(path)
+        if hit and hit[0] == mtime:
+            return hit[1]
+        try:
+            messages = matchfeed.load(path)
+        except (OSError, EOFError, json.JSONDecodeError):  # a file being written
+            return hit[1] if hit else []
+        self._feeds[path] = (mtime, messages)
+        return messages
+
     def _audit(self, match_id: str) -> list[dict]:
         path = self.root / match_id / "audit.jsonl"
         try:
@@ -187,7 +299,8 @@ class CosmosStore(Store):
         from worker.azure_io import CosmosSink
 
         self._sink = CosmosSink(endpoint, database)
-        self.cards_c, self.audit_c = self._sink.cards, self._sink.audit
+        self.cards_c, self.audit_c, self.events_c = self._sink.cards, self._sink.audit, self._sink.events
+        self._events: dict[str, tuple[int, dict[str, dict]]] = {}  # match id -> (highest _ts read, messages by id)
 
     def sink(self):
         return self._sink
@@ -206,6 +319,27 @@ class CosmosStore(Store):
             return _clean(self.cards_c.read_item(f"state-{match_id}", partition_key=match_id))
         except CosmosResourceNotFoundError:
             return None
+
+    def _insights(self, match_id: str) -> list[dict]:
+        return [_clean(d) for d in self.cards_c.query_items("SELECT * FROM c WHERE c.type = 'insight'", partition_key=match_id)]
+
+    def _storyline(self, match_id: str) -> dict | None:
+        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
+        try:
+            return _clean(self.cards_c.read_item(f"storyline-{match_id}", partition_key=match_id))
+        except CosmosResourceNotFoundError:
+            return None
+
+    def _feed_messages(self, match_id: str) -> list[dict]:
+        """Incremental: only the messages written since the last read (by `_ts`, one-second resolution, so the last second is read again and deduplicated by id)."""
+        ts, seen = self._events.get(match_id, (0, {}))
+        query = "SELECT * FROM c WHERE c._ts >= @ts"
+        for d in self.events_c.query_items(query, parameters=[{"name": "@ts", "value": ts}], partition_key=match_id):
+            ts = max(ts, d.get("_ts", 0))
+            seen[d["id"]] = _clean(d)
+        self._events[match_id] = (ts, seen)
+        return list(seen.values())
 
     def _audit(self, match_id: str) -> list[dict]:
         docs = list(self.audit_c.query_items("SELECT * FROM c", partition_key=match_id))

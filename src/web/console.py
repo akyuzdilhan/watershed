@@ -9,7 +9,7 @@ import json
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
-from web import security
+from web import panels, security
 from web.store import get_store
 
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
@@ -60,7 +60,9 @@ def detail(card: dict | None, audit: list[dict]) -> html.Div:
     head = html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
                      html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, value {card.get('value_pts', 0)} pts, version {card.get('version', 1)}", className="muted"),
                                *badges(card)], className="detail-meta")])
-    return html.Div([head, html.Div(texts), html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history])
+    duo = panels.duo_block(card)
+    commentary = [html.H3("Commentary"), duo] if duo is not None else []
+    return html.Div([head, html.Div(texts), *commentary, html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history])
 
 
 PERIOD_STARTS = (2700.0, 5400.0, 6300.0)  # second half, extra time
@@ -257,7 +259,11 @@ def layout(user: str) -> html.Div:
         dcc.Interval(id="c-tick", interval=1500), dcc.Store(id="c-sig"), dcc.Store(id="c-rev", data=0), dcc.Store(id="c-editing", data=False),
         html.Header([html.Div([html.Span("Watershed", className="brand"), html.Span("producer desk", className="muted")]),
                      dcc.Dropdown(id="c-match", clearable=False, className="match-picker", placeholder="Match"),
-                     html.Div(id="c-score", className="scoreline"), html.Div(f"Signed in as {user}", className="who muted")], className="top"),
+                     html.Div(id="c-score", className="scoreline"),
+                     dcc.RadioItems(id="c-view", options=panels.VIEWS, value="desk", className="view-switch", inputClassName="view-radio", labelClassName="view-label"),
+                     html.Div(f"Signed in as {user}", className="who muted")], className="top"),
+        panels.graphics_pane(),
+        panels.insights_pane(),
         html.Main([
             html.Section([html.H3("Rundown"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
             html.Section([
@@ -271,7 +277,7 @@ def layout(user: str) -> html.Div:
                 html.Div(id="c-message", className="message", role="status")], className="col col-middle"),
             html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", config={"displayModeBar": False}),
                           html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small")], className="col col-right"),
-        ], className="desk"),
+        ], id="c-pane-desk", className="desk"),
     ], className="console")
 
 
@@ -323,3 +329,4 @@ def register(app) -> None:
                  State({"type": "c-edit-headline", "lang": ALL}, "id"), State({"type": "c-edit-headline", "lang": ALL}, "value"),
                  State({"type": "c-edit-why", "lang": ALL}, "id"), State({"type": "c-edit-why", "lang": ALL}, "value"),
                  prevent_initial_call=True)(_decide_cb)
+    panels.register(app)
