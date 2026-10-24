@@ -168,6 +168,10 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
         meanings |= {"shooter": "player who took the shot", "shot_xg_pct": "chance the shot had of being a goal (expected goals), in %",
                      f"{slug}_wp_before_pct": f"{name}'s chance of winning the match, in %",
                      f"{slug}_wp_if_goal_pct": f"{name}'s chance of winning the match if the shot had gone in, in %"}
+    season = card.get("season_context") or {}
+    if season.get("facts"):  # what the score means for the season (worker.storyline.live_context), prefixed so it never collides with the match facts
+        facts |= {f"season_{k}": v for k, v in season["facts"].items()}
+        meanings |= {f"season_{k}": v for k, v in season.get("meanings", {}).items()}
     return facts, meanings
 
 
@@ -800,6 +804,9 @@ class TemplateWriter:
                 if tic:
                     text = f"{tic} {text}"
             lines.append({"speaker": speaker, "lang": lang, "line": text, "claims": claims})
+        season = season_lines(card, facts, lang, pick) if kind == "goal" and len(lines) >= 2 else None
+        if season:  # the table matters more than a third remark: the duo ends on it
+            lines = lines[:2] + season
         return lines
 
     def ruling(self, card: dict, facts: dict, languages: list[str], memory: PhraseMemory | None = None) -> list[dict]:
@@ -893,6 +900,58 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
             return None
         lines = [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]
     return out, lines
+
+
+SEASON_LINES = {  # the duo on what a goal does to the table: Wren asks, Joss answers with the rank and the relegation chance if the score holds
+    "en": {"ask": ["And the table, Joss?", "What does it do to the table, Joss?"],
+           "leaves": "If it stays {score}, {club} climb out of the drop zone, up to {rank_ord}.", "enters": "If it stays {score}, {club} drop into the drop zone, down to {rank_ord}.",
+           "up": "If it stays {score}, {club} go up to {rank_ord}, and their chance of going down falls to {chance}%.",
+           "down": "If it stays {score}, {club} slip to {rank_ord}, and their chance of going down rises to {chance}%."},
+    "fr": {"ask": ["Et au classement, Joss ?", "Qu'est-ce que ça change au classement, Joss ?"],
+           "leaves": "Si ça reste {score}, {club} sort de la zone rouge et remonte {rank_ord}.", "enters": "Si ça reste {score}, {club} tombe dans la zone rouge, {rank_ord}.",
+           "up": "Si ça reste {score}, {club} remonte {rank_ord}, et son risque de descente tombe à {chance} %.",
+           "down": "Si ça reste {score}, {club} recule {rank_ord}, et son risque de descente monte à {chance} %."},
+    "es": {"ask": ["¿Y en la tabla, Joss?", "¿Qué cambia en la tabla, Joss?"],
+           "leaves": "Si se mantiene el {score}, el {club} sale del descenso y sube al {rank_ord} puesto.", "enters": "Si se mantiene el {score}, el {club} cae al descenso, {rank_ord}.",
+           "up": "Si se mantiene el {score}, el {club} sube al {rank_ord} puesto, y su riesgo de descenso baja al {chance}%.",
+           "down": "Si se mantiene el {score}, el {club} baja al {rank_ord} puesto, y su riesgo de descenso sube al {chance}%."},
+}
+SEASON_LINES = {lang: fr_typography(v) if lang == "fr" else v for lang, v in SEASON_LINES.items()}
+
+
+def season_lines(card: dict, facts: dict, lang: str, pick: _Picker) -> list[dict] | None:
+    """Two duo lines on the table when a goal changes it: a club entering or leaving the drop zone first, else the scoring club moving two places or more."""
+    from worker.insight_texts import Ord
+
+    score_field = "season_score_now"
+    if not isinstance(facts.get(score_field), str):
+        return None
+    scoring = card["team_name"]
+    clubs = sorted({k[len("season_"):-len("_rank_if_score_holds")] for k in facts if k.startswith("season_") and k.endswith("_rank_if_score_holds")})
+    names = {c: next((n for n in (facts.get("score_before", "") or "").replace("-", " ").split() if n.lower() == c), None) for c in clubs}
+    pickd = None
+    for c in clubs:
+        for move in ("leaves", "enters"):
+            if facts.get(f"season_{c}_{move}_drop_zone_if_score_holds"):
+                pickd = pickd or (c, move)
+    slug = scoring.lower().replace(" ", "_")
+    if pickd is None and f"season_{slug}_rank_if_score_holds" in facts:
+        before, after = facts[f"season_{slug}_rank_at_kickoff"], facts[f"season_{slug}_rank_if_score_holds"]
+        if abs(after - before) >= 2 and f"season_{slug}_relegation_chance_if_score_holds_pct" in facts:
+            pickd = (slug, "up" if after < before else "down")
+    if pickd is None:
+        return None
+    c, move = pickd
+    club = scoring if c == slug else (names.get(c) or c.replace("_", " ").title())
+    score = re.search(r"\d+-\d+", facts[score_field]).group(0)
+    rank = facts[f"season_{c}_rank_if_score_holds"]
+    values = {"score": score, "club": club, "rank_ord": Ord(rank, lang), "chance": facts.get(f"season_{c}_relegation_chance_if_score_holds_pct")}
+    fields = {"score": score_field, "rank_ord": f"season_{c}_rank_if_score_holds", "chance": f"season_{c}_relegation_chance_if_score_holds_pct"}
+    answer = fill(SEASON_LINES[lang][move], values, fields)
+    ask = pick.line(SEASON_LINES[lang]["ask"], {}, {}, "season_ask")
+    if not answer or not ask:
+        return None
+    return [{"speaker": HEART, "lang": lang, "line": ask[0], "claims": ask[1]}, {"speaker": EYE, "lang": lang, "line": answer[0], "claims": answer[1]}]
 
 
 def memory_key_free(pick: _Picker, text: dict) -> bool:

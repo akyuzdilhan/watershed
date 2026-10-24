@@ -249,6 +249,7 @@ class Pipeline:
     _history_view: object | None = None
     storyline_for: object | None = None  # callable(match_id, teams) -> storyline document, built once when the match information arrives
     storylines: dict[str, dict] = field(default_factory=dict)
+    _tables: dict[str, list] = field(default_factory=dict)  # per match: (event id, table if the score holds) of each goal given a season context
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
         """Processes one message off the wire; returns the cards and card actions it produced."""
@@ -289,6 +290,7 @@ class Pipeline:
                     if self.desk is not None:
                         self.desk.on_action(card, result, teams)
                 else:
+                    self._season(match, card)
                     self.sink.card(result)
                     if self.desk is not None:
                         self.desk.write(card, teams)
@@ -320,6 +322,35 @@ class Pipeline:
                 write(doc, teams)
                 if store is not None:
                     store(doc)  # the texts and the status the desk set, whether or not it stored them itself
+
+    def _season(self, match: Match, card: dict) -> None:
+        """What the score after a goal (or at a red card) means for the season, from the pre-match storyline: on the card, for the Writer."""
+        story = self.storylines.get(match.match_id)
+        if story is None or card["moment"] not in ("goal", "red_card"):
+            return
+        from worker.storyline import live_context
+
+        score = dict(card["score_before"])
+        if card["moment"] == "goal":
+            score[card["team"]] += 1
+        facts, meanings = live_context(story, {"score": score})
+        table = tuple(sorted((k, v) for k, v in facts.items() if k.endswith(("_rank_if_score_holds", "_if_score_holds")) and not k.endswith("_pct")))
+        said = [(eid, t) for eid, t in self._tables.get(match.match_id, []) if eid not in match.voided]
+        if said and said[-1][1] == table:
+            return  # the table would read the same as after the last goal that counts: nothing new to say
+        if said:  # entering or leaving the zone is told against the score before this goal, not against kick-off
+            prev = dict(said[-1][1])
+            for k in [k for k in facts if k.endswith(("_leaves_drop_zone_if_score_holds", "_enters_drop_zone_if_score_holds"))]:
+                facts.pop(k)
+                meanings.pop(k, None)
+            for k, now in list(facts.items()):
+                if k.endswith("_in_drop_zone_if_score_holds") and k in prev and prev[k] != now:
+                    club = k[: -len("_in_drop_zone_if_score_holds")]
+                    flag = f"{club}_{'enters' if now else 'leaves'}_drop_zone_if_score_holds"
+                    facts[flag] = True
+                    meanings[flag] = f"{club} {'drop into' if now else 'climb out of'} the drop zone with this goal, if the score holds"
+        self._tables.setdefault(match.match_id, []).append((card["event_id"], table))
+        card["season_context"] = {"facts": facts, "meanings": meanings}
 
     def _storyline(self, match: Match) -> None:
         """Before kick-off: the context of the match, written and checked by the desk like an insight, stored next to the cards."""

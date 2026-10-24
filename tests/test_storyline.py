@@ -243,3 +243,14 @@ def test_recap_says_what_the_result_changed_in_the_table(desk_run):
     texts = {t["lang"]: t["recap"] for t in recap["texts"]}
     assert "Rovers move from 17th to" in texts["en"] and "risque de descente" in texts["fr"]  # the winner's season, rank and chance
     assert build_recap(cards, state)["facts"].keys().isdisjoint({k for k in recap["facts"] if k.startswith("season_")})
+
+
+def test_goal_cards_tell_the_table_only_when_it_changes(desk_run):
+    cards = sorted(json.loads((desk_run / "cards.json").read_text(encoding="utf-8")), key=lambda c: c["clock_s"])
+    said = {c["minute_label"]: [l["line"] for l in c.get("duo", []) if l["lang"] == "en" and l["line"].startswith("If it stays")] for c in cards if c["moment"] == "goal"}
+    assert said["14'"] == ["If it stays 0-1, Rovers drop into the drop zone, down to 18th."]
+    assert said["31'"] == [] and said["52'"] == []  # still in the drop zone: nothing new
+    assert said["57'"] and "climb out of the drop zone" in said["57'"][0]  # against the score before the goal, not kick-off
+    assert said["66'"] and "14th" in said["66'"][0]  # the 63' goal was ruled out, so 66' says it again
+    assert said["83'"] == []
+    assert all(c["verification"]["verified"] for c in cards)
