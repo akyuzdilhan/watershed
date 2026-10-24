@@ -17,7 +17,7 @@ dev = ["pytest>=8", "common-data-format-validator>=0.1.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["generator*", "winprob*", "worker*"]
+include = ["generator*", "winprob*", "worker*", "league*", "web*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

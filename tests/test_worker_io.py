@@ -545,3 +545,44 @@ def test_a_failed_completion_releases_the_session_and_the_loop_goes_on(demo):
     stats = consume(Pipeline(), open_session, idle_s=30, clock=clock, errors=errors)
     assert errors.counts[("session", "RuntimeError")] == 1
     assert log["closed"] == ["lost", "next"] and stats["completed"] == 50
+
+
+def test_producer_decisions_survive_feed_updates(tmp_path):
+    """The console approves a card in the store; the worker's later retraction must see it was on air."""
+    import json as _json
+
+    from generator import generate_match
+    from worker.desk import Desk
+    from worker.pipeline import JsonFileSink, Pipeline
+    from worker.writer import TemplateWriter
+
+    stream, truth = generate_match(7, "demo", frames=False)
+    sink = JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()))
+    goal = next(m["event_id"] for m in truth["moments"] if m["key"] == "goal-63")
+    path = tmp_path / "demo-0007" / "cards.json"
+    approved = False
+    for m in sorted(stream, key=lambda m: m["emitted_at_s"]):
+        pipeline.handle(m)
+        if not approved and path.exists():
+            cards = _json.loads(path.read_text(encoding="utf-8"))
+            for c in cards:
+                if c["event_id"] == goal:  # what the console does: approve in the store, not in the worker
+                    c["status"] = "approved"
+                    c.setdefault("history", []).append({"action": "approved", "by": "producer", "version": c["version"]})
+                    path.write_text(_json.dumps(cards), encoding="utf-8")
+                    approved = True
+    pipeline.flush()
+    card = sink.cards[f"card-{goal}"]
+    assert approved and card["status"] == "retracted" and card["retracted_on_air"]
+    assert any(h["by"] == "producer" for h in card["history"])
+
+
+def test_thin_timeline_keeps_jumps_and_the_end():
+    from worker.azure_io import thin_timeline
+
+    points = [{"home": 0.3, "draw": 0.3, "away": 0.4} for _ in range(100)]
+    points[50] = points[51] = {"home": 0.7, "draw": 0.2, "away": 0.1}
+    thinned = thin_timeline(points)
+    assert len(thinned) < 25 and thinned[-1] is points[-1]
+    assert points[49] in thinned and any(p is points[50] for p in thinned)

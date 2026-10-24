@@ -89,7 +89,26 @@ class CosmosSink:
         self._upsert(self.audit, entry)
 
     def state(self, doc: dict) -> None:
-        self._upsert(self.cards, doc)  # the match state lives next to the cards, with type "match_state"
+        """The match state lives next to the cards, with type "match_state". Its curve is thinned (contract): every point would make a 200 KB document rewritten all match long."""
+        self._upsert(self.cards, {**doc, "wp_timeline": thin_timeline(doc["wp_timeline"])})
+
+    def load_card(self, match_id: str, card_id: str) -> dict | None:
+        """The card as stored, with the producer's latest decision."""
+        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
+        try:
+            return with_retry(lambda: self.cards.read_item(card_id, partition_key=match_id))
+        except CosmosResourceNotFoundError:
+            return None
+
+
+def thin_timeline(points: list[dict], every: int = 10, keep: int = 3) -> list[dict]:
+    """One point in `every`, the last `keep` points, and both sides of every jump of 5 points or more (a goal, a red card), so steps stay sharp."""
+    picked = {i for i in range(0, len(points), every)} | set(range(max(len(points) - keep, 0), len(points)))
+    for i in range(1, len(points)):
+        if max(abs(points[i][k] - points[i - 1][k]) for k in ("home", "draw", "away")) >= 0.05:
+            picked |= {i - 1, i}
+    return [points[i] for i in sorted(picked)]
 
 
 def cosmos_from_env() -> CosmosSink:

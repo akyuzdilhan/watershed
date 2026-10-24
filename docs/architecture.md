@@ -9,20 +9,20 @@ How a message from the match feed becomes a card on air, and what happens when t
 | Match engine | `src/generator/engine.py` and the classes it steps (`Laws`, `ActionModel`, `Shape`, `Director`) | Seed, story | Ordered message log | Offline |
 | Feed builder | `src/generator/feed.py` (`build_stream`, `TruthRecorder`) | Message log | Feed in arrival order (latency, late messages, duplicates) and hidden ground truth | Offline |
 | CDF export | `src/generator/cdf.py` | Feed | Match at rest in the Common Data Format 0.3.2, corrections applied | Offline |
-| Publisher | `src/generator/publish.py` | Replay file | Service Bus messages, paced for a live demo | Developer machine; Container Apps Job (merging) |
+| Publisher | `src/generator/publish.py` | Replay file | Service Bus messages, paced for a live demo | Developer machine; Container Apps Job (not deployed yet) |
 | Match | `src/worker/match.py` | Raw messages | Deduplicated messages in provider order; derived state (score, red cards, added time, final whistle) | Worker |
 | Win probability | `src/winprob/` | `MatchState` | `WinProb(home, draw, away)` | Worker |
 | Spotter | `src/worker/spotter.py` | Ordered messages, match state, model | New cards; card actions (`hold`, `release`, `retract`, `rewrite`) | Worker |
 | Writer | `src/worker/writer.py` (`FoundryWriter`, `TemplateWriter`) | Card facts and their meanings | Draft texts with claims, per language | Worker, calls Microsoft Foundry |
 | Verifier | `src/worker/writer.py` (`verify`) | Draft, facts | Verification report | Worker |
-| Desk | `src/worker/desk.py` | Cards and card actions | Card statuses, audit entries | Worker; producer decisions from the console (planned) |
+| Desk | `src/worker/desk.py` | Cards and card actions | Card statuses, audit entries | Worker; producer decisions from the console |
 | Pipeline | `src/worker/pipeline.py` | Messages | Calls the above in order, keeps the win-probability curve, writes to a sink | Worker |
 | Match state | `match_state` in `src/worker/pipeline.py` | Match, curve | Score, red cards, clock, final whistle, last sequence number, `wp_timeline` | Worker |
 | Sinks | `MemorySink` and `JsonFileSink` in `pipeline.py`, `CosmosSink` in `azure_io.py` | Events, cards, actions, audit, match state | Lists in memory, JSON files in `<desk-dir>/<match_id>/`, or Cosmos DB documents | Worker |
-| Web app | `src/web/app.py` | | Placeholder page today; producer console and read-only overlay planned | Azure Container Apps |
-| Pitch figures | Built, merging | Freeze frames | Pitch figures of the 360 frames, including the 63' offside frame with the offside line and the margin | Console, video |
+| Web app | `src/web/` | Cards, match state, audit | Producer console (`/`) and read-only overlay (`/overlay`); the deployed app is still a placeholder | Azure Container Apps |
+| Pitch figures | `src/web/pitch.py` | Freeze frames | Pitch figures of the 360 frames, including the 63' offside frame with the offside line and the margin | Console, video |
 
-The same `Pipeline` runs on a replay file and on the Service Bus subscription, so every behaviour tested offline is the one that runs live. In Azure, the worker runs as a Container App scaled by a KEDA rule on the Service Bus subscription, and the publisher as a Container Apps Job (both built, merging).
+The same `Pipeline` runs on a replay file and on the Service Bus subscription, so every behaviour tested offline is the one that runs live. In Azure, the worker runs as a Container App scaled by a KEDA rule on the Service Bus subscription, and the publisher as a Container Apps Job (both in the templates, not deployed yet).
 
 ## Data flow
 
@@ -170,18 +170,18 @@ The 63' goal of the demo, in feed time:
 |---|---|---|---|---|---|
 | Web app | User-assigned managed identity (`id-web-<suffix>`) | AcrPull | Container Registry | Pull the image without a registry password | `infra/resources.bicep` |
 | Web app | Same | Cosmos DB Built-in Data Contributor | Cosmos DB account | Read cards and match state for the console, record producer decisions; more than a read-only overlay needs | `infra/resources.bicep` |
-| Web app | Same | Azure Service Bus Data Sender | Topic `match-events` | Send on the topic | Merging |
-| Worker | User-assigned managed identity | AcrPull | Container Registry | Pull the image | Merging |
-| Worker | Same | Azure Service Bus Data Receiver | Subscription `worker` | Read the feed; also used by the KEDA scale rule | Merging |
-| Worker | Same | Cosmos DB Built-in Data Contributor | Database `watershed` | Write events, cards, match state and audit | Merging |
-| Worker | Same | Foundry User | Foundry account | Call the Writer model | Merging |
-| Replay job | User-assigned managed identity | AcrPull | Container Registry | Pull the image | Merging |
-| Replay job | Same | Azure Service Bus Data Sender | Topic `match-events` | Publish the demo replay | Merging |
+| Web app | Same | Azure Service Bus Data Sender | Topic `match-events` | Send on the topic | Not deployed yet |
+| Worker | User-assigned managed identity | AcrPull | Container Registry | Pull the image | Not deployed yet |
+| Worker | Same | Azure Service Bus Data Receiver | Subscription `worker` | Read the feed; also used by the KEDA scale rule | Not deployed yet |
+| Worker | Same | Cosmos DB Built-in Data Contributor | Database `watershed` | Write events, cards, match state and audit | Not deployed yet |
+| Worker | Same | Foundry User | Foundry account | Call the Writer model | Not deployed yet |
+| Replay job | User-assigned managed identity | AcrPull | Container Registry | Pull the image | Not deployed yet |
+| Replay job | Same | Azure Service Bus Data Sender | Topic `match-events` | Publish the demo replay | Not deployed yet |
 | Developer (`principalId` from azd) | User | Cosmos DB Built-in Data Contributor | Cosmos DB account | Run the worker locally with `--cosmos` | `infra/resources.bicep` |
 | Developer | User | Azure Service Bus Data Sender, Azure Service Bus Data Receiver | Service Bus namespace | Publish the replay, run the worker with `--live` | `infra/resources.bicep` |
 | Developer | User | Access to the Foundry project | Foundry resource | Run the Writer with `--writer foundry` | Assigned by hand, not in the templates |
 
-Console sign-in: Easy Auth hooks are in the templates, disabled until an app registration exists (merging). Until then the web app has no sign-in.
+Console sign-in: Easy Auth hooks are in the templates, disabled until an app registration exists. Until then producer actions are refused in public mode.
 
 Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth: true`), so these roles are the only way in. The code never reads a key: `DefaultAzureCredential` in the Service Bus and Cosmos DB clients, `ManagedIdentityCredential` then `AzureCliCredential` for Foundry. Two values that are not data-plane credentials still pass through the templates: the Container Apps environment reads the Log Analytics shared key at deployment (required by the `log-analytics` destination), and the web app gets the Application Insights connection string as an environment variable.
 
@@ -211,4 +211,4 @@ Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth:
 
 ## Deployment
 
-`azd up` (`azure.yaml`, `infra/main.bicep`, `infra/resources.bicep`) creates, in one resource group: Log Analytics (30-day retention, 0.2 GB daily cap) and Application Insights; a Basic Container Registry with the admin user disabled; the web identity; a Standard Service Bus namespace with the topic `match-events` (messages live one day) and the session-enabled subscription `worker` (lock 1 minute, 10 deliveries, dead-lettering on expiry); a Cosmos DB account on the free tier with the database `watershed` (1,000 RU/s shared) and its three containers, the 360 frames excluded from indexing; a Container Apps environment and the web app (0.25 vCPU, 0.5 GiB, 0 to 2 replicas, external ingress). The Foundry project and its model deployment are created outside the templates. Merging: the worker Container App (scaled from zero by a KEDA rule on the `worker` subscription, authenticated with its managed identity), the replay Container Apps Job, one identity per app with the roles above, and the Easy Auth hooks. Until they are merged, the worker runs from a developer machine.
+`azd up` (`azure.yaml`, `infra/main.bicep`, `infra/resources.bicep`) creates, in one resource group: Log Analytics (30-day retention, 0.2 GB daily cap) and Application Insights; a Basic Container Registry with the admin user disabled; the web identity; a Standard Service Bus namespace with the topic `match-events` (messages live one day) and the session-enabled subscription `worker` (lock 1 minute, 10 deliveries, dead-lettering on expiry); a Cosmos DB account on the free tier with the database `watershed` (1,000 RU/s shared) and its three containers, the 360 frames excluded from indexing; a Container Apps environment and the web app (0.25 vCPU, 0.5 GiB, 0 to 2 replicas, external ingress). The Foundry project and its model deployment are created outside the templates. Not deployed yet: the worker Container App (scaled from zero by a KEDA rule on the `worker` subscription, authenticated with its managed identity), the replay Container Apps Job, one identity per app with the roles above, and the Easy Auth hooks. Until they are deployed, the worker runs from a developer machine.

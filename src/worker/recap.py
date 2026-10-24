@@ -229,7 +229,7 @@ def verify_recap(text: str, languages: list[str], facts: dict, cards: list[dict]
             if not isinstance(body, str):
                 report["texts"].append({"lang": d.get("lang"), "section": section, "verified": False, "missing": True})
                 continue
-            _, base = verify(json.dumps([{"headline": body, "why": "","lang": d.get("lang"), "claims": claims}], ensure_ascii=False), [d.get("lang")], facts)
+            _, base = verify(json.dumps([{"headline": body, "why": "","lang": d.get("lang"), "claims": claims}], ensure_ascii=False), [d.get("lang")], facts, style=False)
             entry = {k: v for k, v in base["cards"][0].items() if k not in ("length_ok", "lang")}  # writer.verify measures card lengths
             spelled = SPELLED_NUMBERS.get(str(d.get("lang")), "").split()
             entry |= {
@@ -399,7 +399,7 @@ class RecapWriter:
             facts, meanings = store[match_id]
             return json.dumps({"facts": facts, "field_meanings": meanings}, ensure_ascii=False)
 
-        credential = ChainedTokenCredential(ManagedIdentityCredential(), AzureCliCredential())
+        credential = ChainedTokenCredential(ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID")), AzureCliCredential())
         client = FoundryChatClient(project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"], model=self.model, credential=credential)
         options: dict[str, Any] = {"max_tokens": max_tokens}
         effort = effort or os.environ.get("FOUNDRY_REASONING_EFFORT")

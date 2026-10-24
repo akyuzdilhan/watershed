@@ -38,13 +38,19 @@ Every document carries `match_id`, the partition key in Cosmos DB.
 
 `teams` (`{home, away}` names), `score`, `reds`, `final`, `period`, `clock_s`, `minute_label`, `last_seq`, and `wp_timeline`: one point per action, `{seq, event_id, clock_s, minute_label, home, draw, away}` (probabilities after the action, between 0 and 1).
 
+In Cosmos DB the curve is thinned before each write (one point in ten, the last three, and both sides of every jump of 5 points or more), and the document is rewritten on every card or card action, at the end of each half, on a correction and every 25 actions. The local `state.json` keeps every point.
+
+## Recap (`type: "recap"`, id `recap-<match_id>`)
+
+Written after full time by `python -m worker.recap`: the post-match recap, fan and analyst texts in each language, the turning point and the facts they were checked against, built from approved cards only. Locally in `data/desk/<match_id>/recap.json`, in Azure in the `cards` container. Readers of `cards` must filter on `type`.
+
 ## Audit entry
 
 Card actions from the Spotter: `{id, match_id, card_id, event_id, action (hold, release, retract, rewrite), cause, message_id, minute_label}`. Desk entries: `{id, match_id, card_id, action (written, approved, edited, rejected, retracted, rewrite_requested, hold, release), by, version, at}`; `by` is a model name, `template`, `feed`, `auto-approve` or the producer's identity.
 
 ## Producer decisions
 
-`worker.desk.Desk` owns every status change: `approve(card, by, texts=None)` (with edited texts: an `edited` entry, then `approved`), `reject(card, by)`. A retracted card can never be approved. The console calls these methods; it never writes a status itself.
+`worker.desk.Desk` owns every status change: `approve(card, by, texts=None)` (with edited texts: an `edited` entry, then `approved`), `reject(card, by)`. A retracted card can never be approved. The console calls these methods; it never writes a status itself. The worker never overwrites a decision: before the feed changes a card (VAR check, correction) it reloads the stored card and keeps `status`, `texts`, `history` and `retracted_on_air` from it.
 
 ## Feed and CDF
 

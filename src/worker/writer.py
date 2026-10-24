@@ -258,7 +258,8 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
     return errors, warnings
 
 
-def verify(text: str, languages: list[str], facts: dict) -> tuple[list[dict], dict]:
+def verify(text: str, languages: list[str], facts: dict, style: bool = True) -> tuple[list[dict], dict]:
+    """Checks a Writer reply. `style=False` keeps the number and name checks only, for texts that are not card headlines and whys (the post-match recap)."""
     report: dict[str, Any] = {"json_valid": True, "languages_ok": True, "cards": []}
     try:
         drafts = json.loads(text.strip())
@@ -283,7 +284,7 @@ def verify(text: str, languages: list[str], facts: dict) -> tuple[list[dict], di
                 unclaimed.append(value)
             elif is_pct and not any(c["source_field"].endswith("_pct") for c in matches):
                 wrong_unit.append(value)
-        errors, warnings = style_issues(str(d.get("headline", "")), str(d.get("why", "")), str(d.get("lang")), good, facts)
+        errors, warnings = style_issues(str(d.get("headline", "")), str(d.get("why", "")), str(d.get("lang")), good, facts) if style else ([], [])
         entry = {
             "lang": d.get("lang"),
             "keys_ok": all(isinstance(d.get(k), str) for k in ("headline", "why", "lang")),
@@ -388,7 +389,7 @@ class FoundryWriter:
             facts, meanings = store[card_id]
             return json.dumps({"facts": facts, "field_meanings": meanings}, ensure_ascii=False)
 
-        credential = ChainedTokenCredential(ManagedIdentityCredential(), AzureCliCredential())  # managed identity in Azure, az login locally
+        credential = ChainedTokenCredential(ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID")), AzureCliCredential())  # managed identity in Azure, az login locally
         client = FoundryChatClient(project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"], model=self.model, credential=credential)
         options: dict[str, Any] = {"max_tokens": max_tokens}  # GPT-5 models take no temperature
         effort = effort or os.environ.get("FOUNDRY_REASONING_EFFORT")

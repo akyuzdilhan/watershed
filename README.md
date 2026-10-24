@@ -18,10 +18,10 @@ All match data is synthetic, produced by the match engine in this repository. No
 | Writer agent (Agent Framework on Microsoft Foundry), deterministic Verifier, approval desk with audit trail | Done, tested offline with templates; one measured live run | `src/worker/writer.py`, `desk.py` |
 | Desk data contract: cards, match state with the win-probability curve, audit trail, in Cosmos DB or in local JSON files | Done | `docs/contracts.md`, `src/worker/pipeline.py` (`JsonFileSink`, `match_state`) |
 | Infrastructure as code (azd and Bicep): Service Bus, Cosmos DB, Container Apps, Container Registry, Log Analytics, Application Insights | Done | `infra/` |
-| Worker as a Container App scaled by KEDA on the Service Bus subscription, replay as a Container Apps Job, one managed identity per app, Easy Auth hooks (off until an app registration exists) | Built, merging | `infra/`, `src/worker/` |
-| Pitch figures from the 360 frames, including the 63' offside frame with the offside line and the margin | Built, merging | |
-| Producer console and public overlay | Planned. The deployed web app is a placeholder page today | `src/web/app.py` |
-| Cost kill switch, CI | Planned | |
+| Worker as a Container App scaled by KEDA on the Service Bus subscription, replay as a Container Apps Job, one managed identity per app, Easy Auth hooks (off until an app registration exists) | Built, not deployed yet | `infra/`, `src/worker/Dockerfile` |
+| Pitch figures from the 360 frames, including the 63' offside frame with the offside line and the margin | Built | [`src/web/pitch.py`](src/web/pitch.py), [`docs/img/`](docs/img/) |
+| Producer console and public read-only overlay, with a per-IP rate limit and sign-in required for producer actions | Built, not deployed yet (the deployed web app is still the placeholder page) | [`src/web/`](src/web/) |
+| CI (tests, Bicep build, secret scanning), Dependabot, cost kill switch tied to the budget | Built; the kill switch is not deployed yet | [`.github/`](.github/), [`infra/killswitch/`](infra/killswitch/) |
 
 ## Why it matters
 
@@ -68,8 +68,8 @@ flowchart LR
     W -->|"events, card actions,<br/>match state and curve"| DB[("Azure Cosmos DB<br/>events, cards, audit")]
     D --> DB
     W -.->|"local run"| JF[("JSON files<br/>data/desk/match")]
-    DB --> CON["Producer console<br/>planned"]
-    DB --> OV["Public overlay, read-only<br/>planned"]
+    DB --> CON["Producer console"]
+    DB --> OV["Public overlay, read-only"]
     W -.->|"VAR check: hold, release<br/>void: retract<br/>reassign: rewrite"| D
 ```
 
@@ -89,7 +89,7 @@ Details, message types, the temporal contract of corrections, identities and fai
 | Microsoft Agent Framework | The Writer agent, with `get_moment` as a function tool; a spike also runs Spotter, Writer and Verifier as a workflow with a human approval pause (`request_info`) | [`src/worker/writer.py`](src/worker/writer.py), [`spikes/af_trial.py`](spikes/af_trial.py) |
 | Azure Service Bus | Transport: topic `match-events`, session-enabled subscription `worker`, dead-letter queue for unreadable messages | [`infra/resources.bicep`](infra/resources.bicep), [`src/generator/publish.py`](src/generator/publish.py), [`src/worker/azure_io.py`](src/worker/azure_io.py) |
 | Azure Cosmos DB (NoSQL) | Events, cards and audit trail, partitioned by match id, free tier | [`infra/resources.bicep`](infra/resources.bicep), [`src/worker/azure_io.py`](src/worker/azure_io.py) |
-| Azure Container Apps | Hosts the web app (scale 0 to 2); the worker, scaled by a KEDA rule on the Service Bus subscription, and the replay as a Container Apps Job are merging | [`infra/resources.bicep`](infra/resources.bicep), [`src/web/`](src/web/) |
+| Azure Container Apps | Hosts the web app (scale 0 to 2); the worker, scaled by a KEDA rule on the Service Bus subscription, and the replay as a Container Apps Job, are in the templates and not deployed yet | [`infra/resources.bicep`](infra/resources.bicep), [`src/web/`](src/web/) |
 | Azure Container Registry | Image built remotely by azd, pulled by managed identity | [`infra/resources.bicep`](infra/resources.bicep), [`azure.yaml`](azure.yaml) |
 | Log Analytics and Application Insights | Container logs, with a daily ingestion cap | [`infra/resources.bicep`](infra/resources.bicep) |
 | Microsoft Entra ID | Every data-plane call uses `DefaultAzureCredential` or a managed identity; Service Bus and Cosmos DB have key authentication disabled | [`infra/resources.bicep`](infra/resources.bicep), [`src/worker/azure_io.py`](src/worker/azure_io.py) |
@@ -152,8 +152,8 @@ Effects whose evidence is weak (momentum between matches, a built-in new-manager
 | No keys or connection strings for data access | Service Bus and Cosmos DB have local (key) authentication disabled; the code authenticates with `DefaultAzureCredential` (Azure CLI login locally, managed identity in Azure) | `infra/resources.bicep` (`disableLocalAuth: true`), `src/worker/azure_io.py`, `src/generator/publish.py` |
 | No registry password | Container Registry admin user disabled; the web app pulls with its managed identity (AcrPull) | `infra/resources.bicep` |
 | Foundry without keys in code | The Writer authenticates with a managed identity, or the Azure CLI login locally | `src/worker/writer.py` |
-| Roles | One managed identity per app, each with the roles it uses (table in [`docs/architecture.md`](docs/architecture.md#identities-and-roles)): the worker receives on its subscription only, the replay job sends on the topic only; the developer account gets Cosmos DB data access and Service Bus Data Sender and Receiver, only when azd passes its id | `infra/resources.bicep` (worker and replay identities merging) |
-| Console sign-in | Easy Auth hooks in the templates, off until an app registration exists | Merging |
+| Roles | One managed identity per app, each with the roles it uses (table in [`docs/architecture.md`](docs/architecture.md#identities-and-roles)): the worker receives on its subscription only, the replay job sends on the topic only; the developer account gets Cosmos DB data access and Service Bus Data Sender and Receiver, only when azd passes its id | `infra/resources.bicep` (worker and replay identities: not deployed yet) |
+| Console sign-in | Easy Auth hooks in the templates, off until an app registration exists; the console trusts the signed-in user header only when Easy Auth is on | `infra/`, `src/web/security.py` |
 | Output length | 3,000 output tokens at most per model call | `src/worker/writer.py` (`max_tokens`) |
 | Model calls per match | 40 at most; beyond that, cards use the fixed template | `src/worker/desk.py` (`max_calls_per_match`) |
 | Retries | One retry per card, then the template, so a model failure never blocks a card | `src/worker/writer.py` (`draft`) |
@@ -164,7 +164,7 @@ Effects whose evidence is weak (momentum between matches, a built-in new-manager
 
 Configured on the Azure subscription by hand, outside these templates, and therefore not verifiable from this repository: a rate limit of 20K tokens per minute on the model deployment, key authentication disabled on the Foundry resource, and cost budgets with alerts.
 
-Planned, not in this repository yet: a public overlay that only reads approved cards and never calls the model, a kill switch tied to the budget, and CI (tests, Bicep build, secret scanning).
+Built but not deployed yet: the console and overlay, the worker Container App, the replay job and the kill switch. A test checks that the public overlay never loads a module that can call the model.
 
 ## Run locally
 

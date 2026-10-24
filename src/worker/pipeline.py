@@ -15,6 +15,9 @@ from worker.match import Match, make_model
 from worker.spotter import Spotter
 
 
+PRODUCER_FIELDS = ("status", "texts", "history", "retracted_on_air")  # what the console may change on a card
+
+
 class MemorySink:
     """Keeps everything in lists: tests, the offline run, and the scoring against the ground truth."""
 
@@ -39,6 +42,9 @@ class MemorySink:
     def state(self, doc: dict) -> None:
         self.states = getattr(self, "states", {})
         self.states[doc["match_id"]] = dict(doc)
+
+    def load_card(self, match_id: str, card_id: str) -> dict | None:
+        return self.cards.get(card_id)
 
 
 class JsonFileSink(MemorySink):
@@ -75,6 +81,16 @@ class JsonFileSink(MemorySink):
     def state(self, doc: dict) -> None:
         super().state(doc)
         (self._dir(doc["match_id"]) / "state.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+
+    def load_card(self, match_id: str, card_id: str) -> dict | None:
+        """Reads the file, where the console writes the producer's decisions."""
+        path = self._dir(match_id) / "cards.json"
+        if path.exists():
+            for card in json.loads(path.read_text(encoding="utf-8")):
+                if card["id"] == card_id:
+                    self.cards[card_id] = card
+                    return card
+        return self.cards.get(card_id)
 
 
 def match_state(match: Match, spotter: Spotter, timeline: list[dict]) -> dict:
@@ -154,6 +170,11 @@ class ThreadedSink:
 
         return ordered
 
+    def load_card(self, match_id: str, card_id: str) -> dict | None:
+        """Reads after the writes already handed over, so a decision is never read older than our own writes."""
+        self.drain()
+        return self.sink.load_card(match_id, card_id) if hasattr(self.sink, "load_card") else None
+
     def drain(self, timeout: float | None = None) -> list[BaseException]:
         """Waits for every write handed over so far; returns (and forgets) the errors raised since the last drain."""
         with self._lock:
@@ -212,6 +233,8 @@ class Pipeline:
             if m["type"] == "action":
                 p = spotter.model.predict(match.state(m, after=True))
                 timeline.append({"seq": m["seq"], "event_id": m["event_id"], "clock_s": m["clock_s"], "minute_label": m["minute_label"], "home": round(p.home, 4), "draw": round(p.draw, 4), "away": round(p.away, 4)})
+            if m["type"] in ("var_check", "correction") and m.get("target_event_id") in spotter.cards:
+                self._refresh(spotter.cards[m["target_event_id"]])
             produced = False
             for result in spotter.process(m):
                 produced = True
@@ -228,3 +251,12 @@ class Pipeline:
             if hasattr(self.sink, "state") and (produced or m["type"] in ("period_end", "full_time", "correction") or len(timeline) % self.state_every == 0):
                 self.sink.state(match_state(match, spotter, timeline))
         return out
+
+    def _refresh(self, card: dict) -> None:
+        """Before the feed changes a card, take the producer's decisions from the store: the console writes them there, not into this process."""
+        load = getattr(self.sink, "load_card", None)
+        stored = load(card["match_id"], card["id"]) if load else None
+        if stored is not None and stored is not card:
+            for key in PRODUCER_FIELDS:
+                if key in stored:
+                    card[key] = copy.deepcopy(stored[key])
