@@ -50,8 +50,11 @@ def test_a_reassigned_goal_is_rewritten_with_the_new_scorer(desk_run):
 def test_no_probability_of_0_or_100_before_the_final_whistle(desk_run):
     sink, _, _ = desk_run
     for card in sink.cards.values():
+        assert all(1 <= v <= 99 for k, v in card["facts"].items() if k != "xg_pct"), card["minute_label"]
         for t in card["texts"]:
             assert "100%" not in t["why"] and "100 %" not in t["why"]
+        for line in card.get("duo", []):
+            assert "100%" not in line["line"] and "100 %" not in line["line"]
 
 
 def test_producer_decisions_are_audited():

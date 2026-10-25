@@ -20,6 +20,11 @@ def pct(p: float) -> int:
     return round(100 * p)
 
 
+def shown_pct(p: float) -> int:
+    """A result probability on a card: 1 to 99, never 0% or 100% before the final whistle (same bounds as `writer.shown`)."""
+    return min(max(pct(p), 1), 99)
+
+
 @dataclass
 class Spotter:
     match: Match
@@ -106,10 +111,10 @@ class Spotter:
             "value_pts": pct(value),
             "facts": {
                 "xg_pct": pct(shot["shot"]["xg"]) if "shot" in shot else None,
-                "team_wp_before_pct": pct(team_win(before, team)),
-                f"team_wp_{other_name}_pct": pct(team_win(other, team)),
-                "draw_before_pct": pct(before.draw),
-                f"draw_{other_name}_pct": pct(other.draw),
+                "team_wp_before_pct": shown_pct(team_win(before, team)),
+                f"team_wp_{other_name}_pct": shown_pct(team_win(other, team)),
+                "draw_before_pct": shown_pct(before.draw),
+                f"draw_{other_name}_pct": shown_pct(other.draw),
             },
         }
         self.cards[a["event_id"]] = card

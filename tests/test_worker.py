@@ -66,8 +66,20 @@ def test_unscripted_matches(seed):
     spotter = next(iter(pipeline.spotters.values()))
     report = score_against_truth(spotter.cards, pipeline.sink.audit, truth)
     assert report["recall"] == 1.0 and report["card_actions_correct"], report
+    assert all(1 <= v <= 99 for c in spotter.cards.values() for k, v in c["facts"].items() if k != "xg_pct"), "a card is always before the final whistle"
 
 
 def test_unreadable_messages_are_refused():
     with pytest.raises(SchemaError):
         Match("m").receive({"schema_version": "0.1.0", "message_id": "x", "seq": 1})
+
+
+def test_card_percentages_stay_between_1_and_99(demo):
+    stream, _ = demo
+    _, results = run(stream)
+    cards = [r for r in results if "action" not in r]
+    for c in cards:
+        for k, v in c["facts"].items():
+            if k != "xg_pct":
+                assert 1 <= v <= 99, (c["minute_label"], k, v)
+    assert max(c["facts"]["team_wp_before_pct"] for c in cards) == 99  # the last goal: a side at 100% before rounding is shown at 99%
