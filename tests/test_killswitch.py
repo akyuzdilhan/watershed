@@ -109,7 +109,7 @@ Run-Scenario list-fails '^resource list'
 
 def run(tmp_path: Path, script: str, body: str, variable: str) -> dict[str, dict[str, list[str]]]:
     harness = tmp_path / "harness.ps1"
-    harness.write_text(f"$ErrorActionPreference = 'Stop'\n${variable} = '{KILLSWITCH / script}'\n{body}", encoding="ascii")
+    harness.write_text(f"$ErrorActionPreference = 'Stop'\n${variable} = '{KILLSWITCH / script}'\n{body}", encoding="utf-8-sig")  # with a BOM, Windows PowerShell reads it as UTF-8
     done = subprocess.run([POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
                           capture_output=True, text=True, timeout=180)
     assert done.returncode == 0, done.stderr
