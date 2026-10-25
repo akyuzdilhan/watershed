@@ -240,10 +240,26 @@ def test_deterministic_and_order_independent(demo, history, demo_run):
     assert live(other) == live(docs.values())
 
 
+def lost_leads_hold(pipeline) -> bool:
+    """Every active "led at half-time, now trail" insight is true at the score as it stands."""
+    for match_id, engine in pipeline.engines.items():
+        score = pipeline.matches[match_id].score()
+        for d in engine.active():
+            if d["group"].startswith("ht-lead-lost-") and d["headline_facts"]["stage"] == "behind":
+                side = d["group"].rsplit("-", 1)[1]
+                if score[side] >= score["away" if side == "home" else "home"]:
+                    return False
+    return True
+
+
 @pytest.mark.parametrize("seed", range(1, 21))
 def test_unscripted_matches(seed, history):
     stream, _ = generate_match(seed, frames=False)
-    pipeline = run(stream, history)
+    pipeline = Pipeline(sink=MemorySink(), history=history)
+    for m in stream:
+        pipeline.handle(m)
+        assert lost_leads_hold(pipeline), m["seq"]
+    pipeline.flush()
     docs = pipeline.insights(f"synthetic-{seed:04d}")
     live = [d for d in docs if d["status"] != "superseded"]
     assert len(live) <= 3 * 4 + 1 and len(docs) <= 40
@@ -251,6 +267,54 @@ def test_unscripted_matches(seed, history):
 
 
 # --- what holds at the current score, and while VAR checks a goal --------------------------------------
+
+def test_a_lost_half_time_lead_is_told_only_while_the_team_trails(demo, history):
+    """United lead at the break, trail from the second Rovers comeback goal, are level when their goal stands for a minute, trail again when VAR rules it out."""
+    stream, truth = demo
+    pipeline = Pipeline(sink=MemorySink(), history=history)
+    for m in stream:
+        pipeline.handle(m)
+        assert lost_leads_hold(pipeline), m["seq"]
+    pipeline.flush()
+    doc = pipeline.engines["demo-0007"].docs["ht-lead-lost-away-1"]
+    assert [h["action"] for h in doc["history"]] == ["proposed", "superseded", "revived", "superseded", "revived", "superseded"]
+    causes = [e["cause"] for e in pipeline.sink.audit if e["card_id"] == doc["id"] and e["action"] == "superseded"]
+    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United's equaliser, then lost at full time
+    equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
+    assert equaliser not in doc["evidence"] and doc["superseded_by"] == "insight-demo-0007-ht-lead-lost-away-2"
+
+
+def craft(template: dict, seq: int, emitted_at_s: float, minute: int, **changes) -> dict:
+    """A message of the second half modelled on `template`."""
+    return {**template, "message_id": f"extra-{seq}", "seq": seq, "emitted_at_s": emitted_at_s, "period": 2, "clock_s": 60.0 * minute + 10, "minute": minute,
+            "minute_label": f"{minute + 1}'", **changes}
+
+
+def test_facts_that_rest_on_the_score_are_under_review_while_a_goal_is_checked(demo, history):
+    """The demo until United go down to ten, then two goals of our own: United score with ten men (3-3), Rovers go 4-3 and VAR checks that goal. The fact on United's goal with ten men shows the score: it is under review, though it does not count the Rovers goal; United's brace does not rest on it."""
+    stream, truth = demo
+    red = next(m for m in stream if m["type"] == "action" and m.get("card") in ("red", "second_yellow"))
+    kept = [m for m in stream if m["seq"] <= red["seq"]]
+    goal = {side: next(m for m in stream if m["type"] == "action" and m["event_id"] == next(g["event_id"] for g in truth["goals"] if g["team"] == side and g["counts"]))
+            for side in ("home", "away")}
+    started = next(m for m in stream if m["type"] == "var_check" and m["status"] == "started")
+    t, s = max(m["emitted_at_s"] for m in kept), red["seq"]
+    away = craft(goal["away"], s + 1, t + 60, 79, event_id="extra-away-goal")
+    home = craft(goal["home"], s + 2, t + 120, 81, event_id="extra-home-goal")
+    check = craft(started, s + 3, t + 135, 81, check_id="extra-var", target_event_id="extra-home-goal")
+    stands = craft(check, s + 4, t + 180, 82, status="completed", decision="stands")
+    pipeline = Pipeline(sink=MemorySink(), history=history, insight_min_value=0, insight_cap=100)
+    for m in kept + [away, home]:
+        pipeline.handle(m)
+    engine = pipeline.engines["demo-0007"]
+    ten_men, brace = engine.docs["ten-men-away-scored"], engine.docs[f"scorer-{goal['away']['player']['id']}-2"]
+    assert engine.current["ten-men-away"] == "ten-men-away-scored" and ten_men["headline_facts"]["score"] == "4-3"
+    assert "extra-home-goal" not in ten_men["evidence"] and not ten_men["under_review"]
+    pipeline.handle(check)
+    assert ten_men["under_review"] and engine.docs["ht-lead-lost-away-1"]["under_review"] and not brace["under_review"]
+    pipeline.handle(stands)
+    assert not any(d["under_review"] for d in engine.active())
+
 
 def test_every_step_of_a_fact_is_audited_once(demo, history):
     """The audit trail has each step of every insight's history, in order, and nothing twice: the facts VAR took back are there, with whether they were on air."""

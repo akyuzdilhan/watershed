@@ -4,8 +4,8 @@ After each relevant message (goal, red card, substitution, VAR check, period end
 
 - a new group becomes a `proposed` insight if its value reaches `min_value` and the bucket (first half, second half, full time) has fewer than `cap_per_period` new insights; beyond the cap it replaces the weakest insight still waiting for a producer, if it is worth more;
 - a higher (or, after a correction, lower) level in a group supersedes the previous insight (`status: superseded`, `superseded_by`);
-- a group that is no longer true (its goal was ruled out) is superseded with no successor;
-- an insight whose goals are under a VAR check is flagged `under_review`.
+- a group that is no longer true (its goal was ruled out, or the score moved on) is superseded with no successor;
+- an insight that a goal under VAR check holds up is flagged `under_review`: ruled out, the goal would withdraw it or change its facts, whether the insight counts the goal or only the score it makes.
 
 Every fact is deterministic: the same feed and the same history give the same insights. Every number a text may show is in `headline_facts`, with its meaning in `field_meanings` (contract, "Insight"). At full time the engine adds a "stat of the match" insight: the top fact, why it ranks first, and a short ranked list. Each step of an insight's life (proposed, updated, revived, superseded) is in its `history` and, when the engine is given an `audit` callable, in the audit trail.
 
@@ -93,6 +93,7 @@ class InsightEngine:
         self.min_value = min_value
         self.load = load  # (match_id, doc_id) -> stored doc, for the producer's decisions
         self.audit = audit  # audit entry -> None: every step of an insight's life, as the desk audits its own
+        self._without: set[str] = set()  # goals the detectors leave out, to see what an insight would become if VAR ruled them out
         self.docs: dict[str, dict] = {}  # key -> insight
         self.current: dict[str, str] = {}  # group -> key of its active insight
         self.bucket_of: dict[str, object] = {}
@@ -128,20 +129,15 @@ class InsightEngine:
             return []
         out: list[tuple[dict, bool]] = []
         if t == "var_check":
-            target = m["target_event_id"]
             if m["status"] == "started":
-                self.reviewing.add(target)
+                self.reviewing.add(m["target_event_id"])
             else:
-                self.reviewing.discard(target)
-            for key in self.current.values():
-                doc = self.docs[key]
-                flag = any(e in self.reviewing for e in doc["evidence"])
-                if target in doc["evidence"] and doc["under_review"] != flag:
-                    doc["under_review"] = flag
-                    out.append((doc, False))
-            return out
+                self.reviewing.discard(m["target_event_id"])
+            return self._flag_reviews()
         cause = "goal ruled out" if t == "correction" and m.get("op") == "void" else "correction" if t == "correction" else None
-        out += self._reconcile(self.detect(), m, cause)
+        cands = self.detect()
+        out += self._reconcile(cands, m, cause)
+        out += self._flag_reviews(cands)
         if self.final:
             out += self._stat_of_the_match(m)
         seen, unique = set(), []
@@ -157,9 +153,21 @@ class InsightEngine:
     def goals(self) -> list[LiveGoal]:
         out = []
         for eid, (seq, side) in sorted(self.match.goals.items(), key=lambda x: x[1][0]):
+            if eid in self._without:
+                continue
             a = self.match.versions[eid]
             out.append(LiveGoal(eid, seq, side, a["player"], a["period"], a["clock_s"], shown_minute(a), a["minute_label"]))
         return out
+
+    def score(self) -> dict[str, int]:
+        """The score the detectors see: the goals that count (`Match.score`), less those left out."""
+        out = {"home": 0, "away": 0}
+        for g in self.goals():
+            out[g.side] += 1
+        return out
+
+    def voided(self) -> set[str]:
+        return self.match.voided | self._without
 
     def teams(self) -> dict[str, str]:
         return {side: t["name"] for side, t in self.match.info["teams"].items()}
@@ -261,11 +269,39 @@ class InsightEngine:
         self._mark(doc, "superseded", {"cause": cause, "superseded_by": doc["superseded_by"], "was_on_air": was_on_air})
         self.current.pop(doc["group"], None)
 
+    def hinged(self, goal: str, now: list[Fact] | None = None) -> set[str]:
+        """Keys of the active insights that `goal` holds up: with the goal left out, as if VAR ruled it out, they would be withdrawn or their facts would change. It covers the insights that count the goal and those that only state the score it makes (a team down to ten that scored, at the score now)."""
+        if goal not in self.match.goals:
+            return set()
+        before = {f.key: (f.facts, f.evidence) for f in (self.detect() if now is None else now)}
+        self._without = {goal}
+        try:
+            after = {f.key: (f.facts, f.evidence) for f in self.detect()}
+        finally:
+            self._without = set()
+        return {key for key in self.current.values() if before.get(key) != after.get(key)}
+
+    def _flag_reviews(self, now: list[Fact] | None = None) -> list[tuple[dict, bool]]:
+        """`under_review` on the active insights that a goal under VAR check holds up, cleared on the others; returns the insights whose flag changed."""
+        held: set[str] = set()
+        goals = sorted(g for g in self.reviewing if g in self.match.goals)
+        if goals:
+            now = self.detect() if now is None else now
+            for goal in goals:
+                held |= self.hinged(goal, now)
+        out = []
+        for key in self.current.values():
+            doc = self.docs[key]
+            if doc.get("under_review") != (key in held):
+                doc["under_review"] = key in held
+                out.append((doc, False))
+        return out
+
     def _fill(self, doc: dict, f: Fact, r: dict, val: int) -> None:
         facts, meanings = self._headline(f, r)
         doc.update({"kind": f.kind, "minute_label": f.minute_label or self._now.get("minute_label"), "clock_s": f.clock_s if f.clock_s is not None else self._now.get("clock_s"), "event_id": f.event_id, "headline_facts": facts, "field_meanings": meanings,
                     "rarity": {"p": r["p"], "surprisal_bits": r["surprisal_bits"], "basis": r["basis"]}, "last_time": r["last"], "value": val,
-                    "evidence": list(f.evidence), "under_review": any(e in self.reviewing for e in f.evidence)})
+                    "evidence": list(f.evidence), "under_review": any(e in self.reviewing for e in f.evidence)})  # refined by _flag_reviews once the candidates are reconciled
         w = self.weights.get(f.group)
         if w is None:
             doc.pop("feedback_weight", None)
@@ -504,7 +540,9 @@ def comebacks(e: InsightEngine, ctx: dict) -> list[Fact]:
 
 
 def half_time_lead_lost(e: InsightEngine, ctx: dict) -> list[Fact]:
-    """A team that led at half-time, now behind (or beaten at full time): against every half-time lead, and the club's own last time."""
+    """A team that led at half-time and trails now (or lost, at full time): against every half-time lead, and the club's own last time.
+
+    The stage is the one of the current score: level again, the team no longer trails ("now trail" would be false) and the fact is withdrawn; it comes back if the team trails again or the equaliser is ruled out. A draw or a win at full time is no lost lead."""
     if not e.half_time:
         return []
     goals = ctx["goals"]
@@ -513,21 +551,23 @@ def half_time_lead_lost(e: InsightEngine, ctx: dict) -> list[Fact]:
         return []
     side = "home" if ht["home"] > ht["away"] else "away"
     lead = ht[side] - ht[other(side)]
-    score = e.match.score()
+    score = e.score()
+    if score[side] >= score[other(side)]:
+        return []
     run = dict(ht)
-    behind = None  # the goal that put them behind: what happened stays true if they equalise later
+    behind, at = None, None  # the goal that last put them behind, and the score it made: they have trailed since
     for g in goals:
         if g.period < 2:
             continue
+        trailing = run[side] < run[other(side)]
         run[g.side] += 1
-        if run[side] < run[other(side)]:
-            behind = g
-            break
+        if not trailing and run[side] < run[other(side)]:
+            behind, at = g, dict(run)
     if behind is None:
         return []
-    stage = 2 if e.final and score[side] < score[other(side)] else 1
+    stage = 2 if e.final else 1
     club, venue = ctx["teams"][side], side
-    shown = score if stage == 2 else run
+    shown = score if stage == 2 else at
 
     def fn(f, lead=lead, stage=stage):
         if f.ht is None:
@@ -618,7 +658,7 @@ def red_card_effects(e: InsightEngine, ctx: dict) -> list[Fact]:
     """A team down to ten that scores, or wins: against every team that had a player sent off."""
     out = []
     reds = sorted(e.match.red_cards.values())
-    score = e.match.score()
+    score = e.score()
     for side in ("home", "away"):
         mine = [seq for seq, s in reds if s == side]
         if not mine:
@@ -656,7 +696,7 @@ def runs(e: InsightEngine, ctx: dict) -> list[Fact]:
     if not e.final:
         return []
     out = []
-    score = e.match.score()
+    score = e.score()
     current = e.view.runs()["current"]
     for side in ("home", "away"):
         club = ctx["teams"][side]
@@ -684,7 +724,7 @@ def head_to_head(e: InsightEngine, ctx: dict) -> list[Fact]:
     """At full time: the winner's first win in this fixture for N seasons, and its biggest win over this opponent."""
     if not e.final:
         return []
-    teams, score = ctx["teams"], e.match.score()
+    teams, score = ctx["teams"], e.score()
     if score["home"] == score["away"] or teams["home"] not in e.view.clubs or teams["away"] not in e.view.clubs:
         return []
     side = "home" if score["home"] > score["away"] else "away"
@@ -728,7 +768,7 @@ def head_to_head(e: InsightEngine, ctx: dict) -> list[Fact]:
 def team_records(e: InsightEngine, ctx: dict) -> list[Fact]:
     """Goals in the match against the history: a team's most goals in a match, and matches with as many goals."""
     out = []
-    score = e.match.score()
+    score = e.score()
     total = score["home"] + score["away"]
     goals = ctx["goals"]
     if total >= 6:
@@ -766,7 +806,7 @@ def match_kpis(e: InsightEngine, ctx: dict) -> list[Fact]:
         windows.append((1, "first half"))
     if e.final:
         windows.append((None, "match"))
-    voided = e.match.voided
+    voided = e.voided()
     for period, label in windows:
         shots = {"home": 0, "away": 0}
         xg = {"home": 0.0, "away": 0.0}
