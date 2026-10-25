@@ -9,7 +9,7 @@ SIMS = 1000  # enough for ordered chances on seed 9, fast enough for the suite
 
 
 class FakeHistory:
-    """The read API of `league.history.History` (docs/contracts.md, Lot 2), on a handful of matches."""
+    """The read API of `league.history.History` (docs/contracts.md), on a handful of matches."""
 
     SEASONS = ["2023/24", "2024/25", "2025/26"]
     CLUBS = {"Rovers": {"name": "Rovers", "founded_season": "1976/77", "seasons_in_league": 50, "titles": 2, "best_finish": 1},
@@ -243,6 +243,22 @@ def test_recap_says_what_the_result_changed_in_the_table(desk_run):
     texts = {t["lang"]: t["recap"] for t in recap["texts"]}
     assert "Rovers move from 17th to" in texts["en"] and "risque de descente" in texts["fr"]  # the winner's season, rank and chance
     assert build_recap(cards, state)["facts"].keys().isdisjoint({k for k in recap["facts"] if k.startswith("season_")})
+
+
+def test_the_worker_writes_the_recap_the_cli_would_write(desk_run, tmp_path, monkeypatch, capsys):
+    """At the final whistle the worker writes recap.json in the match folder: the document `python -m worker.recap` writes from that folder, season sentence included."""
+    import sys
+
+    from worker import recap as recap_cli
+
+    written = (desk_run / "recap.json").read_text(encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["recap", str(desk_run), "--out", str(tmp_path / "again.json")])
+    recap_cli.main()
+    capsys.readouterr()
+    assert (tmp_path / "again.json").read_text(encoding="utf-8") == written
+    doc = json.loads(written)
+    assert (doc["id"], doc["type"], doc["final"], doc["writer"]) == ("recap-demo-0007", "recap", True, "template") and doc["verification"]["verified"]
+    assert any(k.startswith("season_") for k in doc["facts"])
 
 
 def test_goal_cards_tell_the_table_only_when_it_changes(desk_run):

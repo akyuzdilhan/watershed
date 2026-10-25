@@ -1,6 +1,7 @@
 import json
 import math
 import random
+import re
 
 import pytest
 
@@ -240,14 +241,220 @@ def test_deterministic_and_order_independent(demo, history, demo_run):
     assert live(other) == live(docs.values())
 
 
+def lost_leads_hold(pipeline) -> bool:
+    """Every active "led at half-time, now trail" insight is true at the score as it stands."""
+    for match_id, engine in pipeline.engines.items():
+        score = pipeline.matches[match_id].score()
+        for d in engine.active():
+            if d["group"].startswith("ht-lead-lost-") and d["headline_facts"]["stage"] == "behind":
+                side = d["group"].rsplit("-", 1)[1]
+                if score[side] >= score["away" if side == "home" else "home"]:
+                    return False
+    return True
+
+
+def comebacks_hold(pipeline) -> bool:
+    """Every active comeback insight is true at the score as it stands: level when it says level, ahead when it says ahead or won."""
+    for match_id, engine in pipeline.engines.items():
+        score = pipeline.matches[match_id].score()
+        for d in engine.active():
+            if d["group"].startswith("comeback-"):
+                side = d["group"].rsplit("-", 1)[1]
+                diff, stage = score[side] - score["away" if side == "home" else "home"], d["headline_facts"]["stage"]
+                if (stage == "level" and diff != 0) or (stage in ("ahead", "won") and diff <= 0):
+                    return False
+    return True
+
+
 @pytest.mark.parametrize("seed", range(1, 21))
 def test_unscripted_matches(seed, history):
     stream, _ = generate_match(seed, frames=False)
-    pipeline = run(stream, history)
+    pipeline = Pipeline(sink=MemorySink(), history=history)
+    for m in stream:
+        pipeline.handle(m)
+        assert lost_leads_hold(pipeline) and comebacks_hold(pipeline), m["seq"]
+    pipeline.flush()
     docs = pipeline.insights(f"synthetic-{seed:04d}")
     live = [d for d in docs if d["status"] != "superseded"]
     assert len(live) <= 3 * 4 + 1 and len(docs) <= 40
     assert sum(1 for d in docs if d.get("stat_of_the_match")) <= 1
+
+
+# --- what holds at the current score, and while VAR checks a goal --------------------------------------
+
+def test_a_lost_half_time_lead_is_told_only_while_the_team_trails(demo, history):
+    """United lead at the break. The fact is told while they trail, withdrawn each time they are level again (the 63' goal ruled out, then their own goal until VAR rules it out), told again when they trail, and replaced by the defeat at full time."""
+    stream, truth = demo
+    pipeline = Pipeline(sink=MemorySink(), history=history)
+    for m in stream:
+        pipeline.handle(m)
+        assert lost_leads_hold(pipeline), m["seq"]
+    pipeline.flush()
+    doc = pipeline.engines["demo-0007"].docs["ht-lead-lost-away-1"]
+    assert [h["action"] for h in doc["history"]] == ["proposed", "superseded", "revived", "superseded", "revived", "superseded"]
+    causes = [e["cause"] for e in pipeline.sink.audit if e["card_id"] == doc["id"] and e["action"] == "superseded"]
+    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United's equaliser, then lost at full time
+    equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
+    assert equaliser not in doc["evidence"] and doc["superseded_by"] == "insight-demo-0007-ht-lead-lost-away-2"
+
+
+def test_a_comeback_is_told_at_the_current_score(demo, history):
+    """Rovers come back from 0-2 down and lead. "Now ahead" is withdrawn when the 63' goal is ruled out and while United are level (their goal, until VAR rules it out), told again each time Rovers lead, and replaced by the win at full time."""
+    stream, truth = demo
+    pipeline = Pipeline(sink=MemorySink(), history=history)
+    for m in stream:
+        pipeline.handle(m)
+        assert comebacks_hold(pipeline), m["seq"]
+    pipeline.flush()
+    doc = pipeline.engines["demo-0007"].docs["comeback-home-2-2"]
+    assert [h["action"] for h in doc["history"]] == ["proposed", "superseded", "revived", "superseded", "revived", "superseded"]
+    causes = [e["cause"] for e in pipeline.sink.audit if e["card_id"] == doc["id"] and e["action"] == "superseded"]
+    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United level, then won at full time
+    equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
+    assert equaliser not in doc["evidence"] and doc["headline_facts"]["score"] == "3-2" and doc["superseded_by"] == "insight-demo-0007-comeback-home-2-3"
+
+
+def craft(template: dict, seq: int, emitted_at_s: float, minute: int, **changes) -> dict:
+    """A message of the second half modelled on `template`."""
+    return {**template, "message_id": f"extra-{seq}", "seq": seq, "emitted_at_s": emitted_at_s, "period": 2, "clock_s": 60.0 * minute + 10, "minute": minute,
+            "minute_label": f"{minute + 1}'", **changes}
+
+
+def test_facts_that_rest_on_the_score_are_under_review_while_a_goal_is_checked(demo, history):
+    """The demo until United go down to ten, then two goals of our own: United score with ten men (3-3), Rovers go 4-3 and VAR checks that goal. The fact on United's goal with ten men shows the score: it is under review, though it does not count the Rovers goal; United's brace does not rest on it."""
+    stream, truth = demo
+    red = next(m for m in stream if m["type"] == "action" and m.get("card") in ("red", "second_yellow"))
+    kept = [m for m in stream if m["seq"] <= red["seq"]]
+    goal = {side: next(m for m in stream if m["type"] == "action" and m["event_id"] == next(g["event_id"] for g in truth["goals"] if g["team"] == side and g["counts"]))
+            for side in ("home", "away")}
+    started = next(m for m in stream if m["type"] == "var_check" and m["status"] == "started")
+    t, s = max(m["emitted_at_s"] for m in kept), red["seq"]
+    away = craft(goal["away"], s + 1, t + 60, 79, event_id="extra-away-goal")
+    home = craft(goal["home"], s + 2, t + 120, 81, event_id="extra-home-goal")
+    check = craft(started, s + 3, t + 135, 81, check_id="extra-var", target_event_id="extra-home-goal")
+    stands = craft(check, s + 4, t + 180, 82, status="completed", decision="stands")
+    pipeline = Pipeline(sink=MemorySink(), history=history, insight_min_value=0, insight_cap=100)
+    for m in kept + [away, home]:
+        pipeline.handle(m)
+    engine = pipeline.engines["demo-0007"]
+    ten_men, brace = engine.docs["ten-men-away-scored"], engine.docs[f"scorer-{goal['away']['player']['id']}-2"]
+    assert engine.current["ten-men-away"] == "ten-men-away-scored" and ten_men["headline_facts"]["score"] == "4-3"
+    assert "extra-home-goal" not in ten_men["evidence"] and not ten_men["under_review"]
+    pipeline.handle(check)
+    assert ten_men["under_review"] and engine.docs["ht-lead-lost-away-1"]["under_review"] and not brace["under_review"]
+    pipeline.handle(stands)
+    assert not any(d["under_review"] for d in engine.active())
+
+
+def test_every_step_of_a_fact_is_audited_once(demo, history):
+    """The audit trail has each step of every insight's history, in order, and nothing twice: the facts VAR took back are there, with whether they were on air."""
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    stream, truth = demo
+    sink = MemorySink()
+    pipeline = run(stream, history, sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    for d in pipeline.insights("demo-0007"):
+        assert [e["action"] for e in sink.audit if e["card_id"] == d["id"]] == [h["action"] for h in d["history"]], d["key"]
+    assert len({e["id"] for e in sink.audit}) == len(sink.audit)
+    taken_back = {e["card_id"][len("insight-demo-0007-"):] for e in sink.audit if e["action"] == "superseded" and e["cause"] == "goal ruled out" and e["was_on_air"]}
+    assert {"scorer-home-20-3", "comeback-home-2-2", "ht-lead-lost-away-1"} <= taken_back  # the three facts that counted the 63' goal, on air when VAR ruled it out
+
+
+# --- who writes the facts, and the call budget --------------------------------------------------------------
+
+class CountingWriter:
+    """Stands in for the model: replies with the template texts, and records what it is asked to write."""
+
+    name = "counting-model"
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def write_async(self, doc, facts, languages, note=None, avoid=None, duo=False, preferences=None):
+        from worker.writer import TemplateWriter
+
+        self.asked.append(doc.get("type", "card"))
+        if doc.get("type") in ("insight", "storyline"):
+            return TemplateWriter().write_insight(doc, facts[0], languages, duo=duo)
+        return TemplateWriter().write(doc, facts[0], languages, duo=duo)
+
+
+class RecapModel:
+    """Stands in for the recap agent: a reply the Verifier refuses, so each recap costs two calls before the template."""
+
+    name = "recap-model"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def write_async(self, match_id, facts, languages, note=None):
+        self.calls += 1
+        return "not json"
+
+
+def test_live_the_model_writes_the_cards_and_the_recap_the_templates_write_the_facts(demo, history):
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    sink, model, recap_model = MemorySink(), CountingWriter(), RecapModel()
+    desk = Desk(sink, model, auto_approve=True, insight_writer=TemplateWriter(), recap_writer=recap_model)
+    pipeline = run(demo[0], history, sink=sink, desk=desk)
+    written = [d for d in pipeline.insights("demo-0007") if "texts" in d]
+    assert written and all(d["writer"] == "template" for d in written)
+    assert set(model.asked) == {"card"} and 12 <= len(model.asked) <= 24  # 11 cards and a rewrite, a retry at most each
+    recap = pipeline.recaps["demo-0007"]
+    assert recap_model.calls == 2 and recap["writer"] == "template" and recap["verification"]["attempts"] == 2
+    assert desk.calls["demo-0007"] == len(model.asked) + recap_model.calls <= desk.max_calls_per_match == 40
+
+
+def test_the_call_budget_covers_the_cards_and_the_recap(demo, history):
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    sink, model, recap_model = MemorySink(), CountingWriter(), RecapModel()
+    desk = Desk(sink, model, auto_approve=True, insight_writer=TemplateWriter(), recap_writer=recap_model, max_calls_per_match=5)
+    pipeline = run(demo[0], history, sink=sink, desk=desk)
+    assert len(model.asked) == 5 and recap_model.calls == 0 and desk.calls["demo-0007"] == 5
+    assert pipeline.recaps["demo-0007"]["writer"] == "template" and pipeline.recaps["demo-0007"]["verification"]["verified"]
+    assert [c["writer"] for c in sink.cards.values()].count("template") >= len(sink.cards) - 5
+
+
+def test_the_facts_go_to_the_model_only_when_asked(demo, history):
+    from worker.desk import Desk
+
+    sink, model = MemorySink(), CountingWriter()
+    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
+    assert "insight" in model.asked and len(model.asked) <= 40
+
+
+def test_the_figures_kept_for_the_producer_reach_no_writer(demo, history):
+    """Every insight keeps its bits and the matches its history counts, and the stat of the match how many times rarer it is than the next fact, for the console. Neither the templates nor a model get them: no text or duo line quotes them."""
+    from worker.desk import OFF_AIR_FACTS, Desk
+    from worker.writer import TemplateWriter
+
+    sink = MemorySink()
+    docs = [d for d in run(demo[0], history, sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True)).insights("demo-0007") if "texts" in d]
+    stat = next(d for d in docs if d.get("stat_of_the_match"))
+    assert {"surprisal_bits", "history_opportunities", "times_rarer_than_runner_up", "top_value"} <= set(stat["headline_facts"])
+    claimed = {c["source_field"] for d in docs for x in d["texts"] + d["duo"] for c in x["claims"]}
+    assert claimed and not claimed & set(OFF_AIR_FACTS)
+    said = [t["headline"] + " " + t["why"] for d in docs for t in d["texts"]] + [l["line"] for d in docs for l in d["duo"]]
+    assert [x for x in said if re.search(r"(?i)times rarer|fois plus rare|veces m[aá]s raro|\bbits?\b", x)] == []
+
+    class Model(CountingWriter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.given: set[str] = set()
+
+        async def write_async(self, doc, facts, languages, **kwargs):
+            if doc.get("type") == "insight":
+                self.given |= set(facts[0]) | set(facts[1])
+            return await super().write_async(doc, facts, languages, **kwargs)
+
+    sink, model = MemorySink(), Model()
+    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
+    assert "top_fact" in model.given and not model.given & set(OFF_AIR_FACTS)
 
 
 def test_without_history_the_pipeline_is_unchanged(demo):
@@ -269,8 +476,31 @@ def test_json_file_sink_and_threaded_sink(demo, history, tmp_path):
     assert inner.insights["insight-demo-0007-stat-of-the-match"]["headline_facts"]["top_fact"] == "scorer-home-20-4"
 
 
+def test_approvals_the_console_writes_survive_the_next_facts(demo, history, tmp_path):
+    """Locally the console writes each approval into insights.json while the match goes on (here every fact once, as soon as it is written): the next facts the worker writes keep them."""
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    sink = JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()), history=history)
+    path = tmp_path / "demo-0007" / "insights.json"
+    console = Desk(MemorySink())  # what the console's desk does to a fact before writing it back
+    approved = set()
+    for m in demo[0]:
+        pipeline.handle(m)
+        docs = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        fresh = {d["id"] for d in docs if d["status"] == "pending" and (d["id"], d["version"]) not in approved}
+        if fresh:
+            approved |= {(d["id"], d["version"]) for d in docs if d["id"] in fresh}
+            path.write_text(json.dumps([console.approve(d, "producer") if d["id"] in fresh else d for d in docs]), encoding="utf-8")
+    pipeline.flush()
+    stored = {d["id"]: d for d in json.loads(path.read_text(encoding="utf-8"))}
+    kept = [stored[i]["status"] for i, version in approved if stored[i]["version"] == version]
+    assert len(kept) >= 4 and set(kept) <= {"approved", "superseded"} and "approved" in kept
+
+
 class TextDesk:
-    """A desk that already has write_insight (another lot adds it to worker.desk.Desk)."""
+    """A desk with the methods the pipeline calls, write_insight included."""
 
     def __init__(self) -> None:
         self.written = []

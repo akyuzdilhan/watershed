@@ -1,10 +1,15 @@
-"""The worker's input and output without Azure: concurrent writes, card ordering, incremental match state, and the Service Bus loop on fakes."""
+"""The worker's input and output without Azure: concurrent writes, card ordering, incremental match state, the Service Bus loop on fakes, and the post-match recap."""
 
 import json
 import logging
+import os
 import random
+import re
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -13,8 +18,11 @@ from worker import azure_io
 from worker.azure_io import ErrorLog, NoSession, consume, with_retry
 from worker.desk import Desk
 from worker.match import Match
-from worker.pipeline import MemorySink, Pipeline, ThreadedSink
+from worker.pipeline import JsonFileSink, MemorySink, Pipeline, ThreadedSink
 from worker.writer import TemplateWriter
+
+
+SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 @pytest.fixture(scope="module")
@@ -586,3 +594,275 @@ def test_thin_timeline_keeps_jumps_and_the_end():
     thinned = thin_timeline(points)
     assert len(thinned) < 25 and thinned[-1] is points[-1]
     assert points[49] in thinned and any(p is points[50] for p in thinned)
+
+
+# --- 5. the post-match recap and the writer options --------------------------------------------------
+
+
+def test_the_listener_writes_the_recap_at_the_final_whistle(demo):
+    """Through the Service Bus loop and the threaded sink, the desk writes the recap once the final whistle is processed, from the approved cards only."""
+    stream, _ = demo
+    inner = MemorySink()
+    sink = ThreadedSink(inner)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    clock, log = FakeClock(), {}
+    consume(pipeline, fake_bus({"demo": bodies(stream)}, clock, log), idle_s=30, clock=clock)
+    assert sink.close() == []
+    recap = inner.recaps["demo-0007"]
+    assert recap == pipeline.recaps["demo-0007"] and (recap["id"], recap["type"], recap["final"], recap["writer"]) == ("recap-demo-0007", "recap", True, "template")
+    assert recap["verification"]["verified"] and recap["analysis"]["score"] == next(iter(pipeline.matches.values())).score()
+    approved = {c["id"] for c in inner.cards.values() if c["status"] == "approved"}
+    assert recap["cited_cards"] and set(recap["cited_cards"] + recap["analysis"]["cards_on_air"]) <= approved
+
+
+def test_a_card_action_after_the_final_whistle_writes_the_recap_again(demo):
+    """A goal the provider voids after full time: the card comes off and the recap is written again on the new score."""
+    stream, truth = demo
+    last = max((g for g in truth["goals"] if g["counts"]), key=lambda g: g["clock_s"])
+    template = next(m for m in stream if m["type"] == "correction" and m["op"] == "void")
+    seq, at = max(m["seq"] for m in stream), max(m["emitted_at_s"] for m in stream)
+    void = {**template, "message_id": "extra-void", "seq": seq + 1, "emitted_at_s": at + 30, "target_event_id": last["event_id"], "cause": "provider_review", "related_message_id": None}
+    sink = MemorySink()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    at_whistle = pipeline.recaps["demo-0007"]["analysis"]["score"]
+    pipeline.handle(void)
+    pipeline.flush()
+    recap = sink.recaps["demo-0007"]
+    side = last["team"]
+    assert recap["analysis"]["score"][side] == at_whistle[side] - 1 and f"card-{last['event_id']}" in recap["analysis"]["cards_retracted"]
+    assert recap["verification"]["verified"]
+
+
+def test_the_recap_waits_for_the_whistle_itself(demo):
+    """The last goal arrives late: the reorder buffer releases it with every message after it, the VAR check on it and the final whistle included, in one batch. The recap is written once, when the whistle itself is processed, and counts the goal."""
+
+    class CountingDesk(Desk):
+        written = 0
+
+        def write_recap(self, cards, state, storyline=None):
+            self.written += 1
+            return super().write_recap(cards, state, storyline)
+
+    stream, truth = demo
+    feed = sorted({m["message_id"]: m for m in stream}.values(), key=lambda m: m["seq"])
+    last = max((g for g in truth["goals"] if g["counts"]), key=lambda g: g["clock_s"])
+    k = next(i for i, m in enumerate(feed) if m["type"] == "action" and m["event_id"] == last["event_id"])
+    sink = MemorySink()
+    desk = CountingDesk(sink, TemplateWriter(), auto_approve=True)
+    pipeline = Pipeline(sink=sink, desk=desk)
+    for m in feed[:k]:
+        pipeline.handle(m)
+    for m in feed[k + 1:]:
+        assert pipeline.handle(m, now=feed[k]["emitted_at_s"]) == []  # held until the goal arrives
+    released = pipeline.handle(feed[k])
+    assert [r["action"] for r in released if "action" in r] and any(r.get("moment") == "goal" for r in released)
+    assert desk.written == 1 and pipeline.recaps["demo-0007"]["final"]
+    assert f"card-{last['event_id']}" in pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"]
+    pipeline.flush()
+    assert desk.written == 1
+
+
+def test_approvals_after_the_whistle_reach_the_recap_on_the_next_flush(demo):
+    """Without auto-approve the cards wait for a producer, and the recap at the whistle cites none. The goals approved in the console after it are in the recap the next flush writes (the listener flushes when the session goes quiet); a flush with no new decision writes nothing."""
+
+    class CountingDesk(Desk):
+        written = 0
+
+        def write_recap(self, cards, state, storyline=None):
+            self.written += 1
+            return super().write_recap(cards, state, storyline)
+
+    stream, _ = demo
+    sink = MemorySink()
+    desk = CountingDesk(sink, TemplateWriter())
+    pipeline = Pipeline(sink=sink, desk=desk)
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    assert desk.written == 1 and pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"] == []
+    goals = [json.loads(json.dumps(c)) for c in sink.cards.values() if c["moment"] == "goal" and c["status"] == "pending"]
+    console = Desk(sink)  # the console's desk, on the same store
+    for card in goals:
+        console.approve(card, "producer")
+    pipeline.flush()
+    recap = pipeline.recaps["demo-0007"]
+    assert desk.written == 2 and sink.recaps["demo-0007"] == recap
+    assert sorted(recap["analysis"]["cards_on_air"]) == sorted(c["id"] for c in goals) and recap["analysis"]["goals_consistent"]
+    pipeline.flush()
+    assert desk.written == 2
+
+
+def test_a_flush_reads_back_only_the_matches_finished_within_the_window(demo):
+    """A long-running worker flushes at every quiet session. It reads the cards of a finished match back for `recap_window_s` after the whistle, so an approval made then is in the recap; later, the match is left alone and a matchday of finished matches is not read again at each flush."""
+
+    class CountingSink(MemorySink):
+        reads = 0
+
+        def load_card(self, match_id, card_id):
+            self.reads += 1
+            return super().load_card(match_id, card_id)
+
+    stream, _ = demo
+    clock, sink = FakeClock(), CountingSink()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()), clock=clock, recap_window_s=600)
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    goals = [json.loads(json.dumps(c)) for c in sink.cards.values() if c["moment"] == "goal" and c["status"] == "pending"]
+    console = Desk(sink)
+    console.approve(goals[0], "producer")
+    clock.now += 300
+    reads = sink.reads
+    pipeline.flush()
+    assert sink.reads > reads and pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"] == [goals[0]["id"]]
+    console.approve(goals[1], "producer")
+    clock.now += 600
+    reads = sink.reads
+    pipeline.flush()
+    assert sink.reads == reads and pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"] == [goals[0]["id"]]
+
+
+def test_approvals_the_console_writes_survive_the_next_cards(demo, tmp_path):
+    """Locally the console writes each approval into cards.json while the match goes on (here every card once, as soon as it is written): the worker's later writes keep them, and the recap counts them."""
+    stream, _ = demo
+    sink = JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()))
+    path = tmp_path / "demo-0007" / "cards.json"
+    console = Desk(MemorySink())  # what the console's desk does to a card before writing it back
+    approved = set()
+    for m in stream:
+        if not pipeline.handle(m):
+            continue
+        cards = json.loads(path.read_text(encoding="utf-8"))
+        fresh = {c["id"] for c in cards if c["status"] == "pending" and (c["id"], c["version"]) not in approved}
+        if fresh:
+            approved |= {(c["id"], c["version"]) for c in cards if c["id"] in fresh}
+            path.write_text(json.dumps([console.approve(c, "producer") if c["id"] in fresh else c for c in cards]), encoding="utf-8")
+    pipeline.flush()
+    stored = {c["id"]: c for c in json.loads(path.read_text(encoding="utf-8"))}
+    kept = [stored[i]["status"] for i, version in approved if stored[i]["version"] == version]
+    assert len(kept) >= 8 and set(kept) == {"approved", "retracted"}  # retracted: on air when VAR ruled the goal out
+    assert sink.cards == stored
+    on_air = {i for i, c in stored.items() if c["status"] == "approved"}
+    assert set(pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"]) == on_air
+
+
+def test_the_final_whistle_is_processed_even_if_the_recap_fails(demo, caplog):
+    class BrokenRecapDesk(Desk):
+        def write_recap(self, cards, state, storyline=None):
+            raise KeyError("draw_after_pct")
+
+    stream, _ = demo
+    sink = MemorySink()
+    pipeline = Pipeline(sink=sink, desk=BrokenRecapDesk(sink, TemplateWriter(), auto_approve=True))
+    with caplog.at_level(logging.WARNING, logger="worker"):
+        for m in stream:
+            pipeline.handle(m)
+        pipeline.flush()
+    assert sink.states["demo-0007"]["final"] and pipeline.recaps == {}
+    assert any("recap of demo-0007 failed" in r.getMessage() for r in caplog.records)
+
+
+def test_no_recap_when_it_is_turned_off_or_without_a_desk(demo):
+    stream, _ = demo
+    sink = MemorySink()
+    off = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True), recap=False)
+    for m in stream:
+        off.handle(m)
+    off.flush()
+    bare, _ = offline(stream)
+    assert off.recaps == sink.recaps == {} and bare.recaps == bare.sink.recaps == {}
+
+
+class FakeContainer:
+    def __init__(self) -> None:
+        self.items: list[dict] = []
+
+    def upsert_item(self, item: dict) -> None:
+        self.items.append(item)
+
+
+def test_cosmos_sink_writes_the_recap_next_to_the_cards():
+    sink = object.__new__(azure_io.CosmosSink)  # no client: the containers are all it uses
+    sink.cards = FakeContainer()
+    sink.recap({"id": "recap-m", "type": "recap", "match_id": "m", "texts": []})
+    (item,) = sink.cards.items
+    assert (item["id"], item["type"], item["match_id"]) == ("recap-m", "recap", "m")
+
+
+class DocumentSink(MemorySink):
+    """Keeps the events in a container, as Cosmos DB does, not in a list."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.events = FakeContainer()
+
+    def event(self, m: dict) -> None:
+        self.events.upsert_item(m)
+
+
+OFFSIDE_CALL_WORDS = re.compile(r"(?i)whisker|clearly|clear offside|that close|d'un rien|pour un rien|si peu|hors-jeu net|por muy poco|tan poco|fuera de juego claro|\d\s?cm\b|centim")
+
+
+def test_the_offside_margin_and_its_call_stay_off_air(demo, tmp_path):
+    """The feed sends the margin of the offside VAR rules out. It stays in the card's var_decision, for the producer: the duo's lines on the ruling and the recap written at the whistle (recap.json) say offside, never how close it was, whether the sink keeps the feed in a list or, like Cosmos DB, in a container."""
+    stream, _ = demo
+    void = next(m for m in stream if m["type"] == "correction" and m["op"] == "void" and m["cause"] == "var_offside")
+    margin = next(m["changes"]["offside"]["margin_m"] for m in stream
+                  if m["type"] == "correction" and m.get("related_message_id") == void["related_message_id"] and isinstance(m["changes"].get("offside"), dict))
+    inner = DocumentSink()
+    for sink in (JsonFileSink(tmp_path), ThreadedSink(inner)):
+        pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+        for m in stream:
+            pipeline.handle(m)
+        pipeline.flush()
+        if isinstance(sink, ThreadedSink):
+            assert sink.close() == []
+            cards, recap = inner.cards, inner.recaps["demo-0007"]
+        else:
+            cards = {c["id"]: c for c in json.loads((tmp_path / "demo-0007" / "cards.json").read_text(encoding="utf-8"))}
+            recap = json.loads((tmp_path / "demo-0007" / "recap.json").read_text(encoding="utf-8"))
+        decision = cards[f"card-{void['target_event_id']}"]["var_decision"]
+        assert decision["margin_m"] == margin and decision["call"] in ("tight", "clear")  # for the producer
+        ruled = [c for c in cards.values() if c.get("ruled_out")]
+        assert len(ruled) == 2 and all(c["ruled_out"]["margin_cm"] is None and c["duo_ruling"] for c in ruled)
+        lines = [l["line"] for c in ruled for l in c["duo_ruling"]]
+        texts = [t[part] for t in recap["texts"] for part in ("recap", "fan", "analyst")]
+        assert any("offside" in l.lower() for l in lines) and "offside" in next(t["recap"] for t in recap["texts"] if t["lang"] == "en")  # the reason is said
+        assert [x for x in lines + texts if OFFSIDE_CALL_WORDS.search(x)] == []
+        assert all(g["margin_cm"] is None for g in recap["analysis"]["disallowed_goals"]) and not [k for k in recap["facts"] if "offside_call" in k or "margin" in k]
+
+
+def test_loading_the_worker_loads_no_model_client():
+    """Agent Framework and the Azure SDKs are imported only when a Foundry writer or an Azure sink is built."""
+    code = ("import sys, worker.__main__, worker.pipeline, worker.desk, worker.recap, worker.azure_io, worker.insights; "
+            "print(sorted(m for m in sys.modules if m.split('.')[0] in ('agent_framework', 'azure')))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env={**os.environ, "PYTHONPATH": str(SRC)}).stdout
+    assert out.strip() == "[]"
+
+
+def test_cli_writes_the_recap_and_takes_the_writer_options(tmp_path, monkeypatch, capsys):
+    from worker import __main__ as cli
+    from worker import desk as desk_module
+
+    made = []
+
+    class SpyDesk(Desk):
+        def __init__(self, *args, **kwargs):
+            made.append(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(desk_module, "Desk", SpyDesk)
+    replay = str(SRC.parent / "data" / "replay" / "demo-0007.jsonl.gz")
+    monkeypatch.setattr(sys, "argv", ["worker", replay, "--writer", "template", "--auto-approve", "--desk-dir", str(tmp_path / "a")])
+    cli.main()
+    recap = json.loads((tmp_path / "a" / "demo-0007" / "recap.json").read_text(encoding="utf-8"))
+    assert recap["id"] == "recap-demo-0007" and recap["verification"]["verified"]
+    assert "recap    template, verified True" in capsys.readouterr().out
+    assert isinstance(made[0]["insight_writer"], TemplateWriter) and made[0]["recap_writer"] is None  # by default the facts are written by template
+    monkeypatch.setattr(sys, "argv", ["worker", replay, "--writer", "template", "--desk-dir", str(tmp_path / "b"), "--insights-writer", "writer", "--no-recap"])
+    cli.main()
+    assert made[1]["insight_writer"] is None and (tmp_path / "b" / "demo-0007" / "cards.json").exists() and not (tmp_path / "b" / "demo-0007" / "recap.json").exists()

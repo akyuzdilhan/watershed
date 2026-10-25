@@ -6,6 +6,8 @@ Deterministic, so every card can be traced back to numbers. A moment's value is 
 - a red card: the move of a team going down to ten.
 
 Every goal and every red card gets a card; another chance needs a value of at least `threshold`. A VAR check puts the card under review; a void retracts it; a reassignment rewrites it.
+
+What the card keeps for the desk and the console: the win and draw percentages of `facts` stay between 1 and 99 (a moment is always before the final whistle, as `writer.shown` puts it on air); a red card says whether it was a straight red or a second yellow (`card_kind`); a rewrite that changes the player names the previous one (`previous_player`); a void records why (`var_decision`: the cause of the correction, and for offside the margin the feed sends on the pass, called tight or clear by `writer.offside_call`). Everything is on the card itself, so it survives a store that keeps only documents (Cosmos DB).
 """
 
 from dataclasses import dataclass, field
@@ -18,6 +20,11 @@ SHOT_PREFIX = "shot"
 
 def pct(p: float) -> int:
     return round(100 * p)
+
+
+def shown_pct(p: float) -> int:
+    """A result probability on a card: 1 to 99, never 0% or 100% before the final whistle (same bounds as `writer.shown`)."""
+    return min(max(pct(p), 1), 99)
 
 
 @dataclass
@@ -49,12 +56,29 @@ class Spotter:
                 action = self._action(card, "retract", m, m["cause"])
                 action["previous_status"] = card["status"]
                 card["status"] = "retracted"
+                card["var_decision"] = self._var_decision(m)
                 return [action]
             if "player" in m["changes"]:
-                card["player"] = m["changes"]["player"]
+                before, after = card["player"], m["changes"]["player"]
+                card["player"] = after
                 card["version"] += 1
+                same = before.get("id") == after.get("id") if before.get("id") and after.get("id") else before.get("name") == after.get("name")
+                if same:
+                    card.pop("previous_player", None)  # the previous version credited him too
+                else:
+                    card["previous_player"] = before.get("name")
                 return [self._action(card, "rewrite", m, m["cause"])]
         return []
+
+    def _var_decision(self, void: dict) -> dict:
+        """Why a correction voided a card: its cause, and for offside the margin in metres the feed sends on the pass, in a correction tied to the same VAR decision."""
+        from worker.writer import offside_call
+
+        related = void.get("related_message_id")
+        found = [c for c in self.match.messages.values() if related and c.get("type") == "correction" and c.get("related_message_id") == related
+                 and isinstance((c.get("changes") or {}).get("offside"), dict) and isinstance(c["changes"]["offside"].get("margin_m"), (int, float))]
+        margin = max(found, key=lambda c: c["seq"])["changes"]["offside"]["margin_m"] if found else None
+        return {"reason": void.get("cause"), "call": offside_call(round(100 * margin)) if margin is not None else None, "margin_m": margin}
 
     def _moment(self, a: dict) -> dict | None:
         match, model = self.match, self.model
@@ -79,7 +103,9 @@ class Spotter:
             return self._card(a, "chance", value, before, if_goal, "if_goal")
         if kind == "foul" and a.get("card") in ("red", "second_yellow"):
             before, after = model.predict(match.state(a)), model.predict(match.state(a, after=True))
-            return self._card(a, "red_card", swing(before, after), before, after, "after")
+            card = self._card(a, "red_card", swing(before, after), before, after, "after")
+            card["card_kind"] = a["card"]
+            return card
         return None
 
     def _card(self, a: dict, moment: str, value: float, before, other, other_name: str, shot: dict | None = None) -> dict:
@@ -106,10 +132,10 @@ class Spotter:
             "value_pts": pct(value),
             "facts": {
                 "xg_pct": pct(shot["shot"]["xg"]) if "shot" in shot else None,
-                "team_wp_before_pct": pct(team_win(before, team)),
-                f"team_wp_{other_name}_pct": pct(team_win(other, team)),
-                "draw_before_pct": pct(before.draw),
-                f"draw_{other_name}_pct": pct(other.draw),
+                "team_wp_before_pct": shown_pct(team_win(before, team)),
+                f"team_wp_{other_name}_pct": shown_pct(team_win(other, team)),
+                "draw_before_pct": shown_pct(before.draw),
+                f"draw_{other_name}_pct": shown_pct(other.draw),
             },
         }
         self.cards[a["event_id"]] = card
@@ -119,13 +145,16 @@ class Spotter:
         return {"id": f"{card['id']}-{m['message_id']}", "match_id": card["match_id"], "card_id": card["id"], "event_id": card["event_id"], "action": action, "cause": cause, "message_id": m["message_id"], "minute_label": m["minute_label"]}
 
 
+CARD_ACTIONS = {"retract": "retract", "rewrite": "rewrite", "retracted": "retract", "rewrite_requested": "rewrite"}  # the Spotter's names, and the desk's when a desk audits the action
+
+
 def score_against_truth(cards: dict[str, dict], actions: list[dict], truth: dict) -> dict:
-    """Recall of the moments the truth says deserve a card, precision of the cards, and the actions taken on cards the feed changed."""
+    """Recall of the moments the truth says deserve a card, precision of the cards, and the actions taken on cards the feed changed (`actions`: the audit trail, with or without a desk)."""
     wanted = {g["event_id"] for g in truth["goals"]}
     wanted |= {m["event_id"] for m in truth["moments"] if m["kind"] in ("goal", "save") or (m["kind"] == "foul" and m["key"].startswith("red"))}
     found = {i for c in cards.values() for i in (c["event_id"], c["shot_event_id"])} & wanted
     expected = {g["event_id"]: g["expected_card_action"] for g in truth["goals"] if g["expected_card_action"] != "none"}
-    done = {a["event_id"]: a["action"] for a in actions if a["action"] in ("retract", "rewrite")}
+    done = {a["event_id"]: CARD_ACTIONS[a["action"]] for a in actions if a.get("action") in CARD_ACTIONS and a.get("event_id")}
     return {
         "moments": len(wanted),
         "recall": len(found) / len(wanted) if wanted else 1.0,

@@ -5,6 +5,7 @@ import pytest
 from generator import generate_match
 from worker.desk import Desk
 from worker.pipeline import MemorySink, Pipeline
+from worker.spotter import score_against_truth
 from worker.writer import TemplateWriter, card_facts, verify
 
 
@@ -50,8 +51,28 @@ def test_a_reassigned_goal_is_rewritten_with_the_new_scorer(desk_run):
 def test_no_probability_of_0_or_100_before_the_final_whistle(desk_run):
     sink, _, _ = desk_run
     for card in sink.cards.values():
+        assert all(1 <= v <= 99 for k, v in card["facts"].items() if k != "xg_pct"), card["minute_label"]
         for t in card["texts"]:
             assert "100%" not in t["why"] and "100 %" not in t["why"]
+        for line in card.get("duo", []):
+            assert "100%" not in line["line"] and "100 %" not in line["line"]
+
+
+def test_each_card_action_is_audited_once(desk_run):
+    """With a desk, each card action from the feed has one audit entry, the desk's, with the action's own event, message and minute; the score against the ground truth reads it."""
+    sink, _, truth = desk_run
+    stream, _ = generate_match(7, "demo")
+    bare = Pipeline()
+    actions = [r for m in stream for r in bare.handle(m) if "action" in r] + [r for r in bare.flush() if "action" in r]
+    named = {"retract": "retracted", "rewrite": "rewrite_requested", "hold": "hold", "release": "release"}
+    feed = [e for e in sink.audit if e["by"] == "feed"]
+    assert sorted((e["action"], e["event_id"], e["message_id"], e["minute_label"]) for e in feed) == sorted(
+        (named[a["action"]], a["event_id"], a["message_id"], a["minute_label"]) for a in actions)
+    assert all(e.get("by") for e in sink.audit)  # no bare line from the Spotter next to the desk's
+    for card in sink.cards.values():
+        assert [e["action"] for e in sink.audit if e["card_id"] == card["id"]] == [h["action"] for h in card["history"]], card["minute_label"]
+    report = score_against_truth({c["event_id"]: c for c in sink.cards.values()}, sink.audit, truth)
+    assert report["card_actions_correct"] and report["card_actions_done"] == report["card_actions_expected"]
 
 
 def test_producer_decisions_are_audited():

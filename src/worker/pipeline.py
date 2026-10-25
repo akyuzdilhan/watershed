@@ -1,11 +1,13 @@
 """From the wire to the desk: one Match and one Spotter per match, and a sink that stores what they produce.
 
-The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription.
+The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription. With a desk, the desk writes every card, audits every card action once (the Spotter's action goes to the audit trail only when there is no desk), and at the final whistle writes the post-match recap from the cards as the store has them.
 """
 
 import copy
 import json
+import logging
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,8 +16,10 @@ from winprob.skellam import SkellamWinProb
 from worker.match import Match, make_model
 from worker.spotter import Spotter
 
+log = logging.getLogger("worker")
 
 PRODUCER_FIELDS = ("status", "texts", "history", "retracted_on_air")  # what the console may change on a card
+INSIGHT_PRODUCER_FIELDS = ("status", "texts", "history")  # what the console may change on an insight
 
 
 class MemorySink:
@@ -26,6 +30,7 @@ class MemorySink:
         self.cards: dict[str, dict] = {}
         self.audit: list[dict] = []
         self.insights: dict[str, dict] = {}
+        self.recaps: dict[str, dict] = {}  # match id -> post-match recap
 
     def event(self, m: dict) -> None:
         self.events.append(m)
@@ -53,9 +58,12 @@ class MemorySink:
     def load_insight(self, match_id: str, insight_id: str) -> dict | None:
         return self.insights.get(insight_id)
 
+    def recap(self, doc: dict) -> None:
+        self.recaps[doc["match_id"]] = copy.deepcopy(doc)
+
 
 class JsonFileSink(MemorySink):
-    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json and audit.jsonl. The console reads these files when Cosmos DB is not configured."""
+    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json, audit.jsonl and, at the final whistle, recap.json. The console reads these files when Cosmos DB is not configured, and writes the producer's decisions into cards.json and insights.json: before rewriting one of them, the sink takes those decisions back from it for every document other than the one it writes, so a later card does not undo an approval."""
 
     def __init__(self, root: Path) -> None:
         super().__init__()
@@ -66,19 +74,36 @@ class JsonFileSink(MemorySink):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _write_cards(self, match_id: str) -> None:
+    @staticmethod
+    def _keep_decisions(path: Path, docs: dict[str, dict], written_id: str, fields: tuple[str, ...]) -> None:
+        """The console's decisions in the file at `path` (`fields` of every document but `written_id`, at the version this sink last wrote) back into `docs`."""
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        except (OSError, ValueError):  # unreadable while the console replaces it: written as this process has it
+            return
+        for doc in stored if isinstance(stored, list) else []:
+            mine = docs.get(doc.get("id")) if isinstance(doc, dict) else None
+            if mine is None or doc["id"] == written_id or doc.get("version") != mine.get("version"):
+                continue
+            for k in fields:
+                if k in doc:
+                    mine[k] = doc[k]
+
+    def _write_cards(self, match_id: str, written_id: str) -> None:
+        path = self._dir(match_id) / "cards.json"
+        self._keep_decisions(path, self.cards, written_id, PRODUCER_FIELDS)
         cards = [c for c in self.cards.values() if c["match_id"] == match_id]
-        (self._dir(match_id) / "cards.json").write_text(json.dumps(cards, indent=1, ensure_ascii=False), encoding="utf-8")
+        path.write_text(json.dumps(cards, indent=1, ensure_ascii=False), encoding="utf-8")
 
     def card(self, card: dict) -> None:
         super().card(card)
-        self._write_cards(card["match_id"])
+        self._write_cards(card["match_id"], card["id"])
 
     def action(self, action: dict, card: dict) -> None:
         super().action(action, card)
         self.audit_entry(action)
         self.audit.pop()  # audit_entry already appended it once
-        self._write_cards(card["match_id"])
+        self._write_cards(card["match_id"], card["id"])
 
     def audit_entry(self, entry: dict) -> None:
         super().audit_entry(entry)
@@ -95,8 +120,15 @@ class JsonFileSink(MemorySink):
         if doc.get("type") == "storyline":
             (self._dir(doc["match_id"]) / "storyline.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
             return
+        path = self._dir(doc["match_id"]) / "insights.json"
+        self._keep_decisions(path, self.insights, doc["id"], INSIGHT_PRODUCER_FIELDS)
         docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"] and d.get("type") != "storyline"]
-        (self._dir(doc["match_id"]) / "insights.json").write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
+        path.write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
+
+    def recap(self, doc: dict) -> None:
+        """recap.json, as `python -m worker.recap` writes it."""
+        super().recap(doc)
+        (self._dir(doc["match_id"]) / "recap.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
 
     def feedback(self, doc: dict) -> None:
         """A producer's judgement on one sentence: appended to feedback.jsonl, never into cards.json."""
@@ -249,6 +281,12 @@ class Pipeline:
     _history_view: object | None = None
     storyline_for: object | None = None  # callable(match_id, teams) -> storyline document, built once when the match information arrives
     storylines: dict[str, dict] = field(default_factory=dict)
+    recap: bool = True  # with a desk: the post-match recap once the final whistle is processed, written again if the feed changes a card after it, or if a flush finds a producer decision made since
+    recaps: dict[str, dict] = field(default_factory=dict)
+    _recapped: dict[str, tuple] = field(default_factory=dict)  # per match: (card id, status, version) of each card the last recap was written from
+    recap_window_s: float = 3600.0  # how long after its final whistle a flush still reads a match's cards back for the producer's decisions
+    clock: object = time.monotonic  # seconds, for recap_window_s
+    _whistled: dict[str, float] = field(default_factory=dict)  # match id -> clock when its full_time message was processed (Match.full_time_seq is set as soon as it is released)
     _tables: dict[str, list] = field(default_factory=dict)  # per match: (event id, table if the score holds) of each goal given a season context
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
@@ -259,15 +297,22 @@ class Pipeline:
         return self._process(match, ready)
 
     def flush(self) -> list[dict]:
+        """Processes what the reorder buffers still hold. A match finished less than `recap_window_s` ago gets its recap written again when a producer decided on one of its cards since the last one (the listener flushes when a session goes quiet); older ones are not read back."""
         out = []
         for match in self.matches.values():
             out += self._process(match, match.flush())
+            whistled = self._whistled.get(match.match_id)
+            if self.recap and whistled is not None and self.clock() - whistled <= self.recap_window_s and match.match_id in self.spotters:
+                self._recap(match, self.spotters[match.match_id], self.timelines.get(match.match_id, []), only_if_changed=True)
         return out
 
     def _process(self, match: Match, ready: list[dict]) -> list[dict]:
         out = []
         for m in ready:
             self.sink.event(m)
+            whistle = m["type"] == "full_time" and match.match_id not in self._whistled
+            if whistle:
+                self._whistled[match.match_id] = self.clock()
             spotter = self.spotters.get(match.match_id)
             if spotter is None and match.info is not None:
                 spotter = self.spotters[match.match_id] = Spotter(match, make_model(match, SkellamWinProb), self.threshold)
@@ -286,9 +331,10 @@ class Pipeline:
                 produced = True
                 card = spotter.cards[result["event_id"]]
                 if "action" in result:
-                    self.sink.action(result, card)
                     if self.desk is not None:
-                        self.desk.on_action(card, result, teams)
+                        self.desk.on_action(card, result, teams)  # audits the action once, with its own fields, and stores the card
+                    else:
+                        self.sink.action(result, card)
                 else:
                     self._season(match, card)
                     self.sink.card(result)
@@ -298,7 +344,26 @@ class Pipeline:
             self._insights(match, spotter, m, teams)
             if hasattr(self.sink, "state") and (produced or m["type"] in ("period_end", "full_time", "correction") or len(timeline) % self.state_every == 0):
                 self.sink.state(match_state(match, spotter, timeline))
+            if self.recap and match.match_id in self._whistled and (whistle or produced):  # not for the messages released with the whistle but before it
+                self._recap(match, spotter, timeline)
         return out
+
+    def _recap(self, match: Match, spotter: Spotter, timeline: list[dict], only_if_changed: bool = False) -> None:
+        """The post-match recap, by the desk, from the cards with the producer's decisions read back from the store: at the final whistle, after a card action that comes later, and on a flush when a card's status or version changed since the last recap (`only_if_changed`)."""
+        write = getattr(self.desk, "write_recap", None)
+        if write is None:
+            return
+        cards = list(spotter.cards.values())
+        try:
+            for card in cards:
+                self._refresh(card)
+            seen = tuple(sorted((c["id"], c.get("status"), c.get("version", 1)) for c in cards))
+            if only_if_changed and self._recapped.get(match.match_id) == seen:
+                return
+            self.recaps[match.match_id] = write(cards, match_state(match, spotter, timeline), self.storylines.get(match.match_id))
+            self._recapped[match.match_id] = seen
+        except Exception as error:  # the final whistle is processed, and the flush goes on, even if the recap fails
+            log.warning("recap of %s failed: %s: %s", match.match_id, type(error).__name__, str(error)[:300])
 
     def _insights(self, match: Match, spotter: Spotter, m: dict, teams: dict[str, str]) -> None:
         """After the Spotter: the facts this message makes true, or no longer true, against the match and the history. Not returned by `handle`, which keeps returning cards and card actions."""
@@ -312,7 +377,7 @@ class Pipeline:
             if self._history_view is None:
                 self._history_view = HistoryView(self.history)
             engine = self.engines[match.match_id] = InsightEngine(match, self._history_view, spotter, self.insight_cap, self.insight_min_value,
-                                                                  load=getattr(self.sink, "load_insight", None))
+                                                                  load=getattr(self.sink, "load_insight", None), audit=getattr(self.sink, "audit_entry", None))
         store = getattr(self.sink, "insight", None)
         write = getattr(self.desk, "write_insight", None) if self.desk is not None else None
         for doc, needs_text in engine.process(m):
