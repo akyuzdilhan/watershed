@@ -93,6 +93,12 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 
 .sign-in { max-width: 520px; margin: 80px auto; padding: 0 16px; }
 
+/* read-only view (a visitor in public mode): no decision or feedback control, whatever a panel draws */
+.read-only .actions, .read-only .edit-panel, .read-only .fb, .read-only .fb-reasons { display: none !important; }
+.read-note { display: flex; gap: 10px; align-items: center; }
+.sign-in-link { color: var(--ink-2); font-size: 12px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
+.sign-in-link:hover { color: var(--ink); border-color: var(--ink-2); }
+
 /* overlay: transparent page, lower-third at the bottom */
 .ov-page { position: fixed; inset: 0; background: transparent; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 body:has(.ov-page) { background: #0b0b0b; }

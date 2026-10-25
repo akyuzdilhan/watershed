@@ -1,6 +1,6 @@
-"""Public safety: a per-IP rate limit on the Flask server, and the sign-in gate on producer actions.
+"""Public safety: a per-IP rate limit on the Flask server, and who may decide.
 
-In Azure Container Apps, Easy Auth signs the producer in and passes the user in the `X-MS-CLIENT-PRINCIPAL-NAME` header. Anyone can send that header to an app without Easy Auth, so it is trusted only when `EASY_AUTH_ENABLED` is true. `PUBLIC_MODE` (on unless set to 0) makes the console and the producer callbacks require a trusted user, optionally one of `PRODUCERS` (comma-separated); with `PUBLIC_MODE=0`, locally, everyone is the local producer.
+In Azure Container Apps, Easy Auth signs the producer in and passes the user in the `X-MS-CLIENT-PRINCIPAL-NAME` header. Anyone can send that header to an app without Easy Auth, so it is trusted only when `EASY_AUTH_ENABLED` is true. In `PUBLIC_MODE` (on unless set to 0) a visitor sees the console read only, and the producer callbacks (decisions, edits, feedback) require a trusted user, optionally one of `PRODUCERS` (comma-separated); with `PUBLIC_MODE=0`, locally, everyone is the local producer.
 
 The rate limit counts page loads and Dash callbacks per IP over a sliding minute: `RATE_LIMIT_PER_MIN`, 600 by default. The console's desk (about 80 requests a minute), its graphics or insights panel (12) and the overlay (60), open together from one address, send about 150.
 """
@@ -14,6 +14,7 @@ from flask import Flask, Response, request
 
 PRINCIPAL_HEADER = "X-MS-CLIENT-PRINCIPAL-NAME"
 LOCAL_PRODUCER = "local-producer"
+LOGIN_URL = "/.auth/login/aad?post_login_redirect_uri=/"
 DEFAULT_PER_MIN = 600
 LIMITED_PREFIXES = ("/_dash-update-component", "/_dash-layout", "/_dash-dependencies")
 PAGES = ("/", "/overlay")
@@ -32,7 +33,7 @@ def easy_auth() -> bool:
 
 
 def producer() -> str | None:
-    """The signed-in producer, the local producer outside public mode, or None (decisions refused)."""
+    """The signed-in producer, the local producer outside public mode, or None (a visitor: read only, decisions refused)."""
     if not public_mode():
         return LOCAL_PRODUCER
     if not easy_auth():

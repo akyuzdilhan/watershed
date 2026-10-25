@@ -214,23 +214,39 @@ def test_overlay_module_never_loads_the_writer_or_a_model():
 
 # --- public safety --------------------------------------------------------------------------------
 
-def test_public_mode_requires_a_signed_in_producer(desk, monkeypatch):
+def find(component, test) -> list:
+    """Every component of a Dash tree for which `test` is true."""
+    if isinstance(component, (list, tuple)):
+        return [c for item in component for c in find(item, test)]
+    if not hasattr(component, "to_plotly_json"):
+        return []
+    return ([component] if test(component) else []) + find(getattr(component, "children", None), test)
+
+
+def test_public_mode_shows_visitors_a_read_only_console(desk, monkeypatch):
     monkeypatch.setenv("PUBLIC_MODE", "1")
     monkeypatch.setenv("EASY_AUTH_ENABLED", "true")
     with app.server.test_request_context("/"):
         assert security.producer() is None
-        assert "Sign in" in texts_in(route("/"))
-        assert "Sign in" not in texts_in(route("/overlay"))  # the overlay stays public
+        page = route("/")
+        assert "read-only" in page.className and "Read-only view" in texts_in(page) and "Signed in as" not in texts_in(page)
+        assert {"c-pane-desk", "c-pane-graphics", "c-pane-insights", "c-detail", "c-wp", "c-i-detail", "c-g-figure"} <= component_ids(page)  # the whole console
+        assert [a.href for a in find(page, lambda c: getattr(c, "href", None) and "sign-in" in texts_in(c))] == [security.LOGIN_URL]
+        assert find(page, lambda c: "c-approve" in component_ids(getattr(c, "children", None)) and getattr(c, "className", "") == "actions")[0].style == {"display": "none"}
+        assert "Read-only view" not in texts_in(route("/overlay"))  # the overlay stays as it was
     with app.server.test_request_context("/", headers={security.PRINCIPAL_HEADER: "ana@example.com"}):
         assert security.producer() == "ana@example.com"
-        assert "Signed in as ana@example.com" in texts_in(route("/"))
+        page = route("/")
+        assert "Signed in as ana@example.com" in texts_in(page) and "Read-only view" not in texts_in(page) and "read-only" not in page.className
     monkeypatch.setenv("PRODUCERS", "bob@example.com")
     with app.server.test_request_context("/", headers={security.PRINCIPAL_HEADER: "ana@example.com"}):
-        assert security.producer() is None
+        assert security.producer() is None and "Read-only view" in texts_in(route("/"))
     monkeypatch.delenv("PRODUCERS")
     monkeypatch.setenv("EASY_AUTH_ENABLED", "false")  # without Easy Auth the header is forgeable
     with app.server.test_request_context("/", headers={security.PRINCIPAL_HEADER: "ana@example.com"}):
         assert security.producer() is None
+        page = route("/")
+        assert "Read-only view" in texts_in(page) and "Producer sign-in" not in texts_in(page)  # no sign-in to offer
 
 
 def test_approve_callback_refuses_without_sign_in_in_public_mode(desk, monkeypatch):
@@ -287,6 +303,132 @@ def test_rate_limit_lets_the_desk_the_graphics_and_the_overlay_run_together(monk
     # one address, one minute: the desk ticks every 0.75 s (two callbacks a 1.5 s tick), the graphics panel every 5 s, the overlay every second
     times = sorted([0.75 * i for i in range(80)] + [5.0 * i for i in range(12)] + [1.0 * i for i in range(60)])
     assert len(times) > 120 and all(limiter.allow("1.2.3.4", now=t) for t in times)
+
+
+def dash_post(output: str, inputs: list, state: list, changed: list[str], headers: dict | None = None):
+    """POSTs one callback to the Dash endpoint, as the browser does; `output` picks the callback by a part of its outputs."""
+    key = next(k for k in app.callback_map if output in k)
+    outputs = [{"id": part.split(".")[0], "property": part.split(".", 1)[1]} for part in key.strip(".").split("...")]
+    body = {"output": key, "outputs": outputs, "inputs": inputs, "state": state, "changedPropIds": changed}
+    return app.server.test_client().post("/_dash-update-component", json=body, headers=headers or {})
+
+
+def json_ids(tree) -> list:
+    """Every component id in a serialized Dash tree (a callback response)."""
+    if isinstance(tree, list):
+        return [i for t in tree for i in json_ids(t)]
+    if not isinstance(tree, dict):
+        return []
+    if "namespace" not in tree:
+        return [i for v in tree.values() for i in json_ids(v)]
+    props = tree.get("props") or {}
+    return ([props["id"]] if "id" in props else []) + json_ids(props.get("children"))
+
+
+REFRESH = "c-detail.children"
+DECIDE = "..c-message.children...c-rev.data.."
+VISITOR = {"X-Forwarded-For": "203.0.113.7"}
+
+
+def refresh_body(card_id: str, sig=None, n: int = 1) -> tuple[list, list, list]:
+    inputs = [{"id": "c-tick", "property": "n_intervals", "value": n}, {"id": "c-rev", "property": "data", "value": 0},
+              {"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card_id}]
+    return inputs, [{"id": "c-sig", "property": "data", "value": sig}], ["c-tick.n_intervals"]
+
+
+def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypatch):
+    goal = card_at(desk, "66'")
+    assert console.decide("approve", MATCH, goal["id"], "ana@example.com")[1]
+    assert console.give_feedback(MATCH, f"{goal['id']}|headline|en|0", "verdict", "down", "ana@example.com")[1]
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    monkeypatch.setenv("EASY_AUTH_ENABLED", "true")
+    with app.server.test_request_context("/"):
+        rundown, _, detail, fig, score, approve_off, edit_off, reject_off, _ = console._refresh_cb(1, 0, MATCH, goal["id"], None)
+    text = texts_in(detail)
+    en = next(t for t in goal["texts"] if t["lang"] == "en")
+    assert len(rundown) == 11 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
+    assert approve_off and edit_off and reject_off
+    assert not feedback_ids(detail) and not feedback_ids(detail, "fb-r") and not feedback_ids(detail, "fb-n")  # no thumbs, reasons or notes
+    history = texts_in(find(detail, lambda c: getattr(c, "className", "") == "history"))
+    assert "ana@example.com" not in text and "by a producer" in history and "feedback" not in history and "Producer feedback" not in text
+    # the same through the Dash endpoint, as the visitor's browser asks for it
+    options = dash_post("c-match.options", [{"id": "c-tick", "property": "n_intervals", "value": 1}], [{"id": "c-match", "property": "value", "value": None}],
+                        ["c-tick.n_intervals"], VISITOR).get_json()["response"]
+    assert options["c-match"]["value"] == MATCH
+    response = dash_post(REFRESH, *refresh_body(goal["id"]), headers=VISITOR)
+    assert response.status_code == 200
+    payload = response.get_json()["response"]
+    assert en["headline"] in json.dumps(payload["c-detail"], ensure_ascii=False) and payload["c-approve"]["disabled"] is True
+    assert not [i for i in json_ids(payload["c-detail"]) if isinstance(i, dict) and i.get("type", "").startswith("fb")]
+    monkeypatch.setenv("PUBLIC_MODE", "0")  # the producer, locally: every control
+    with app.server.test_request_context("/"):
+        detail = console._refresh_cb(1, 0, MATCH, goal["id"], None)[2]
+    assert feedback_ids(detail) and feedback_ids(detail, "fb-n") and "ana@example.com" in texts_in(detail)
+
+
+def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypatch):
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    monkeypatch.setenv("EASY_AUTH_ENABLED", "true")
+    goal, other = card_at(desk, "66'"), card_at(desk, "57'")
+    folder = desk.root / MATCH
+    before = {name: (folder / name).read_bytes() for name in ("cards.json", "audit.jsonl")}
+    hid = {"type": "c-edit-headline", "lang": "en"}
+
+    def decision(button: str, card: dict, headline: str | None = None) -> tuple[list, list, list]:
+        edits = [[{"id": hid, "property": "id", "value": hid}], [{"id": hid, "property": "value", "value": headline}], [], []] if headline else [[], [], [], []]
+        inputs = [{"id": b, "property": "n_clicks", "value": 1 if b == button else None} for b in ("c-approve", "c-reject", "c-approve-edit")]
+        state = [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card["id"]},
+                 {"id": "c-rev", "property": "data", "value": 0}, *edits]
+        return inputs, state, [f"{button}.n_clicks"]
+
+    def judge(kind: str, card: dict, value) -> tuple[list, list, list]:
+        key = f"{card['id']}|why|en|0"
+        cid = {"type": "fb", "p": "d", "k": key, "v": value} if kind == "fb" else {"type": "fb-r", "p": "d", "k": key, "r": value} if kind == "fb-r" else {"type": "fb-n", "p": "d", "k": key}
+        prop, val = ("value", value) if kind == "fb-n" else ("n_clicks", 1)
+        inputs = [[{"id": cid, "property": prop, "value": val}] if kind == k else [] for k in ("fb", "fb-r", "fb-n")]
+        state = [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-i-rev", "property": "data", "value": 0}]
+        return inputs, state, [json.dumps(cid, sort_keys=True, separators=(",", ":")) + "." + prop]
+
+    def edit_open(card: dict) -> tuple[list, list, list]:
+        inputs = [{"id": "c-edit", "property": "n_clicks", "value": 1}, {"id": "c-cancel-edit", "property": "n_clicks", "value": None},
+                  {"id": "c-rev", "property": "data", "value": 0}, {"id": "c-rundown", "property": "value", "value": card["id"]}]
+        return inputs, [{"id": "c-match", "property": "value", "value": MATCH}], ["c-edit.n_clicks"]
+
+    for headers in (VISITOR, {**VISITOR, security.PRINCIPAL_HEADER: ""}):  # nobody signed in
+        for body in (decision("c-approve", goal), decision("c-reject", other), decision("c-approve-edit", goal, "Edited by a visitor")):
+            assert "Sign in to approve or reject cards" in dash_post(DECIDE, *body, headers=headers).get_data(as_text=True)
+        for body in (judge("fb", goal, "down"), judge("fb-r", goal, "too_long"), judge("fb-n", goal, "Too long by half")):
+            assert "Sign in to give feedback" in dash_post("c-i-rev.data@", *body, headers=headers).get_data(as_text=True)
+        panel = dash_post("c-edit-panel.children", *edit_open(goal), headers=headers).get_json()["response"]
+        assert panel["c-edit-panel"]["children"] == [] and panel["c-edit-actions"]["style"] == {"display": "none"}
+    assert {name: (folder / name).read_bytes() for name in before} == before and not (folder / "feedback.jsonl").exists()  # nothing written
+
+    producer = {**VISITOR, security.PRINCIPAL_HEADER: "ana@example.com"}
+    panel = dash_post("c-edit-panel.children", *edit_open(goal), headers=producer).get_json()["response"]
+    assert len(panel["c-edit-panel"]["children"]) == len(goal["texts"])
+    assert "approved by ana@example.com" in dash_post(DECIDE, *decision("c-approve", goal), headers=producer).get_data(as_text=True)
+    assert "Rejected by ana@example.com" in dash_post(DECIDE, *decision("c-reject", other), headers=producer).get_data(as_text=True)
+    assert "not relevant (too long), by ana@example.com" in dash_post("c-i-rev.data@", *judge("fb-r", goal, "too_long"), headers=producer).get_data(as_text=True)
+    assert "with a note" in dash_post("c-i-rev.data@", *judge("fb-n", goal, "Too long by half"), headers=producer).get_data(as_text=True)
+    assert card_at(desk, "66'")["status"] == "approved" and card_at(desk, "57'")["status"] == "rejected"
+    latest = console.FB.by_target(desk.feedback_docs(MATCH))[f"{goal['id']}|why|en|0"]
+    assert latest["reasons"] == ["too_long"] and latest["note"] == "Too long by half" and latest["by"] == "ana@example.com"
+
+
+def test_public_console_never_loads_a_model(desk):
+    code = ("import json, sys\n"
+            "from web.app import app, route\n"
+            "from web import console\n"
+            "with app.server.test_request_context('/'):\n"
+            "    page = route('/')\n"
+            "    out = console._refresh_cb(1, 0, sys.argv[1], None, None)\n"
+            "print(json.dumps({'read_only': 'read-only' in page.className, 'rundown': len(out[0]),\n"
+            "                  'loaded': sorted(m for m in sys.modules if m.startswith(('agent_framework', 'openai', 'azure.ai')))}))\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("COSMOS_ENDPOINT", "DESK")}
+    env.update(PYTHONPATH=str(SRC), PUBLIC_MODE="1", EASY_AUTH_ENABLED="true", DESK_DIR=str(desk.root))
+    out = subprocess.run([sys.executable, "-c", code, MATCH], capture_output=True, text=True, check=True, env=env).stdout
+    result = json.loads(out.strip().splitlines()[-1])
+    assert result == {"read_only": True, "rundown": 11, "loaded": []}
 
 
 # --- match graphics, insights and storyline -------------------------------------------------------

@@ -1,6 +1,8 @@
-"""The producer console (`/`): the rundown of cards, the selected card with its texts, facts and history, the producer's decisions, and the win-probability curve.
+"""The console (`/`): the rundown of cards, the selected card with its texts, facts and history, the producer's decisions, and the win-probability curve.
 
-Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and duo line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
+Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and duo line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving.
+
+In public mode a visitor who is not signed in gets the same views read only: no decision button, no thumbs, reasons or notes, no producer identity, no offside margin. Every decision and feedback callback asks `security.producer()` again and refuses without writing. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
 """
 
 import hashlib
@@ -17,6 +19,7 @@ LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
 MOMENTS = {"goal": "Goal", "save": "Save", "red_card": "Red card", "chance": "Chance"}
 STATUS = {"proposed": ("Writing", "st-proposed"), "pending": ("Pending", "st-pending"), "approved": ("On air", "st-approved"),
           "rejected": ("Rejected", "st-rejected"), "retracted": ("Retracted", "st-retracted")}
+SYSTEM_ACTORS = ("template", "auto-approve", "feed")  # who decided, besides a producer and the writer models
 COLORS = {"home": "#3987e5", "draw": "#9a998f", "away": "#d95926", "muted": "#6f6e69", "ink": "#f0efec", "ink2": "#c3c2b7", "surface": "#1a1a19", "grid": "#2c2c2a"}
 
 
@@ -40,11 +43,28 @@ def rundown_options(cards: list[dict]) -> list[dict]:
         html.Div(badges(c), className="ru-badges")], className="ru-item " + ("ru-retracted" if c.get("status") == "retracted" else ""))} for c in cards]
 
 
-def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None) -> html.Div:
-    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far."""
+def actor(by: str, action: str, card: dict, read_only: bool) -> str:
+    """Who did it, as shown: in the read-only view a producer's identity becomes "a producer"."""
+    if not read_only or action == "written" or by in SYSTEM_ACTORS or by in (card.get("writer"), card.get("duo_writer")):
+        return by
+    return "a producer"
+
+
+def history_view(card: dict, audit: list[dict], read_only: bool) -> html.Ol:
+    entries = [e for e in audit if e.get("card_id") == card["id"] and e.get("by") and not (read_only and e.get("action") == "feedback")]  # desk entries; the Spotter's own lines repeat them
+    items = [html.Li([html.Span(e.get("action", ""), className="h-action"), html.Span(f" by {actor(e['by'], e.get('action', ''), card, read_only)}"),
+                      html.Span(f", v{e['version']}" if e.get("version") else ""), html.Span(f", {e['cause']}" if e.get("cause") else "", className="muted")])
+             for e in entries]
+    items = items or [html.Li(f"{h['action']} by {actor(h['by'], h['action'], card, read_only)}, v{h['version']}") for h in card.get("history", [])
+                      if not (read_only and h.get("action") == "feedback")]
+    return html.Ol(items, className="history")
+
+
+def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None, read_only: bool = False) -> html.Div:
+    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far. `read_only` (a visitor in public mode): no thumbs, no producer identity, no feedback."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
-    verdicts = FB.by_target(feedback or [])
+    verdicts = None if read_only else FB.by_target(feedback or [])
     mt = set(card.get("machine_translated") or [])
     texts = [html.Div([html.Div([html.Span(LANG_NAMES.get(t["lang"], t["lang"]), className="lang"),
                                  *([html.Span("machine-translated", className="badge st-mt")] if t["lang"] in mt else [])], className="lang-row"),
@@ -55,18 +75,16 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     verification = html.Div(
         [html.Span("Verified" if v.get("verified") else "Not verified", className="badge " + ("st-approved" if v.get("verified") else "st-retracted")),
          html.Span(f" writer {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s)", className="muted")]) if v else html.Div("Not checked yet.", className="muted")
-    entries = [e for e in audit if e.get("card_id") == card["id"] and e.get("by")]  # desk entries; the Spotter's own lines repeat them
-    history = html.Ol([html.Li([html.Span(e.get("action", ""), className="h-action"), html.Span(f" by {e['by']}"),
-                                html.Span(f", v{e['version']}" if e.get("version") else ""), html.Span(f", {e['cause']}" if e.get("cause") else "", className="muted")])
-                       for e in entries] or [html.Li(f"{h['action']} by {h['by']}, v{h['version']}") for h in card.get("history", [])], className="history")
     sb = card.get("score_before", {})
     head = html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
                      html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, priority {card.get('value_pts', 0)}, version {card.get('version', 1)}", className="muted"),
                                *badges(card)], className="detail-meta")])
     duo = panels.duo_block(card, verdicts=verdicts, pane="d")
     commentary = [html.H3("Commentary"), duo] if duo is not None else []
-    return html.Div([head, html.Div(texts), *commentary, html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history,
-                     html.H3("Producer feedback"), panels.fb_stats(feedback or [])])
+    out = [head, html.Div(texts), *commentary, html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history_view(card, audit, read_only)]
+    if not read_only:
+        out += [html.H3("Producer feedback"), panels.fb_stats(feedback or [])]
+    return html.Div(out)
 
 
 PERIOD_STARTS = (2700.0, 5400.0, 6300.0)  # second half, extra time
@@ -158,21 +176,22 @@ def match_options(current: str | None, store=None) -> tuple[list[dict], str | No
     return options, current if current in ids else (ids[0] if ids else None)
 
 
-def refresh(match_id: str | None, selected: str | None, last_sig: str | None, rev: int | None = None, store=None):
-    """(rundown options, selected card, detail, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed."""
+def refresh(match_id: str | None, selected: str | None, last_sig: str | None, rev: int | None = None, store=None, read_only: bool = False):
+    """(rundown options, selected card, detail, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled."""
     store = store or get_store()
     if not match_id:
         return [], None, detail(None, []), figure(None, []), "No match on the desk yet", True, True, True, None
     cards, state, audit, fb_docs = store.cards(match_id), store.state(match_id), store.audit(match_id), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
     picked = selected if selected in ids else next((c["id"] for c in cards if c.get("status") == "pending"), ids[0] if ids else None)
-    sig = hashlib.sha1(json.dumps([cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), len(audit), len(fb_docs), picked, match_id, rev],
+    sig = hashlib.sha1(json.dumps([cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), len(audit), len(fb_docs), picked, match_id, rev, read_only],
                                   sort_keys=True, default=str).encode()).hexdigest()
     if sig == last_sig:
         return (no_update,) * 9
     card = next((c for c in cards if c["id"] == picked), None)
+    buttons = (True, True, True) if read_only else button_states(card)
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
-    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit, fb_docs), figure(state, cards, picked), scoreline(state), *button_states(card), sig)
+    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit, fb_docs, read_only), figure(state, cards, picked), scoreline(state), *buttons, sig)
 
 
 def edit_panel(open_: bool, match_id: str | None, card_id: str | None, store=None) -> tuple[list, dict]:
@@ -310,14 +329,27 @@ def give_feedback(match_id: str | None, key: str | None, kind: str, value, by: s
 
 # --- layout and wiring ----------------------------------------------------------------------------
 
-def layout(user: str) -> html.Div:
+def viewer(user: str | None) -> html.Div:
+    """Who is looking: the signed-in producer, or a visitor of the read-only view (with the sign-in link when Easy Auth is on)."""
+    if user:
+        return html.Div(f"Signed in as {user}", className="who muted")
+    parts = [html.Span("Read-only view", className="muted")]
+    if security.easy_auth():
+        parts.append(html.A("Producer sign-in", href=security.LOGIN_URL, className="sign-in-link"))
+    return html.Div(parts, className="who read-note")
+
+
+def layout(user: str | None) -> html.Div:
+    """The console; without a user (a visitor in public mode) it is read only. The decision buttons stay in the page, hidden, because the refresh callback sets their state."""
+    read_only = user is None
+    hidden = {"style": {"display": "none"}} if read_only else {}
     return html.Div([
         dcc.Interval(id="c-tick", interval=1500), dcc.Store(id="c-sig"), dcc.Store(id="c-rev", data=0), dcc.Store(id="c-editing", data=False),
         html.Header([html.Div([html.Span("Watershed", className="brand"), html.Span("producer desk", className="muted")]),
                      dcc.Dropdown(id="c-match", clearable=False, className="match-picker", placeholder="Match"),
                      html.Div(id="c-score", className="scoreline"),
                      dcc.RadioItems(id="c-view", options=panels.VIEWS, value="desk", className="view-switch", inputClassName="view-radio", labelClassName="view-label"),
-                     html.Div(f"Signed in as {user}", className="who muted")], className="top"),
+                     viewer(user)], className="top"),
         panels.graphics_pane(),
         panels.insights_pane(),
         html.Main([
@@ -326,7 +358,7 @@ def layout(user: str) -> html.Div:
                 html.Div(id="c-detail"),
                 html.Div([html.Button("Approve", id="c-approve", className="btn btn-approve", disabled=True),
                           html.Button("Edit", id="c-edit", className="btn", disabled=True),
-                          html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions"),
+                          html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden),
                 html.Div(id="c-edit-panel", className="edit-panel"),
                 html.Div([html.Button("Approve edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
                          id="c-edit-actions", className="actions", style={"display": "none"}),
@@ -334,20 +366,11 @@ def layout(user: str) -> html.Div:
             html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", config={"displayModeBar": False}),
                           html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small")], className="col col-right"),
         ], id="c-pane-desk", className="desk"),
-    ], className="console")
-
-
-def sign_in() -> html.Div:
-    action = (html.A("Sign in", href="/.auth/login/aad?post_login_redirect_uri=/", className="btn btn-approve") if security.easy_auth()
-              else html.P("Producer sign-in is not configured on this deployment.", className="muted"))
-    return html.Div([html.H1("Watershed producer desk"), html.P("The producer console needs a signed-in producer."), action,
-                     html.P(["The public overlay is at ", html.A("/overlay", href="/overlay"), "."], className="muted")], className="sign-in")
+    ], className="console read-only" if read_only else "console")
 
 
 def _refresh_cb(_n, rev, match_id, selected, last_sig):
-    if security.producer() is None:
-        return [], None, html.Div("Sign in to see the desk."), figure(None, []), "", True, True, True, None
-    return refresh(match_id, selected, last_sig, rev)
+    return refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None)
 
 
 def _edit_cb(_edit, _cancel, _rev, card_id, match_id):
@@ -360,12 +383,15 @@ def _decide_cb(_a, _r, _e, match_id, card_id, rev, h_ids, headlines, w_ids, whys
     action = {"c-approve": "approve", "c-reject": "reject", "c-approve-edit": "approve-edited"}.get(ctx.triggered_id)
     if action is None:
         return no_update, no_update
+    by = security.producer()
+    if by is None:  # read only: refused before anything is read or written
+        return html.Span("Sign in to approve or reject cards.", className="error"), no_update
     edits: dict[str, dict] = {}
     for i, v in zip(h_ids, headlines):
         edits.setdefault(i["lang"], {})["headline"] = v
     for i, v in zip(w_ids, whys):
         edits.setdefault(i["lang"], {})["why"] = v
-    message, done = decide(action, match_id, card_id, security.producer(), edits)
+    message, done = decide(action, match_id, card_id, by, edits)
     return html.Span(message, className="ok" if done else "error"), (rev or 0) + 1 if done else no_update
 
 
@@ -387,7 +413,11 @@ def _feedback_cb(_v, _r, _n, match_id, rev):
         cur = FB.by_target(get_store().feedback_docs(match_id)).get(trig.get("k")) if match_id else None
         if value == ((cur or {}).get("note") or ""):
             return no_update, no_update, no_update  # unchanged, or the field just drawn
-    message, done = give_feedback(match_id, trig.get("k"), kind, value, security.producer())
+    by = security.producer()
+    if by is None:  # read only: refused, nothing written
+        message, done = "Sign in to give feedback.", False
+    else:
+        message, done = give_feedback(match_id, trig.get("k"), kind, value, by)
     span = html.Span(message, className="ok" if done else "error")
     if trig.get("p") == "i":
         return no_update, span, (rev or 0) + 1 if done else no_update
@@ -395,8 +425,7 @@ def _feedback_cb(_v, _r, _n, match_id, rev):
 
 
 def register(app) -> None:
-    app.callback(Output("c-match", "options"), Output("c-match", "value"), Input("c-tick", "n_intervals"), State("c-match", "value"))(
-        lambda _n, current: match_options(current) if security.producer() is not None else ([], None))
+    app.callback(Output("c-match", "options"), Output("c-match", "value"), Input("c-tick", "n_intervals"), State("c-match", "value"))(lambda _n, current: match_options(current))
     app.callback(
         Output("c-rundown", "options"), Output("c-rundown", "value"), Output("c-detail", "children"), Output("c-wp", "figure"), Output("c-score", "children"),
         Output("c-approve", "disabled"), Output("c-edit", "disabled"), Output("c-reject", "disabled"), Output("c-sig", "data"),
