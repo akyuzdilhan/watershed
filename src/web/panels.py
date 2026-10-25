@@ -1,6 +1,6 @@
 """The console's match-graphics tab and its insights and storyline tab.
 
-Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Every sentence of a document on the desk carries the producer feedback controls (`fb_controls`, wired in `console`). Like `console`, the functions below are plain functions that `register` wires as callbacks.
+Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Every sentence of a document on the desk carries the producer feedback controls (`fb_controls`, wired in `console`). Under the storyline, "After the match" shows the recap the worker writes at the final whistle (`Store.recap`): read only, nothing to approve. Like `console`, the functions below are plain functions that `register` wires as callbacks.
 """
 
 import hashlib
@@ -113,12 +113,14 @@ def text_lines(doc: dict, t: dict, verdicts: dict | None, pane: str) -> list:
             html.Div([t.get("why", ""), *fb_controls(pane, doc, "why", lang, 0, t.get("why", ""), verdicts)], className="why")]
 
 
+def lang_row(lang: str, machine_translated: set) -> html.Div:
+    return html.Div([html.Span(lang.upper(), className="lang"), *([html.Span("machine-translated", className="badge st-mt")] if lang in machine_translated else [])],
+                    className="lang-row")
+
+
 def texts_block(doc: dict, verdicts: dict | None = None, pane: str = "i") -> list:
     mt = set(doc.get("machine_translated") or [])
-    return [html.Div([html.Div([html.Span(t.get("lang", "").upper(), className="lang"), *([html.Span("machine-translated", className="badge st-mt")] if t.get("lang") in mt else [])],
-                               className="lang-row"),
-                      *text_lines(doc, t, verdicts, pane)], className="text-block")
-            for t in doc.get("texts") or []]
+    return [html.Div([lang_row(t.get("lang", ""), mt), *text_lines(doc, t, verdicts, pane)], className="text-block") for t in doc.get("texts") or []]
 
 
 # --- match graphics ---------------------------------------------------------------------------------
@@ -299,6 +301,43 @@ def storyline_block(doc: dict | None, verdicts: dict | None = None) -> html.Div:
     return html.Div(parts)
 
 
+RECAP_PARTS = {"recap": "Recap", "fan": "Supporters", "analyst": "Analyst"}
+
+
+def recap_block(doc: dict | None, final: bool, lang: str | None = None) -> html.Div:
+    """After the match: the recap, the supporters' text and the analyst text of the recap document (`worker.recap`), in every language or in `lang` only, labelled like the other texts of the console (Spanish machine-translated). Before the final whistle, a line saying when it comes."""
+    if not final:
+        return html.Div("The recap appears at full time.", className="muted")
+    if not doc:
+        return html.Div("Full time: no recap yet.", className="muted")
+    teams = {"fan": doc.get("fan_team"), "analyst": doc.get("analyst_team")}
+    mt = set(doc.get("machine_translated") or [])
+    blocks = []
+    for t in doc.get("texts") or []:
+        if not isinstance(t, dict) or (lang is not None and t.get("lang") != lang):
+            continue
+        lines = [html.P([html.Span(label + (f" ({teams[part]})" if teams.get(part) else "") + ": ", className="duo-speaker"), t[part]], className="duo-line recap-line")
+                 for part, label in RECAP_PARTS.items() if isinstance(t.get(part), str) and t[part].strip()]
+        blocks.append(html.Div([lang_row(t.get("lang", ""), mt), *lines], className="text-block"))
+    v = doc.get("verification") or {}
+    meta = [html.Span("Verified" if v.get("verified") else "Not verified", className="badge " + ("st-approved" if v.get("verified") else "st-retracted")),
+            html.Span(f"writer {doc.get('writer', '?')}" + ("" if doc.get("final", True) else ", written before the final whistle"), className="muted")]
+    return html.Div([html.Div(meta, className="detail-meta"), *(blocks or [html.Div("No text in this recap.", className="muted")])])
+
+
+def after_the_match(match_id: str | None, view: str | None, last_sig: str | None, store=None, lang: str | None = None):
+    """(After the match section, signature); no_update for both when the tab is hidden or nothing changed. The recap is read once the match state is final, so a recap left by an earlier run of the match never shows while it is played again."""
+    if view != "insights":
+        return no_update, no_update
+    store = store or get_store()
+    final = bool(match_id) and bool((store.state(match_id) or {}).get("final"))
+    doc = store.recap(match_id) if final else None
+    sig = _sig(match_id, final, doc, lang)
+    if sig == last_sig:
+        return no_update, no_update
+    return recap_block(doc, final, lang), sig
+
+
 def insights(match_id: str | None, selected: str | None, view: str | None, last_sig: str | None, rev: int | None = None, store=None):
     """(options, selected, detail, figure, storyline, approve disabled, reject disabled, storyline approve disabled, storyline reject disabled, signature)."""
     if view != "insights":
@@ -353,8 +392,10 @@ def insights_pane() -> html.Div:
                       dcc.Graph(id="c-i-figure", figure=empty_figure("Loading."), config={"displayModeBar": False})], className="col col-middle"),
         html.Section([html.H3("Storyline"), html.Div(id="c-s-detail"),
                       html.Div([html.Button("Approve", id="c-s-approve", className="btn btn-approve", disabled=True),
-                                html.Button("Reject", id="c-s-reject", className="btn btn-reject", disabled=True)], className="actions")], className="col col-right"),
-        dcc.Store(id="c-i-sig"), dcc.Store(id="c-i-rev", data=0), dcc.Interval(id="c-i-tick", interval=PANEL_REFRESH_MS, disabled=True)], id="c-pane-insights", className="desk pane", style={"display": "none"})
+                                html.Button("Reject", id="c-s-reject", className="btn btn-reject", disabled=True)], className="actions"),
+                      html.H3("After the match"), html.Div(recap_block(None, False), id="c-r-detail")], className="col col-right"),
+        dcc.Store(id="c-i-sig"), dcc.Store(id="c-r-sig"), dcc.Store(id="c-i-rev", data=0), dcc.Interval(id="c-i-tick", interval=PANEL_REFRESH_MS, disabled=True)],
+        id="c-pane-insights", className="desk pane", style={"display": "none"})
 
 
 # --- wiring ------------------------------------------------------------------------------------------
@@ -376,10 +417,11 @@ def _graphics_cb(_n, match_id, kind, item, view, last_sig):
     return graphics(match_id, kind, item, view, last_sig)
 
 
-def _insights_cb(_n, rev, match_id, selected, view, last_sig):
+def _insights_cb(_n, rev, match_id, selected, view, last_sig, recap_sig):
+    """The insights and storyline outputs, then the After the match section, in one request per tick."""
     if security.producer() is None:
-        return [], None, html.Div("Sign in."), empty_figure(""), "", True, True, True, True, None
-    return insights(match_id, selected, view, last_sig, rev)
+        return [], None, html.Div("Sign in."), empty_figure(""), "", True, True, True, True, None, "", None
+    return insights(match_id, selected, view, last_sig, rev) + after_the_match(match_id, view, recap_sig)
 
 
 def _decide_cb(_a, _r, _sa, _sr, match_id, doc_id, rev):
@@ -401,8 +443,9 @@ def register(app) -> None:
                  State("c-g-sig", "data"))(_graphics_cb)
     app.callback(Output("c-i-list", "options"), Output("c-i-list", "value"), Output("c-i-detail", "children"), Output("c-i-figure", "figure"), Output("c-s-detail", "children"),
                  Output("c-i-approve", "disabled"), Output("c-i-reject", "disabled"), Output("c-s-approve", "disabled"), Output("c-s-reject", "disabled"), Output("c-i-sig", "data"),
+                 Output("c-r-detail", "children"), Output("c-r-sig", "data"),
                  Input("c-i-tick", "n_intervals"), Input("c-i-rev", "data"), Input("c-match", "value"), Input("c-i-list", "value"), Input("c-view", "value"),
-                 State("c-i-sig", "data"))(_insights_cb)
+                 State("c-i-sig", "data"), State("c-r-sig", "data"))(_insights_cb)
     app.callback(Output("c-i-message", "children"), Output("c-i-rev", "data"),
                  Input("c-i-approve", "n_clicks"), Input("c-i-reject", "n_clicks"), Input("c-s-approve", "n_clicks"), Input("c-s-reject", "n_clicks"),
                  State("c-match", "value"), State("c-i-list", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_decide_cb)
