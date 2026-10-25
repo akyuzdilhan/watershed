@@ -244,6 +244,24 @@ def test_a_var_decision_shows_its_reason_and_call_and_the_margin_only_to_a_produ
             assert "0.37" not in on_screen and "37 cm" not in on_screen and "tight" not in on_screen
 
 
+def test_a_note_being_typed_survives_the_ticks(desk):
+    goal = card_at(desk, "66'")
+    key = f"{goal['id']}|why|en|0"
+    assert console.give_feedback(MATCH, key, "verdict", "down", "producer-1")[1]  # a thumbs down opens the note field
+    first = dash_post(REFRESH, *refresh_body(goal["id"])).get_json()["response"]
+    assert {"type": "fb-n", "p": "d", "k": key} in json_ids(first["c-detail"])
+    path = desk.root / MATCH / "state.json"  # the match goes on: the clock moves, another card goes on air
+    state = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps(dict(state, last_seq=state["last_seq"] + 1, minute_label="90+12'")), encoding="utf-8")
+    assert console.decide("approve", MATCH, card_at(desk, "14'")["id"], "producer-1")[1]
+    second = dash_post(REFRESH, *refresh_body(goal["id"], first["c-sig"]["data"], 2)).get_json()["response"]
+    assert "c-detail" not in second and "90+12'" in second["c-score"]["children"] and "c-rundown" in second  # the note field is not drawn again: the draft stays
+    assert console.give_feedback(MATCH, key, "reason", "too_long", "producer-1")[1]  # a change on this card draws it again
+    third = dash_post(REFRESH, *refresh_body(goal["id"], second["c-sig"]["data"], 3)).get_json()["response"]
+    assert "c-detail" in third
+    assert console.refresh(MATCH, goal["id"], third["c-sig"]["data"], rev=0) == (no_update,) * 9  # nothing changed since: nothing sent
+
+
 # --- overlay --------------------------------------------------------------------------------------
 
 def test_overlay_shows_the_latest_approved_card_in_the_chosen_language(desk):

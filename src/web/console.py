@@ -28,6 +28,10 @@ SYSTEM_ACTORS = ("template", "auto-approve", "feed")  # who decided, besides a p
 COLORS = {"home": "#3987e5", "draw": "#9a998f", "away": "#d95926", "muted": "#6f6e69", "ink": "#f0efec", "ink2": "#c3c2b7", "surface": "#1a1a19", "grid": "#2c2c2a"}
 
 
+def _sig(*parts) -> str:
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()
+
+
 # --- pieces ---------------------------------------------------------------------------------------
 
 def badges(card: dict) -> list:
@@ -288,22 +292,28 @@ def match_options(current: str | None, store=None) -> tuple[list[dict], str | No
     return options, current if current in ids else (ids[0] if ids else None)
 
 
-def refresh(match_id: str | None, selected: str | None, last_sig: str | None, rev: int | None = None, store=None, read_only: bool = False):
-    """(rundown options, selected card, detail, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled."""
+def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, rev: int | None = None, store=None, read_only: bool = False):
+    """(rundown options, selected card, detail, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed.
+
+    The detail is sent again only when the selected card, its history or the feedback changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled."""
     store = store or get_store()
     if not match_id:
         return [], None, detail(None, []), figure(None, []), "No match on the desk yet", True, True, True, None
     cards, state, audit, fb_docs = store.cards(match_id), store.state(match_id), store.audit(match_id), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
     picked = selected if selected in ids else next((c["id"] for c in cards if c.get("status") == "pending"), ids[0] if ids else None)
-    sig = hashlib.sha1(json.dumps([cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), len(audit), len(fb_docs), picked, match_id, rev, read_only],
-                                  sort_keys=True, default=str).encode()).hexdigest()
-    if sig == last_sig:
-        return (no_update,) * 9
     card = next((c for c in cards if c["id"] == picked), None)
+    teams = (state or {}).get("teams")
+    judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
+    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only)
+    sig = _sig(detail_sig, cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), len(audit))
+    last = last_sig if isinstance(last_sig, dict) else {}
+    if sig == last.get("all"):
+        return (no_update,) * 9
+    view = detail(card, audit, fb_docs, teams, read_only) if detail_sig != last.get("detail") else no_update
     buttons = (True, True, True) if read_only else button_states(card)
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
-    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit, fb_docs, (state or {}).get("teams"), read_only), figure(state, cards, picked), scoreline(state), *buttons, sig)
+    return (rundown_options(cards), picked if picked != selected else no_update, view, figure(state, cards, picked), scoreline(state), *buttons, {"all": sig, "detail": detail_sig})
 
 
 def edit_panel(open_: bool, match_id: str | None, card_id: str | None, store=None) -> tuple[list, dict]:
