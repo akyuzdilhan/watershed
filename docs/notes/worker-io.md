@@ -68,11 +68,11 @@ One budget per match, `Desk.max_calls_per_match` (40), for every draft the desk 
 | Document | Written by, by default | Calls |
 |---|---|---|
 | Card (and its duo) | `--writer` | 1 per card, 2 with the retry; a rewrite is a new draft |
-| Recap | the recap agent with `--writer foundry`, else the template | 1, 2 with the retry, from what the cards left |
+| Recap | the recap agent with `--writer foundry`, else the template | 1, 2 with the retry, each time it is written, from what the cards left |
 | Insight, storyline | the templates (`--insights-writer template`) | 0; with `--insights-writer writer`, as a card |
 | Duo after a VAR ruling (`duo_ruling`) | the templates | 0 |
 
-On the demo with `--writer foundry`: 12 card drafts (11 cards and one rewrite) and one recap, 13 calls when every draft passes the first time, 26 at most. With `--insights-writer writer` and the seed-9 history, the 16 insight drafts and the storyline come on top (29 drafts before the recap), and the budget can run out before the recap.
+On the demo with `--writer foundry`: 12 card drafts (11 cards and one rewrite) and one recap, 13 calls when every draft passes the first time, 26 at most. The recap is written again, one more draft of one or two calls, once per card action after the whistle and once per flush that finds a new producer decision (the flush when the session goes quiet; with `--forever`, each flush within the hour after the whistle); once the budget is spent, the template writes it. With `--insights-writer writer` and the seed-9 history, the 16 insight drafts and the storyline come on top (29 drafts before the recap), and the budget can run out before the recap.
 
 ## Audit trail: one entry per step
 
