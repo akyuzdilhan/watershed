@@ -1,6 +1,6 @@
-"""The console (`/`): the rundown of cards, the selected card with its texts, facts and history, the producer's decisions, and the win-probability curve.
+"""The console (`/`): the rundown of cards, the selected card with its texts, the claim behind every number and the Verifier's report, its history, the producer's decisions, and the win-probability curve.
 
-Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and duo line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving.
+Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and suggested line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving. The suggested lines are the duo's proposals for the commentary team, never voiced.
 
 In public mode a visitor who is not signed in gets the same views read only: no decision button, no thumbs, reasons or notes, no producer identity, no offside margin. Every decision and feedback callback asks `security.producer()` again and refuses without writing. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
 """
@@ -14,6 +14,8 @@ from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 from web import panels, security
 from web.store import get_store
 from worker import feedback as FB
+from worker.duo import PERSONAS
+from worker.writer import card_facts, claim_ok, verify, verify_duo
 
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
 MOMENTS = {"goal": "Goal", "save": "Save", "red_card": "Red card", "chance": "Chance"}
@@ -43,6 +45,94 @@ def rundown_options(cards: list[dict]) -> list[dict]:
         html.Div(badges(c), className="ru-badges")], className="ru-item " + ("ru-retracted" if c.get("status") == "retracted" else ""))} for c in cards]
 
 
+def facts_of(card: dict, teams: dict | None) -> tuple[dict, dict]:
+    """The facts the card's texts were written from (`worker.writer.card_facts`) and what each field means; empty for a card that cannot be read."""
+    if not (teams and "home" in teams and "away" in teams):
+        teams = {card.get("team", "home"): card.get("team_name", ""), ("away" if card.get("team") == "home" else "home"): ""}
+    try:
+        return card_facts(card, teams)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {}, {}
+
+
+def _num(v) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
+
+
+def speaker_name(code: str | None) -> str:
+    p = PERSONAS.get(code or "")
+    return p.short if p else (code or "?")
+
+
+def claims_view(t: dict, duo_lines: list[dict], facts: dict, meanings: dict) -> html.Div:
+    """Every number of a language with the field it was taken from and what that field means: the text's claims, then those of the suggested lines."""
+    rows = []
+    for where, claims in [("text", t.get("claims") or [])] + [(speaker_name(d.get("speaker")), d.get("claims") or []) for d in duo_lines]:
+        for c in claims if isinstance(claims, list) else []:
+            if not isinstance(c, dict):
+                continue
+            field = str(c.get("source_field", ""))
+            ok = claim_ok(c, facts)
+            rows.append(html.Tr([html.Td(_num(c.get("value")), className="claim-value"), html.Td(field, className="fact-key"),
+                                 html.Td(meanings.get(field) or ("" if ok else "not a fact of this card"), className="muted small" if ok else "claim-bad small"),
+                                 html.Td(where, className="muted small")]))
+    if not rows:
+        return html.Div("No number in this language.", className="muted small")
+    return html.Table([html.Tbody(rows)], className="claims")
+
+
+def _issue(x) -> str:
+    if isinstance(x, dict):
+        if "rule" in x:
+            return f"{x['rule']}: {x.get('text', '')}"
+        return f"{_num(x.get('value'))} ({x.get('source_field', '?')})"
+    return _num(x)
+
+
+TEXT_CHECKS = (("unclaimed_numbers", "every number claimed"), ("bad_claims", "claims match the facts"), ("wrong_unit", "units"), ("style_errors", "style"))
+
+
+def checks_view(lang: str, t: dict, duo_lines: list[dict], facts: dict, style: bool) -> html.Div:
+    """The Verifier's checks on one language as it stands (`worker.writer.verify` and `verify_duo`, no model): what passes, what fails, the warnings."""
+    _, report = verify(json.dumps([t], ensure_ascii=False), [lang], facts, style=style)
+    entry = (report.get("cards") or [{}])[0]
+    pills, ok = [], bool(entry.get("verified"))
+    for key, label in TEXT_CHECKS:
+        bad = entry.get(key) or []
+        pills.append(html.Span(label + (": " + ", ".join(_issue(x) for x in bad) if bad else ""), className="check " + ("check-fail" if bad else "check-ok")))
+    if not entry.get("keys_ok", True):
+        pills.append(html.Span("headline and text present", className="check check-fail"))
+    warnings = [_issue(w) for w in entry.get("style_warnings") or []]
+    if entry.get("unknown_names"):
+        warnings.append("names not in the facts: " + ", ".join(entry["unknown_names"]))
+    if duo_lines:
+        d = verify_duo(duo_lines, [lang], facts)
+        shape = d["languages"].get(lang, {})
+        shape_ok = shape.get("count_ok") and shape.get("alternates") and shape.get("speakers_ok")
+        pills.append(html.Span(f"suggested lines: {shape.get('count', 0)}, alternating speakers" if shape_ok else f"suggested lines: {shape.get('count', 0)}, 2 to 4 alternating",
+                               className="check " + ("check-ok" if shape_ok else "check-fail")))
+        for line in d["lines"]:
+            problems = [_issue(x) for k in ("unclaimed_numbers", "bad_claims", "wrong_unit", "style_errors") for x in line.get(k) or []]
+            if problems or not line.get("keys_ok", True):
+                pills.append(html.Span(f"{speaker_name(line.get('speaker'))}: " + ("; ".join(problems) or "empty line"), className="check check-fail"))
+            warnings += [f"{speaker_name(line.get('speaker'))}: {_issue(w)}" for w in line.get("style_warnings") or []]
+        ok = ok and bool(d["verified"])
+    pills += [html.Span(w, className="check check-warn") for w in warnings]
+    verdict = html.Span("Verifier: passes" if ok else "Verifier: fails", className="badge " + ("st-approved" if ok else "st-retracted"))
+    return html.Div([verdict, *pills], className="checks")
+
+
+def language_block(card: dict, t: dict, verdicts: dict | None, facts: dict, meanings: dict, style: bool) -> html.Div:
+    lang = t.get("lang", "")
+    mt = set(card.get("machine_translated") or [])
+    duo_lines = [d for d in card.get("duo") or [] if isinstance(d, dict) and d.get("lang") == lang]
+    return html.Div([html.Div([html.Span(LANG_NAMES.get(lang, lang), className="lang"), *([html.Span("machine-translated", className="badge st-mt")] if lang in mt else [])],
+                              className="lang-row"),
+                     *panels.text_lines(card, t, verdicts, "d"),
+                     claims_view(t, duo_lines, facts, meanings),
+                     checks_view(lang, t, duo_lines, facts, style)], className="text-block")
+
+
 def actor(by: str, action: str, card: dict, read_only: bool) -> str:
     """Who did it, as shown: in the read-only view a producer's identity becomes "a producer"."""
     if not read_only or action == "written" or by in SYSTEM_ACTORS or by in (card.get("writer"), card.get("duo_writer")):
@@ -60,28 +150,27 @@ def history_view(card: dict, audit: list[dict], read_only: bool) -> html.Ol:
     return html.Ol(items, className="history")
 
 
-def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None, read_only: bool = False) -> html.Div:
-    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far. `read_only` (a visitor in public mode): no thumbs, no producer identity, no feedback."""
+def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None, teams: dict | None = None, read_only: bool = False) -> html.Div:
+    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no feedback."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
     verdicts = None if read_only else FB.by_target(feedback or [])
-    mt = set(card.get("machine_translated") or [])
-    texts = [html.Div([html.Div([html.Span(LANG_NAMES.get(t["lang"], t["lang"]), className="lang"),
-                                 *([html.Span("machine-translated", className="badge st-mt")] if t["lang"] in mt else [])], className="lang-row"),
-                       *panels.text_lines(card, t, verdicts, "d")], className="text-block")
-             for t in card.get("texts") or []] or [html.Div("Not written yet.", className="muted")]
-    facts = html.Table([html.Tbody([html.Tr([html.Td(k, className="fact-key"), html.Td(str(v))]) for k, v in (card.get("facts") or {}).items()])], className="facts")
+    facts, meanings = facts_of(card, teams)
+    texts = [language_block(card, t, verdicts, facts, meanings, style=bool(teams)) for t in card.get("texts") or []] or [html.Div("Not written yet.", className="muted")]
     v = card.get("verification") or {}
+    reps = v.get("repetition_warnings") or 0
     verification = html.Div(
         [html.Span("Verified" if v.get("verified") else "Not verified", className="badge " + ("st-approved" if v.get("verified") else "st-retracted")),
-         html.Span(f" writer {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s)", className="muted")]) if v else html.Div("Not checked yet.", className="muted")
+         html.Span(f" when written: writer {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s), "
+                   + (f"{reps} repetition warning(s) (an opening, phrase or tic already used in this match)" if reps else "no repetition warning"), className="muted")]
+    ) if v else html.Div("Not checked yet.", className="muted")
     sb = card.get("score_before", {})
     head = html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
                      html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, priority {card.get('value_pts', 0)}, version {card.get('version', 1)}", className="muted"),
                                *badges(card)], className="detail-meta")])
     duo = panels.duo_block(card, verdicts=verdicts, pane="d")
-    commentary = [html.H3("Commentary"), duo] if duo is not None else []
-    out = [head, html.Div(texts), *commentary, html.H3("Facts"), facts, html.H3("Verification"), verification, html.H3("History"), history_view(card, audit, read_only)]
+    suggested = [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo] if duo is not None else []
+    out = [head, html.Div(texts), *suggested, html.H3("Verification"), verification, html.H3("History"), history_view(card, audit, read_only)]
     if not read_only:
         out += [html.H3("Producer feedback"), panels.fb_stats(feedback or [])]
     return html.Div(out)
@@ -191,7 +280,7 @@ def refresh(match_id: str | None, selected: str | None, last_sig: str | None, re
     card = next((c for c in cards if c["id"] == picked), None)
     buttons = (True, True, True) if read_only else button_states(card)
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
-    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit, fb_docs, read_only), figure(state, cards, picked), scoreline(state), *buttons, sig)
+    return (rundown_options(cards), picked if picked != selected else no_update, detail(card, audit, fb_docs, (state or {}).get("teams"), read_only), figure(state, cards, picked), scoreline(state), *buttons, sig)
 
 
 def edit_panel(open_: bool, match_id: str | None, card_id: str | None, store=None) -> tuple[list, dict]:
@@ -224,8 +313,6 @@ def edited_texts(card: dict, edits: dict[str, dict]) -> list[dict] | None:
 
 def check_edits(card: dict, texts: list[dict], teams: dict[str, str]) -> list[str]:
     """What the Verifier refuses in edited texts: one line per language."""
-    from worker.writer import card_facts, verify
-
     facts, _ = card_facts(card, teams)
     _, report = verify(json.dumps(texts, ensure_ascii=False), [t["lang"] for t in texts], facts)
     problems = []

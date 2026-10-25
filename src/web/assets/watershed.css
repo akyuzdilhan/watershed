@@ -93,6 +93,16 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 
 .sign-in { max-width: 520px; margin: 80px auto; padding: 0 16px; }
 
+/* card detail: claims, Verifier checks */
+.claims { border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.claims td { padding: 1px 10px 1px 0; vertical-align: top; }
+.claim-value { color: var(--ink); font-weight: 600; text-align: right; font-size: 12px; }
+.claim-bad { color: var(--bad); }
+.checks { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; }
+.check { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.check-fail { color: var(--bad); border-color: var(--bad); }
+.check-warn { color: var(--warn); border-color: var(--warn); }
+
 /* read-only view (a visitor in public mode): no decision or feedback control, whatever a panel draws */
 .read-only .actions, .read-only .edit-panel, .read-only .fb, .read-only .fb-reasons { display: none !important; }
 .read-note { display: flex; gap: 10px; align-items: center; }

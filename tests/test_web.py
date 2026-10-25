@@ -175,6 +175,34 @@ def test_edit_panel_holds_one_block_per_language(desk):
     assert console.edit_panel(True, MATCH, card_at(desk, "63'")["id"]) == ([], {"display": "none"})
 
 
+def text_blocks(view) -> list:
+    return find(view, lambda c: getattr(c, "className", "") == "text-block")
+
+
+def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(desk):
+    save, teams = card_at(desk, "72'"), desk.state(MATCH)["teams"]
+    _, meanings = console.facts_of(save, teams)
+    worth = [c for t in save["texts"] for c in t["claims"] if c["source_field"].endswith("_pts")]
+    assert worth  # what the save was worth, in points, in at least one language
+    view = console.detail(save, desk.audit(MATCH), [], teams)
+    text = texts_in(view)
+    for c in worth:
+        assert f"{c['value']:g} {c['source_field']} {meanings[c['source_field']]}" in text  # the number, its field, what the field means
+    blocks = text_blocks(view)
+    assert len(blocks) == len(save["texts"])
+    for block, t in zip(blocks, save["texts"]):
+        shown = texts_in(block)
+        assert "Verifier: passes" in shown and "every number claimed" in shown and "claims match the facts" in shown
+        assert all(f"{c['value']:g} {c['source_field']}" in shown for c in t["claims"])
+    assert "Facts" not in text  # the raw facts table is gone
+    reps = save["verification"].get("repetition_warnings", 0)
+    assert (f"{reps} repetition warning(s)" if reps else "no repetition warning") in text
+    edited = dict(save, texts=[dict(t, why=t["why"] + " 33%.") if t["lang"] == "en" else t for t in save["texts"]])  # a number no fact backs
+    blocks = text_blocks(console.detail(edited, [], [], teams))
+    assert "Verifier: fails" in texts_in(blocks[0]) and "every number claimed: 33" in texts_in(blocks[0])
+    assert all("Verifier: passes" in texts_in(b) for b in blocks[1:])
+
+
 # --- overlay --------------------------------------------------------------------------------------
 
 def test_overlay_shows_the_latest_approved_card_in_the_chosen_language(desk):
@@ -637,13 +665,13 @@ def test_decisions_degrade_when_the_desk_cannot_decide_insights(feed_desk):
     assert not done and "cannot decide" in message
 
 
-def test_card_detail_shows_the_commentary_duo(desk):
+def test_card_detail_shows_the_duo_as_suggested_lines(desk):
     card = dict(card_at(desk, "66'"), duo=[{"speaker": "Ada", "lang": "en", "line": "He has done it again!", "claims": []},
                                            {"speaker": "Bram", "lang": "fr", "line": "Troisième but.", "claims": []}])
     text = texts_in(console.detail(card, []))
-    assert "He has done it again!" in text and "Troisième but." in text and "Commentary" in text
+    assert "He has done it again!" in text and "Troisième but." in text and "Suggested lines" in text and "Commentary" not in text
     without = {k: v for k, v in card_at(desk, "66'").items() if k != "duo"}
-    assert "Commentary" not in texts_in(console.detail(without, []))
+    assert "Suggested lines" not in texts_in(console.detail(without, []))
 
 
 def test_overlay_never_loads_the_graphics_or_the_worker():
