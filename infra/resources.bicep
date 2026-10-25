@@ -29,6 +29,11 @@ param foundryRoleId string = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 @description('Extra arguments for the worker, for example --auto-approve in judging mode.')
 param workerExtraArgs string = ''
 
+@minValue(0)
+@maxValue(1)
+@description('Minimum replicas of the worker: 0 lets KEDA scale it to zero when the subscription is idle, 1 keeps one replica up (no scale-in during a replay).')
+param workerMinReplicas int = 0
+
 @description('Client id of the Entra app registration for Easy Auth on the web app. Empty: Easy Auth is off.')
 param webAuthClientId string = ''
 
@@ -466,7 +471,7 @@ var workerEnv = [
   }
 ]
 
-// Worker: no ingress, scaled by KEDA on the worker subscription (0 when idle, 1 at most so one consumer owns each match)
+// Worker: no ingress, scaled by KEDA on the worker subscription (0 when idle unless workerMinReplicas is 1, 1 at most so one consumer owns each match)
 resource worker 'Microsoft.App/containerApps@2025-01-01' = {
   name: 'ca-worker-${suffix}'
   location: location
@@ -500,10 +505,10 @@ resource worker 'Microsoft.App/containerApps@2025-01-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: workerMinReplicas
         maxReplicas: 1
-        // KEDA stops the replica 15 minutes after it last saw a message waiting (5 by default). The worker settles messages
-        // within seconds, so a quiet stretch of a replay can look idle, and a replica stopped mid-match loses the match state.
+        // KEDA stops the replica 15 minutes after a poll last saw a message waiting (5 by default). The worker settles messages
+        // within seconds, so polls can find the subscription empty while a replay runs, and a replica stopped mid-match loses the match state.
         cooldownPeriod: 900
         rules: [
           {

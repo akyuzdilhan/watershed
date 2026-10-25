@@ -32,6 +32,11 @@ param foundryReasoningEffort string = 'medium'
 @description('Extra worker arguments, for example --auto-approve in judging mode.')
 param workerExtraArgs string = ''
 
+@minValue(0)
+@maxValue(1)
+@description('Minimum replicas of the worker: 0 scales to zero when idle, 1 keeps one replica up, for example while the demo is judged.')
+param workerMinReplicas int = 0
+
 @description('Client id of the Entra app registration for Easy Auth on the web app. Empty: Easy Auth is off.')
 param webAuthClientId string = ''
 
@@ -71,6 +76,7 @@ module resources 'resources.bicep' = {
     foundryModelFallback: foundryModelFallback
     foundryReasoningEffort: foundryReasoningEffort
     workerExtraArgs: workerExtraArgs
+    workerMinReplicas: workerMinReplicas
     webAuthClientId: webAuthClientId
     webProducers: webProducers
     webMinReplicas: webMinReplicas
