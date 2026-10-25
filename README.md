@@ -278,8 +278,9 @@ All tests run without Azure and without model calls (the Writer is replaced by t
 | Azure SDK for Python (Service Bus, Cosmos DB, Identity) | MIT | Azure access |
 | Dash, Gunicorn | MIT | Web app |
 | common-data-format-validator | MIT | Test dependency: checks the CDF export against the official schemas |
+| Faker 40.43.0 | MIT | Player and referee name lists, drawn once and frozen in `src/generator/names.py` (not a runtime dependency) |
 
-No third-party code is copied into this repository; see `THIRD_PARTY_NOTICES.md`. The action types follow SPADL (Decroos et al., KDD 2019) and the export follows the Common Data Format (Anzer et al., 2025).
+No third-party code is copied into this repository; the only copied values are those name lists, see `THIRD_PARTY_NOTICES.md`. The action types follow SPADL (Decroos et al., KDD 2019) and the export follows the Common Data Format (Anzer et al., 2025).
 
 ## License
 
