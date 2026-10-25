@@ -2,7 +2,7 @@
 
 | Function | What it shows |
 |---|---|
-| `shot_map` | every shot, sized by xG, coloured and shaped by outcome; goals ruled out by VAR drawn apart; the home team attacks right |
+| `shot_map` | every shot, sized by xG, coloured and shaped by outcome; goals ruled out by VAR drawn apart and left out of the shots and xG totals; the home team attacks right |
 | `buildup_figure` | the possession behind a goal or a big chance as arrows whose width is the threat each action added |
 | `set_piece_figure` | a corner or free kick animated: the frame at the delivery, then at the first contact, with variable-width arrows |
 | `set_pieces_map` | every corner and crossed free kick of a team: delivery arrows sized by the value of where they landed, coloured by who won the first contact |
@@ -100,9 +100,10 @@ def shot_map(feed: dict, theme="dark", width: int | None = 900) -> go.Figure:
                     "line": {"color": t["paper"] if filled else color, "width": 1.5 if filled else 2.2}, "opacity": 0.95},
             customdata=[[a.get("minute_label", ""), teams[a["team"]], _who(a), a["shot"]["xg"], label + (" (penalty)" if a["action_type"] == "shot_penalty" else " (free kick)" if a["action_type"] == "shot_freekick" else "")] for a in items],
             hovertemplate="%{customdata[0]} %{customdata[1]} %{customdata[2]}<br>xG %{customdata[3]:.2f}, %{customdata[4]}<extra></extra>"))
-    xg = {s: sum(a["shot"]["xg"] for a in shots(feed) if a["team"] == s) for s in ("home", "away")}
-    goals = {s: sum(1 for a in shots(feed) if a["team"] == s and T.counted_goal(a)) for s in ("home", "away")}
-    n = {s: sum(1 for a in shots(feed) if a["team"] == s) for s in ("home", "away")}
+    counted = [a for a in shots(feed) if not a.get("voided")]  # a shot VAR ruled out stays drawn but is out of the totals, as in the insight facts
+    xg = {s: sum(a["shot"]["xg"] for a in counted if a["team"] == s) for s in ("home", "away")}
+    goals = {s: sum(1 for a in counted if a["team"] == s and T.counted_goal(a)) for s in ("home", "away")}
+    n = {s: sum(1 for a in counted if a["team"] == s) for s in ("home", "away")}
     for side, x, anchor in (("away", 2, "left"), ("home", pitch.LENGTH - 2, "right")):
         fig.add_annotation(x=x, y=pitch.WIDTH + 1.2, text=f"<b>{teams[side]}</b> {goals[side]} goals, {n[side]} shots, xG {xg[side]:.2f}", showarrow=False,
                            xanchor=anchor, yanchor="bottom", font={"color": t[side], "size": 13})
@@ -262,13 +263,13 @@ def _x(period: int, clock_s: float, extra: float) -> float:
 
 
 def momentum_series(feed: dict, minutes: int = 5) -> dict:
-    """Threat added and xG per slice of `minutes` per team: `{home: [{x, threat, xg}], away: [...]}`, x the slice's start on a continuous minute axis."""
+    """Threat added and xG per slice of `minutes` per team: `{home: [{x, threat, xg}], away: [...]}`, x the slice's start on a continuous minute axis. Shots VAR ruled out are not in the xG."""
     extra = _first_half_extra(feed)
     out = {}
     for side in ("home", "away"):
         mine = [a for a in feed["actions"] if a["team"] == side]
         threat = {(b["period"], b["index"]): b for b in T.per_bucket(mine, lambda a: max(T.threat_added(a), 0.0), minutes, sum)}
-        xg = {(b["period"], b["index"]): b for b in T.per_bucket([a for a in mine if a.get("shot")], lambda a: a["shot"]["xg"], minutes, sum)}
+        xg = {(b["period"], b["index"]): b for b in T.per_bucket([a for a in mine if a.get("shot") and not a.get("voided")], lambda a: a["shot"]["xg"], minutes, sum)}
         keys = sorted(set(threat) | set(xg))
         out[side] = [{"x": _x(p, T.PERIOD_START_S.get(p, 0) + k * minutes * 60, extra) + minutes / 2, "period": p, "threat": round(threat.get((p, k), {}).get("value", 0.0), 4),
                       "xg": round(xg.get((p, k), {}).get("value", 0.0), 3)} for p, k in keys]
@@ -382,9 +383,11 @@ def line_break_figure(feed: dict, event_id: str, theme="dark", width: int | None
     return fig
 
 
-def run_figure(feed: dict, event_id: str, runner_id: str | None = None, theme="dark", zoom: float | None = None, width: int | None = 900) -> go.Figure:
+def run_figure(feed: dict, event_id: str, runner_id: str | None = None, theme="dark", zoom: float | None = None, width: int | None = 900, show_margin: bool = True) -> go.Figure:
+    """`pitch.offside_figure` of the pass with the runner; `show_margin=False` leaves the margin out (anyone but the producer)."""
     teams = team_names(feed.get("info"))
-    return pitch.offside_figure(_action(feed, event_id), True, teams["home"], teams["away"], theme, runner_id=runner_id, zoom=zoom, names=player_names(feed.get("info")), width=width)
+    return pitch.offside_figure(_action(feed, event_id), True, teams["home"], teams["away"], theme, runner_id=runner_id, zoom=zoom, names=player_names(feed.get("info")), width=width,
+                                show_margin=show_margin)
 
 
 def space_figure(feed: dict, event_id: str, theme="dark", width: int | None = 900) -> go.Figure:
@@ -430,24 +433,25 @@ def _team_lines(feed: dict, rows: list[dict], value, title: str, sub: str, ytitl
 def line_height_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
     rows = T.line_heights(feed["actions"])
     return _team_lines(feed, rows, lambda r, s: r[s] if r["in_possession"] != s else None, "Defensive line height",
-                       f"median distance from a team's own goal line to its deepest outfield player when the opponent has the ball, per {minutes} minutes", "metres", theme, minutes, width)
+                       f"mean distance from a team's own goal line to its deepest outfield player when the opponent has the ball, per {minutes} minutes", "metres", theme, minutes, width)
 
 
 def pressing_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
+    """Per team, the mean number of its players within `PRESS_RADIUS_M` (5 m) of the opponent on the ball in open play (`worker.tactics.pressure`), titled "Opponents near the ball" for what it counts."""
     rows = T.pressure(feed["actions"])
-    return _team_lines(feed, rows, lambda r, s: r["pressers"] if r["pressing_team"] == s else None, "Pressing intensity",
-                       f"mean number of players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, per {minutes} minutes", "players", theme, minutes, width)
+    return _team_lines(feed, rows, lambda r, s: r["pressers"] if r["pressing_team"] == s else None, "Opponents near the ball",
+                       f"mean number of a team's players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, open play, per {minutes} minutes", "players", theme, minutes, width)
 
 
-def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 900) -> go.Figure | None:
-    """The figure an insight document names in `figure` (`kind` line_break, run, space, line_height, pressing, buildup); None when it names none or the feed lacks the action."""
+def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 900, show_margin: bool = True) -> go.Figure | None:
+    """The figure an insight document names in `figure` (`kind` line_break, run, space, line_height, pressing, buildup); None when it names none or the feed lacks the action. `show_margin=False` draws a run without its offside margin."""
     ref = insight.get("figure") or {}
     kind = ref.get("kind")
     try:
         if kind == "line_break":
             return line_break_figure(feed, ref["event_id"], theme, width)
         if kind == "run":
-            return run_figure(feed, ref["event_id"], ref.get("runner_id"), theme, width=width)
+            return run_figure(feed, ref["event_id"], ref.get("runner_id"), theme, width=width, show_margin=show_margin)
         if kind == "space":
             return space_figure(feed, ref["event_id"], theme, width)
         if kind == "line_height":

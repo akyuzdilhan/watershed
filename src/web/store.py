@@ -2,7 +2,7 @@
 
 Reads are cached for a second, so that every viewer of the overlay costs one read per process and per second. Producer decisions go through `worker.desk.Desk`, with a sink that writes back to the same store; the desk is imported only when a decision is made, so the overlay never loads the Writer.
 
-Besides cards, the store reads insight and storyline documents (`insights.json` and `storyline.json` locally, `type` insight or storyline in the `cards` container) and the feed itself for the match graphics: locally `<match>/feed.jsonl[.gz]` in the desk folder, else `<REPLAY_DIR>/<match>.jsonl[.gz]` (default data/replay), in Azure the `events` container. While the match is not final, the feed is cut at the match state's `last_seq`, so a replay file never shows what the desk has not seen yet.
+Besides cards, the store reads insight and storyline documents (`insights.json` and `storyline.json` locally, `type` insight or storyline in the `cards` container), the post-match recap that the worker writes at the final whistle (`recap.json` locally, in the format `python -m worker.recap` writes; `recap-<match_id>` with `type` recap in the `cards` container) and the feed itself for the match graphics: locally `<match>/feed.jsonl[.gz]` in the desk folder, else `<REPLAY_DIR>/<match>.jsonl[.gz]` (default data/replay), in Azure the `events` container. While the match is not final, the feed is cut at the match state's `last_seq`, so a replay file never shows what the desk has not seen yet.
 
 Producer feedback on sentences (`feedback`, through `Desk.feedback`) is read back with `feedback_docs`: `<match>/feedback.jsonl` locally, `type` feedback in the `cards` container in Azure. Locally, from `from_env`, every feedback also rebuilds the producer profile (`FEEDBACK_PROFILE`, default data/feedback/profile.json) that the worker reads.
 """
@@ -71,6 +71,10 @@ class Store:
 
     def storyline(self, match_id: str) -> dict | None:
         return self._cached(("storyline", match_id), lambda: self._storyline(match_id))
+
+    def recap(self, match_id: str) -> dict | None:
+        """The post-match recap document (`worker.recap`: recap, fan and analyst texts per language), None until the worker writes it."""
+        return self._cached(("recap", match_id), lambda: self._recap(match_id))
 
     def doc(self, match_id: str, doc_id: str) -> dict | None:
         """A card, insight or storyline document by id, read fresh."""
@@ -177,6 +181,9 @@ class Store:
         return []
 
     def _storyline(self, match_id: str) -> dict | None:
+        return None
+
+    def _recap(self, match_id: str) -> dict | None:
         return None
 
     def _feed_messages(self, match_id: str) -> list[dict]:
@@ -289,6 +296,10 @@ class FileStore(Store):
             doc = next((d for d in doc if isinstance(d, dict)), None)
         return doc if isinstance(doc, dict) else None
 
+    def _recap(self, match_id: str) -> dict | None:
+        doc = self._json(self.root / match_id / "recap.json", None)
+        return doc if isinstance(doc, dict) else None
+
     def feed_path(self, match_id: str) -> Path | None:
         for path in (self.root / match_id / "feed.jsonl.gz", self.root / match_id / "feed.jsonl", self.replay_dir / f"{match_id}.jsonl.gz", self.replay_dir / f"{match_id}.jsonl"):
             if path.is_file():
@@ -359,24 +370,27 @@ class CosmosStore(Store):
     def _cards(self, match_id: str) -> list[dict]:
         return [_clean(d) for d in self.cards_c.query_items("SELECT * FROM c WHERE c.type = 'card'", partition_key=match_id)]
 
-    def _state(self, match_id: str) -> dict | None:
+    def _item(self, doc_id: str, match_id: str) -> dict | None:
+        """One document of the `cards` container by id, None when it is not there."""
         from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
         try:
-            return _clean(self.cards_c.read_item(f"state-{match_id}", partition_key=match_id))
+            return _clean(self.cards_c.read_item(doc_id, partition_key=match_id))
         except CosmosResourceNotFoundError:
             return None
+
+    def _state(self, match_id: str) -> dict | None:
+        return self._item(f"state-{match_id}", match_id)
 
     def _insights(self, match_id: str) -> list[dict]:
         return [_clean(d) for d in self.cards_c.query_items("SELECT * FROM c WHERE c.type = 'insight'", partition_key=match_id)]
 
     def _storyline(self, match_id: str) -> dict | None:
-        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+        return self._item(f"storyline-{match_id}", match_id)
 
-        try:
-            return _clean(self.cards_c.read_item(f"storyline-{match_id}", partition_key=match_id))
-        except CosmosResourceNotFoundError:
-            return None
+    def _recap(self, match_id: str) -> dict | None:
+        """`recap-<match_id>` (`type` recap), the document `worker.recap` writes next to the cards."""
+        return self._item(f"recap-{match_id}", match_id)
 
     def _feed_messages(self, match_id: str) -> list[dict]:
         """Incremental: only the messages written since the last read (by `_ts`, one-second resolution, so the last second is read again and deduplicated by id)."""
