@@ -852,6 +852,11 @@ FRESH = {  # closes a required duo line when the match has already heard every v
     "fr": {"goal": "{score_now} à la {minute}.", "other": "Toujours {score_then} à la {minute}."},
     "es": {"goal": "{score_now} en el {minute}.", "other": "Sigue el {score_then} en el {minute}."},
 }
+FRESH_INSIGHT = {  # the same for an insight's last line once its kind and the storyline have no line left: the minute makes it new
+    "en": ["Remember the minute: {minute}.", "Write down the minute: {minute}."],
+    "fr": fr_typography(["Retenez la minute : {minute}.", "Notez la minute : {minute}."]),
+    "es": ["Recuerden el minuto: el {minute}.", "Apunten el minuto: el {minute}."],
+}
 DEMOTED = 500  # a variant the control room turned down repeatedly: after every other one, before a repeat
 
 
@@ -1065,7 +1070,7 @@ class TemplateWriter:
         texts, lines = [], []
         for lang in languages:
             pick = _Picker(memory, doc["id"], lang, facts, self.demoted)
-            values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team")}
+            values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team"), "minute": facts.get("minute")}
             mine = own.get(lang)
             if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], air)[1]["verified"] and memory_key_free(pick, mine):
                 texts.append(mine)  # the document's text, the family's duo lines
@@ -1093,12 +1098,12 @@ class TemplateWriter:
 
     @staticmethod
     def _kind_lines(kind: str, lang: str, values: dict, pick: _Picker) -> list[dict]:
-        """Two duo lines true for the kind of fact, with no number; the storyline's lines when the kind's were all said."""
+        """Two duo lines true for the kind of fact, with no number; the storyline's lines when the kind's were all said, closed with the minute (`FRESH_INSIGHT`) when those were too."""
         slots = LINES["insight"][lang]
         out = []
         for speaker, slot in ((HEART, "heart"), (EYE, "eye")):
             filled = (pick.line(slots[slot].get(kind, []), values, {}, slot, optional=True) or pick.line(slots[slot]["storyline"], values, {}, slot, optional=True)
-                      or pick.line(slots[slot]["storyline"], values, {}, slot))
+                      or pick.line(slots[slot]["storyline"], values, {"minute": "minute"}, slot, fresh=FRESH_INSIGHT[lang]))
             out.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
         return out
 

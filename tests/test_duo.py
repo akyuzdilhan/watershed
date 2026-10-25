@@ -747,6 +747,21 @@ def test_insights_back_after_a_goal_ruled_out_get_lines_of_their_own():
         assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
 
 
+def test_an_insight_line_is_closed_with_the_minute_once_its_kind_has_no_line_left():
+    """Facts no family covers share the lines of their kind, then the storyline's: once those are spent, the line is closed with the minute, never said twice."""
+    players = replay_names()["home"]
+    desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
+    outs = [desk.write_insight({"id": f"insight-m-landmark-{i}", "type": "insight", "match_id": "m", "key": f"landmark-home-{i}", "kind": "milestone", "minute_label": f"{60 + i}'",
+                                "headline_facts": {"player": players[i]}, "field_meanings": {"player": "player who reached it"}, "value": 50, "status": "proposed"}, TEAMS)
+            for i in range(6)]
+    assert all(o["verification"]["verified"] for o in outs)
+    for lang in LANGS:
+        lines = [PhraseMemory.key(l["line"]) for o in outs for l in o["duo"] if l["lang"] == lang]
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+    eye = next(l for l in outs[-1]["duo"] if l["lang"] == "en" and l["speaker"] == EYE)  # Joss's lines name nobody: they run out first
+    assert eye["line"].endswith("65'.") and eye["claims"] == [{"value": 65, "source_field": "minute"}], eye
+
+
 class EveryVersion(MemorySink):
     """Keeps the duo of every version of a card, not only the last one."""
 
