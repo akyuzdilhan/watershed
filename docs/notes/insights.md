@@ -6,7 +6,7 @@ Facts about the match in progress, measured against the match itself and the 50-
 
 `Pipeline(history=...)` (CLI: `python -m worker <replay> --history data/history/<seed>`) creates one `InsightEngine` per match next to the Spotter. After the Spotter has handled a message, the engine runs if the message is relevant: a goal or a red card (as the action now stands), a substitution, a VAR check, a period end, full time, a correction. Every detector reads the match as it stands (goals that count, scorer after reassignment, substitutes, red cards, shots), so a late, repeated or corrected message gives the same facts as a clean feed. Without `history` nothing changes in the pipeline.
 
-Each insight document goes to `sink.insight(doc)`: `MemorySink.insights`, `data/desk/<match_id>/insights.json` for `JsonFileSink`, the `cards` container with `type: "insight"` for `CosmosSink`, the ordered lane of `ThreadedSink`. When the desk has a `write_insight(doc, teams)` method, new or changed insights go through it for their texts; otherwise `texts` stays absent. Insights are not returned by `Pipeline.handle` (which keeps returning cards and card actions); `Pipeline.insights(match_id)` lists them.
+Each insight document goes to `sink.insight(doc)`: `MemorySink.insights`, `data/desk/<match_id>/insights.json` for `JsonFileSink`, the `cards` container with `type: "insight"` for `CosmosSink`, the ordered lane of `ThreadedSink`. When the desk has a `write_insight(doc, teams)` method, new or changed insights go through it for their texts; otherwise `texts` stays absent. The worker's desk writes them with the templates (`--insights-writer template`, the default): live, the model only writes the cards and the recap; `--insights-writer writer` sends the insights to the card writer, within the same budget of 40 model calls per match. Each step of an insight's life also goes to `sink.audit_entry`, by `insights`. Insights are not returned by `Pipeline.handle` (which keeps returning cards and card actions); `Pipeline.insights(match_id)` lists them.
 
 ## Catalogue
 
@@ -17,7 +17,7 @@ Each detector proposes facts with a `group` (what it is about) and a `level` (ho
 | `scorer_milestones` | `scorer-<player>`, goals (2, 3, 4...) | milestone | each goal that counts | matches where one player scored N or more / matches; for a player who came off the bench before his first goal, substitutes only |
 | `fastest_hat_trick` | `hat-trick-speed-<player>`, minutes from 1st to 3rd goal | record | third goal | hat-tricks completed within as many minutes / hat-tricks |
 | `comebacks` | `comeback-<side>`, `<deficit>-<stage>` (1 level, 2 ahead, 3 won) | rarity | goal, full time | teams D or more down that reached the stage / teams that trailed by D or more; plus the club's last time (`club_last_season`) |
-| `half_time_lead_lost` | `ht-lead-lost-<side>`, 1 fell behind, 2 lost | streak | second-half goal, full time | half-time leads of L or more that fell behind (or lost) / half-time leads of L or more; plus the club's last such defeat at the same venue (`club_seasons_since`) |
+| `half_time_lead_lost` | `ht-lead-lost-<side>`, 1 trailing now, 2 lost | streak | second-half goal, full time | half-time leads of L or more that fell behind (or lost) / half-time leads of L or more; plus the club's last such defeat at the same venue (`club_seasons_since`) |
 | `late_goals` | `late-<event>`, equaliser or go-ahead | rarity | goal from the 85th minute | matches with such a goal from the 85th minute / matches |
 | `red_card_effects` | `ten-men-<side>`, scored or won | rarity | goal after a red, full time | teams with a player sent off that scored after it (or won) / teams with a player sent off |
 | `runs` | `run-<unbeaten or winless>-<side>`, ended or extended and length | streak | full time | runs of that kind of L or more / all runs of that kind; the run is the club's run at the end of the history |
@@ -46,13 +46,15 @@ Worked example, the demo match against the test history (12 seasons, 4,560 match
 
 - New group: proposed if its value reaches `min_value` (40) and its bucket (first half, second half, full time) has had fewer than `cap_per_period` (4) new groups; beyond the cap it replaces the weakest insight of the bucket still `proposed` or `pending` if it is worth more (`supersede_cause: outranked`), otherwise it is not written. A group admitted once is not capped again.
 - New level in a group: the previous insight becomes `superseded`, with `superseded_by` and `supersede_cause` (`updated`, `goal ruled out`, `correction`).
-- Group no longer true (its goal was voided): superseded with no successor. If a correction brings a level back, its insight is revived as a new version, `proposed` again.
+- Group no longer true (its goal was voided, or the score moved on): superseded with no successor, `supersede_cause` `goal ruled out` when a goal it counted was voided (whichever message released the void), `no longer true` otherwise. If a correction or a later goal brings a level back, its insight is revived as a new version, `proposed` again.
 - Same key, facts changed: new version, back to `proposed` (an approved text would show old numbers).
-- VAR check on a goal an insight counts: `under_review` until the decision.
+- VAR check on a goal an insight rests on: `under_review` until the decision. The engine runs the detectors again with that goal left out, as if VAR ruled it out (`InsightEngine.hinged`); an active insight that would then be withdrawn or would change its facts is flagged. That covers the insights that count the goal and those that only state the score it makes: a team down to ten that scored, with the current score, is under review while the other team's goal is checked.
 - Before changing an insight, the engine reads the stored one (`load_insight`) and keeps the producer's `status`, `texts` and `history`, as the pipeline does for cards.
-- Comebacks and lost half-time leads are kept at the furthest stage reached: an equaliser after the comeback does not take back "came from 0-2 down to lead".
+- Comebacks are kept at the furthest stage reached: an equaliser after the comeback does not take back "came from 0-2 down to lead".
+- A lost half-time lead is told at the current score: stage 1 ("now trail") only while the team trails, stage 2 at full time if it lost. Level again, the insight is superseded (`no longer true`); it is revived when the team trails again or the equaliser is ruled out. Its `score` is the score of the goal that last put the team behind.
+- Every step (`proposed`, `updated`, `revived`, `superseded`, the last with `cause`, `superseded_by` and `was_on_air`) is an audit entry by `insights`, next to the desk's `written` and `approved`: a fact VAR takes back is in the audit trail, with whether it was on air.
 
-In the demo the scorer group goes brace (57') to hat-trick (63'), back to brace when VAR rules the 63' goal out (64'), hat-trick again (66', version 2), four (83').
+In the demo the scorer group goes brace (57') to hat-trick (63'), back to brace when VAR rules the 63' goal out (64'), hat-trick again (66', version 2), four (83'). United's lost half-time lead (0-2 at the break) is proposed at 63', superseded at 64' (`goal ruled out`), revived at 66', superseded at 69' when United equalise (`no longer true`), revived at 70' when VAR rules that goal out (version 3), and superseded at full time by the defeat (`ht-lead-lost-away-2`).
 
 Fields beyond the contract table: `group`, `version`, `evidence` (goals the fact counts), `under_review`, `superseded_by`, `supersede_cause`, `last_time`; on the stat of the match, `stat_of_the_match`, `why_first` and `ranked`.
 
@@ -74,3 +76,7 @@ Only the contract API (`seasons`, `matches`, `head_to_head`, `last`, `player`). 
 - KPI probabilities are model probabilities (Poisson, binomial, normal) with independence assumptions that real football breaks; the possession model in particular treats each possession as an independent trial.
 - Weights (75/25, 12-bit cap, relevance per detector), `min_value` 40 and the cap of 4 per period are hand-set, not fitted to what producers keep.
 - Many related facts can describe one story (Rovers' comeback and United's lost lead): both are kept, the cap and the ranking decide.
+- A lost half-time lead withdrawn by an equaliser that VAR then rules out comes back as a new version: with a producer, it waits for approval again although its facts are those it had.
+- A comeback stays at the furthest stage after an equaliser, and one of its "ahead" headlines in `insight_texts` ("now lead after trailing") is then false; the other ("turn 0-2 around") holds.
+- `headline_facts` also carry league-wide figures (`one_in`, `history_opportunities`, `history_per_season`, `surprisal_bits`, and `times_rarer_than_runner_up` on the stat of the match) for the console and for the templates' conditions. Keeping them off air is the texts' job; with `--insights-writer writer` the model sees them too.
+- While a goal is under VAR check, the detectors run twice for each relevant message (with and without the goal).

@@ -9,7 +9,7 @@ SIMS = 1000  # enough for ordered chances on seed 9, fast enough for the suite
 
 
 class FakeHistory:
-    """The read API of `league.history.History` (docs/contracts.md, Lot 2), on a handful of matches."""
+    """The read API of `league.history.History` (docs/contracts.md), on a handful of matches."""
 
     SEASONS = ["2023/24", "2024/25", "2025/26"]
     CLUBS = {"Rovers": {"name": "Rovers", "founded_season": "1976/77", "seasons_in_league": 50, "titles": 2, "best_finish": 1},
