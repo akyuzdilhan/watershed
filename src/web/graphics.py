@@ -435,9 +435,10 @@ def line_height_figure(feed: dict, theme="dark", minutes: int = 5, width: int | 
 
 
 def pressing_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
+    """Per team, the mean number of its players within `PRESS_RADIUS_M` (5 m) of the opponent on the ball, open play (`worker.tactics.pressure`), titled "Opponents near the ball": it counts players close to the ball, not pressing actions."""
     rows = T.pressure(feed["actions"])
-    return _team_lines(feed, rows, lambda r, s: r["pressers"] if r["pressing_team"] == s else None, "Pressing intensity",
-                       f"mean number of players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, per {minutes} minutes", "players", theme, minutes, width)
+    return _team_lines(feed, rows, lambda r, s: r["pressers"] if r["pressing_team"] == s else None, "Opponents near the ball",
+                       f"mean number of a team's players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, open play, per {minutes} minutes", "players", theme, minutes, width)
 
 
 def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 900) -> go.Figure | None:

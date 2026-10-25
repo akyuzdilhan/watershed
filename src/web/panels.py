@@ -140,7 +140,7 @@ def graphic_items(feed: dict, kind: str) -> list[dict]:
         return [{"value": a["event_id"], "label": f"{a.get('minute_label', '')} {teams[a['team']]} {'penalty' if a['action_type'] == 'shot_penalty' else 'free kick'}, {G._who(a)}"}
                 for a in feed["actions"] if a["action_type"] in G.DIRECT]
     if kind == "tactics":
-        out = [{"value": "lines", "label": "Defensive line height over time"}, {"value": "press", "label": "Pressing intensity over time"}]
+        out = [{"value": "lines", "label": "Defensive line height over time"}, {"value": "press", "label": "Opponents near the ball over time"}]
         breaks = sorted(T.line_breaks(feed["actions"], 4), key=lambda r: (-r["bypassed"], r["seq"]))[:8]
         out += [{"value": f"lb:{r['event_id']}", "label": f"Line break {r['minute_label']}: {who(r['passer_id'])}, {r['bypassed']} defenders bypassed"} for r in breaks]
         runs = sorted(T.runs_behind(feed["actions"]), key=lambda r: abs(r["margin_m"]))[:8]
