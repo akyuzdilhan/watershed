@@ -1,10 +1,12 @@
 import asyncio
 import json
+import re
 
 import pytest
 
-from worker.writer import (EXAMPLE_FACTS, EXAMPLE_REPLY, LANGUAGE_RULES, STRUCTURAL_RULES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter, card_facts, draft,
-                           style_issues, verify)
+from worker.duo import fill
+from worker.writer import (CARD_KIND_WORDS, EM_DASH, EXAMPLE_FACTS, EXAMPLE_REPLY, LANGUAGE_RULES, STRUCTURAL_RULES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter,
+                           card_facts, draft, no_em_dash, numbers_in, style_issues, template_values, verify, verify_reply)
 
 TEAMS = {"home": "Rovers", "away": "United"}
 MOMENT_FACTS = {
@@ -223,3 +225,153 @@ def test_two_style_failures_fall_back_to_the_template():
     bad = reply("en", "Ingleby scores", "Win chance jumped: a +24-point swing.", [SWING])
     d = asyncio.run(draft(make_card(), TEAMS, FakeWriter([bad, bad]), ["en"]))
     assert d.writer == "template" and d.attempts == 2 and d.report["verified"]
+
+
+# --- on-air rules -------------------------------------------------------------------------------------
+
+SAVE_FACTS, _ = card_facts(make_card("save"), TEAMS)  # Rovers save: rovers_wp_after_save_pct 81, rovers_wp_if_goal_pct 24, save_value_pts 57
+SAVE_CLAIMS = [{"value": 81, "source_field": "rovers_wp_after_save_pct"}, {"value": 24, "source_field": "rovers_wp_if_goal_pct"}]
+
+
+@pytest.mark.parametrize("lang,why,starts", [
+    ("en", "The save lifts Rovers from 24% to 81% to win.", True),
+    ("en", "Rovers stay on 81% to win instead of 24% had it gone in.", False),
+    ("fr", "L'arrêt fait passer Rovers de 24 % à 81 % de chances de gagner.", True),
+    ("fr", "Rovers reste à 81 % de chances de gagner, contre 24 % si le tir était entré.", False),
+    ("fr", "Rovers reste à 81 % de chances de gagner au lieu de 24 %.", False),
+    ("es", "La parada lleva al Rovers del 24% al 81% de opciones de ganar.", True),
+    ("es", "El Rovers sigue en el 81% de opciones de ganar, frente al 24% si hubiera entrado.", False),
+    ("es", "El Rovers sigue en el 81% de opciones de ganar en lugar del 24%.", False),
+    ("fr", "Rovers reste à 81 % de chances de gagner ; elles auraient été de 24 % si le tir était entré.", False),
+    ("es", "El Rovers sigue en el 81% de opciones de ganar; estuvo a un paso del 24%.", False),
+    ("en", "Rovers stay on 81% to win, a goal away from 24%.", False),
+])
+def test_a_value_if_goal_is_never_a_starting_point(lang, why, starts):
+    errors, _ = rules("Rovers", why, lang, SAVE_CLAIMS, SAVE_FACTS)
+    assert ("if_goal_as_start" in errors) == starts, (why, errors)
+
+
+def test_a_save_told_from_its_value_if_goal_is_retried():
+    bad = reply("en", "Big save for Rovers", "The save lifts Rovers from 24% to 81% to win.", SAVE_CLAIMS)
+    good = reply("en", "Big save for Rovers", "Rovers stay on 81% to win instead of 24% had it gone in.", SAVE_CLAIMS)
+    writer = FakeWriter([bad, good])
+    d = asyncio.run(draft(make_card("save"), TEAMS, writer, ["en"]))
+    assert d.writer == "fake" and d.attempts == 2 and d.report["verified"] and "if_goal_as_start" in writer.notes[1]
+
+
+def test_the_em_dash_is_refused_in_a_text_and_normalised_in_a_reply():
+    scorer = make_card()["player"]["name"]
+    assert "em_dash" in rules(f"{scorer} scores for Rovers", f"Rovers go from 30% to 54% to win {EM_DASH} up 24 points.", "en")[0]
+    assert no_em_dash(f"Rovers lead {EM_DASH} and how!") == "Rovers lead, and how!" and no_em_dash(f"Level! {EM_DASH} Rovers are back.") == "Level! Rovers are back."
+    model = json.dumps({"texts": [{"headline": f"{scorer} scores for Rovers", "why": f"Rovers go from 30% to 54% to win {EM_DASH} up 24 points.", "lang": "en", "claims": GOAL_CLAIMS}],
+                        "duo": [{"speaker": "wren", "lang": "en", "line": f"{scorer} {EM_DASH} what a goal!", "claims": []},
+                                {"speaker": "joss", "lang": "en", "line": "That goal is worth 24 points to Rovers.", "claims": [SWING]}]})
+    texts, lines, report = verify_reply(model, ["en"], GOAL_FACTS, duo=True)
+    assert report["verified"] and texts[0]["why"] == "Rovers go from 30% to 54% to win, up 24 points." and lines[0]["line"] == f"{scorer}, what a goal!"
+
+
+@pytest.mark.parametrize("lang,why", [
+    ("en", "Rovers take 24 points with that goal, up to 54% to win."),
+    ("en", "Rovers gain 24 points: 54% to win now."),
+    ("fr", "En silence, Rovers vient de prendre 24 points : 54 % de chances de gagner."),
+    ("fr", "Rovers gagne 24 points et passe à 54 % de chances de gagner."),
+    ("es", "Sin hacer ruido, el Rovers acaba de ganar 24 puntos: 54% de opciones de ganar."),
+    ("es", "El Rovers suma 24 puntos y llega al 54% de opciones de ganar."),
+    ("en", "Rovers win 24 points with that goal, up to 54% to win."),
+    ("en", "Rovers pick up 24 points: 54% to win now."),
+    ("en", "Honours even, and Rovers take a point."),
+    ("fr", "Rovers empoche 24 points et passe à 54 % de chances de gagner."),
+    ("fr", "Match nul, et Rovers prend un point."),
+    ("es", "El Rovers consigue 24 puntos y llega al 54% de opciones de ganar."),
+    ("es", "Empate, y el Rovers saca un punto."),
+])
+def test_points_never_go_with_a_verb_of_league_points(lang, why):
+    assert "league_points_verb" in rules("Rovers", why, lang)[0], why
+
+
+@pytest.mark.parametrize("lang,why", [
+    ("en", "Rovers scored 5 from chances worth 1.3 expected goals: about one match in 101 goes that way."),
+    ("en", "A brace off the bench: this league sees about 3 a season."),
+    ("en", "It ranks first, 228 times rarer than the next fact."),
+    ("en", "That is 14.2 bits of surprise."),
+    ("en", "Not once in 19,000 matches."),
+    ("fr", "À peu près un match sur 101 tourne ainsi."),
+    ("fr", "Le championnat en voit environ 3 par saison."),
+    ("fr", "Le fait le plus rare du match, 228 fois plus rare que le suivant."),
+    ("fr", "Jamais en 19\u202f000 matchs."),
+    ("es", "Más o menos un partido de cada 101 acaba así."),
+    ("es", "La liga ve unos 3 por temporada."),
+    ("es", "Es el dato más raro del partido, 228 veces más raro que el siguiente."),
+    ("es", "Nunca en 19.000 partidos."),
+])
+def test_league_wide_rates_ratios_match_counts_and_bits_stay_off_air(lang, why):
+    assert "league_rate" in rules("Rovers", why, lang)[0], why
+
+
+def test_a_rarity_told_in_seasons_for_the_team_or_the_player_passes():
+    for lang, why in (("en", "Rovers had not won from 2 goals down since 2019/20, 7 seasons ago."), ("en", "Only the 6th hat-trick by a substitute in 50 seasons."),
+                      ("en", "Never, Wren. Not once in 50 seasons had Rovers won from 2 goals down."),
+                      ("fr", "Rovers n'avait plus gagné après avoir été mené de 2 buts depuis 2019/20, il y a 7 saisons."), ("es", "Primer póker de un suplente en 50 temporadas de liga.")):
+        assert "league_rate" not in rules("Rovers", why, lang)[0], why
+
+
+def test_thousands_are_read_as_one_number():
+    assert [v for v, _ in numbers_in("18,620, 18\u202f620, 18.620 and 1.3")] == [18620, 18620, 18620, 1.3]
+
+
+def test_instructions_carry_the_on_air_rules():
+    assert "without thousands separators" not in WRITER_INSTRUCTIONS and EM_DASH not in WRITER_INSTRUCTIONS
+    assert "suggested lines for the human commentary team, in two fictional voices" in WRITER_INSTRUCTIONS
+    assert "what two fictional commentators say on air" not in WRITER_INSTRUCTIONS
+    for rule in ("_if_goal", "from, de or del", "em dash", "by a whisker", "one match in 101", "228 times rarer", "take, prendre, gagner, ganar", "previous_scorer", "team_at_home"):
+        assert rule in WRITER_INSTRUCTIONS, rule
+
+
+def test_league_table_points_never_reach_the_writer():
+    season = {"facts": {"score_now": "Rovers 1-2 United", "rovers_rank_if_score_holds": 16, "rovers_points_if_score_holds": 31, "rovers_relegation_change_since_kickoff_pts": 9},
+              "meanings": {"score_now": "score", "rovers_rank_if_score_holds": "rank", "rovers_points_if_score_holds": "league points", "rovers_relegation_change_since_kickoff_pts": "change"}}
+    facts, meanings = card_facts(dict(make_card(), season_context=season), TEAMS)
+    assert facts["season_rovers_rank_if_score_holds"] == 16 and facts["season_rovers_relegation_change_since_kickoff_pts"] == 9
+    assert not [k for k in list(facts) + list(meanings) if "points" in k.split("_")]
+
+
+# --- red cards ------------------------------------------------------------------------------------------
+
+RED_CLAIMS = [{"value": 55, "source_field": "united_wp_before_pct"}, {"value": 40, "source_field": "united_wp_after_pct"}]
+
+
+@pytest.mark.parametrize("kind,fact", [("second_yellow", "second_yellow"), ("red", "straight_red"), (None, None)])
+def test_a_red_card_names_the_player_and_says_how_he_was_sent_off(kind, fact):
+    card = dict(make_card("red_card", "away"), **({"card_kind": kind} if kind else {}))
+    facts, meanings = card_facts(card, TEAMS)
+    assert facts.get("card_kind") == fact and (fact is None or fact in meanings["card_kind"])
+    for lang, t in TEMPLATES["red_card"].items():
+        values, fields = template_values(card, facts, lang)
+        heads = t["kinds"][fact]["headlines"] if fact else t["headlines"]
+        whys = (t["kinds"][fact]["whys"] if fact else []) + t["whys"]
+        for headline in heads:
+            assert "{player}" in headline, headline
+            for why in whys:
+                h, w = fill(headline, values, fields), fill(why, values, fields)
+                text = {"headline": h[0], "why": w[0], "lang": lang, "claims": h[1] + w[1]}
+                _, report = verify(json.dumps([text], ensure_ascii=False), [lang], facts)
+                e = report["cards"][0]
+                assert report["verified"] and not e["style_warnings"] and not e["unknown_names"], (lang, text, e)
+        written = json.loads(TemplateWriter().write(card, facts, [lang]))[0]
+        if fact:
+            assert re.search(CARD_KIND_WORDS[fact][lang], written["headline"] + " " + written["why"]), written
+    if fact == "second_yellow":
+        assert any(w.startswith("Second yellow for {player}: {team} are down to ten") for w in TEMPLATES["red_card"]["en"]["kinds"]["second_yellow"]["whys"])
+
+
+def test_the_verifier_refuses_an_unnamed_player_and_a_card_kind_the_feed_did_not_give():
+    card = make_card("red_card", "away")
+    player = card["player"]["name"]
+    facts, _ = card_facts(card, TEAMS)
+    unnamed = verify(reply("en", "United down to ten", "The red card costs United: from 55% to 40% to win.", RED_CLAIMS), ["en"], facts)[1]
+    assert not unnamed["verified"] and "player_not_named" in {e["rule"] for e in unnamed["cards"][0]["style_errors"]}
+    second = reply("en", f"Second yellow for {player}", "United go from 55% to 40% to win.", RED_CLAIMS)
+    for kind, ok in ((None, False), ("red", False), ("second_yellow", True)):
+        facts, _ = card_facts(dict(card, **({"card_kind": kind} if kind else {})), TEAMS)
+        report = verify(second, ["en"], facts)[1]
+        assert report["verified"] == ok and (ok or "card_kind_unbacked" in {e["rule"] for e in report["cards"][0]["style_errors"]}), (kind, report)

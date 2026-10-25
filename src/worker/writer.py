@@ -1,8 +1,8 @@
 """The Writer and the Verifier: from a Spotter card (or an insight) to on-air text and a commentary duo in several languages, every number checked.
 
-The code computes every number and sends it under an explicit field name (`card_facts`, `insight_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. The Verifier checks those claims, rejects any number nobody claimed, a percentage taken from a field that is not one, and flags any name that is not in the facts. It also applies broadcast style rules per language (`LANGUAGE_RULES`, `STRUCTURAL_RULES`): an error fails the draft, a warning is only reported. The duo lines (`duo` field, personas in `worker.duo`) go through the same checks, line by line. Across a match, a `PhraseMemory` remembers what was already said: an identical headline fails, a reused opening, phrase or tic is a warning. A failed draft gets one retry, told what was rejected, then fixed templates take over (many variants, the least used one picked deterministically), so a card is never blocked by the model.
+The code computes every number and sends it under an explicit field name (`card_facts`, `insight_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. The Verifier checks those claims, rejects any number nobody claimed, a percentage taken from a field that is not one, and flags any name that is not in the facts. It also applies broadcast style rules per language (`LANGUAGE_RULES`, `STRUCTURAL_RULES`): an error fails the draft, a warning is only reported. The duo lines (`duo` field, personas in `worker.duo`) are suggested lines for the human commentary team and go through the same checks, line by line. Across a match, a `PhraseMemory` remembers what was already said: an identical headline or duo line fails, a reused opening, phrase or tic is a warning. A failed draft gets one retry, told what was rejected, then fixed templates take over (many variants, the least used one picked deterministically), so a card is never blocked by the model.
 
-"Points" has one meaning on screen: a change in a team's chance of winning. The card ranking value `value_pts` is never sent to the model nor written. A goal that hardly moves the result (under 2 points) is written as a milestone, with no probability (`low_stake`).
+On-air rules. "Points" has one meaning on screen: a gap between two chances, in percentage points (a field ending in `_pts`), never with a verb of league points (take, prendre, gagner, ganar). The card ranking value `value_pts` and league table points are never sent to the model nor written. A goal that hardly moves the result (under 2 points) is written as a milestone, with no probability (`low_stake`). A rarity is told in seasons for the team or the player: league-wide rates, match counts, ratios and bits stay with the producer (`on_air` keeps them out of the model's facts). An offside is tight or clear, never a margin. A value "if goal" is never a starting point after from, de or del. No em dash.
 
 The model runs on Microsoft Foundry through Agent Framework (`FoundryWriter`, a function tool `get_moment`); `TemplateWriter` needs no Azure and serves the tests and the fallback.
 """
@@ -14,8 +14,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from worker.duo import (ALLOWED_NAMES, CARDINALS, EYE, HEART, LINES, NB, ORDINALS, PERSONAS, PhraseMemory, count_words, fill, fr_de, fr_typography, persona_brief,
-                        placeholders, rotated, stable)
+from worker.duo import (ALLOWED_NAMES, CARDINALS, CONDITIONS, EYE, HEART, LINES, NB, ORDINALS, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, count_words, fill, fr_de,
+                        fr_typography, persona_brief, placeholders, rotated, stable)
 from worker.feedback import skeleton
 
 LANGUAGES = ("en", "fr", "es")
@@ -29,11 +29,14 @@ Facts: call the get_moment tool with the card_id to get the facts and the meanin
 Numbers. Each number has a field name that says what it means: never use a number with another meaning. For example, a win probability "if goal" is a chance of winning, never a chance of scoring. Do not compute any new number. Write every number exactly as given: whole numbers, no sign (never +24), no decimals.
 - Fields ending in _pct are percentages: write them with a % sign (34%, never 0.34).
 - Fields ending in _pts are percentage points: always write the word points (French: points, Spanish: puntos) right after the number, never a % sign.
+- A field with _if_goal in its name is what the chance would have been had the shot gone in: never write it as a starting point after from, de or del ("from 9%", "de 9 %", "del 9%"); write "instead of 9%", "contre 9 %", "frente al 9%".
 
 Content. Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Every sentence that gives a win probability names the team it belongs to: rovers_wp_after_pct is the chance of Rovers. Never write "win chance", "the chances" or "les chances" without the team.
 - Headline: at most 8 words, names the player or the team. No minute and no number at the start: the graphic already shows the minute and the score.
 - Why: one sentence, at most 25 words.
+- A red card names the player in the headline or the why. Say second yellow only when card_kind is second_yellow, and straight red only when card_kind is straight_red.
 - Same meaning in every language, each written natively as a broadcaster of that country would say it, not translated word for word.
+- Punctuation: never the long dash (em dash); use a comma, a colon or a full stop.
 
 Language rules.
 - en: plain broadcast English. Say "Rovers go from 30% to 54% to win", "worth 13 points". No jargon: no "+24-point swing", no "win chance".
@@ -73,19 +76,24 @@ EXAMPLE_DUO = [
 
 WRITER_INSTRUCTIONS += f"""
 
-Points. The word points (French points, Spanish puntos) means only a change in a team's chance of winning, from a field ending in _pts. Never write any other value as points.
+Points. The word points (French points, Spanish puntos) has one meaning: a gap between two chances, in percentage points, from a field ending in _pts. Never write any other value as points, and never with a verb of league points (take, prendre, gagner, ganar, sumar; nor win, earn, pick up, empocher, conseguir): "Rovers take 24 points" sounds like the league table. A draw is never "a point" (un point, un punto).
 
 A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Lightfoot"), with no probability and no points.
 
-Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact, the why says why it is remarkable, with numbers only from the facts (write them without thousands separators: 18620).
+Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact and who did it, the why says why it is remarkable, with numbers only from the facts. A rarity is told in seasons, for the team or the player ("Rovers' first comeback from two goals down since 2019/20"); never a count of matches, a league-wide rate ("one match in 101", "about 3 a season"), a ratio ("228 times rarer") or bits: those stay with the producer.
 
-Variety. The request may list, per language, the headlines, openings and verbs already used in this match ("avoid"). Never repeat a headline; do not start a sentence or build a headline like those; vary the verbs. Each match has its story: tell it from the facts (goal_situation, score_after, scorer_match_goals), never with the same words twice.
+On air. Name the feat and who did it. Never give an offside margin as a number: an offside is tight ("by a whisker") or clear.
 
-Commentary duo. When the request has "duo": true, also write what two fictional commentators say on air about the moment. Never name or imitate a real commentator or pundit; keep it broadcast-safe, never insulting.
+Variety. The request may list, per language, the headlines, openings, verbs and duo lines already used in this match ("avoid"). Never repeat a headline or a duo line; do not start a sentence or build a headline like those; vary the verbs. Each match has its story: tell it from the facts (goal_situation, score_after, scorer_match_goals), never with the same words twice.
+
+Commentary duo. When the request has "duo": true, also write suggested lines for the human commentary team, in two fictional voices. Never name or imitate a real commentator or pundit; keep it broadcast-safe, never insulting.
 {persona_brief(list(LANGUAGES))}
 - 2 to 4 lines per requested language, alternating speakers, usually wren first: wren lives the moment and the story, joss brings one number or the detail nobody noticed, then they answer each other.
 - Spoken, not written: one or two short sentences per line, at most 25 words, no headline style, and not a copy of the headline or the why.
 - Same rules as the card for numbers, units, club names and each language's style: every number in a line is listed in that line's claims, and a line that gives a win probability names the team.
+- Only a goal by the home team (team_at_home true) makes the stadium roar or wake up; for an away goal, speak of the away fans or the bench.
+- The words match the size of the number: "small margins" only for a save worth less than {SMALL_MARGIN_PTS} points, "the whole match just tilted" only for a change of more than {TILT_PTS} points.
+- When the facts have previous_scorer, the feed has credited the goal to another player: the duo announces the change of scorer, not the goal again.
 - A tic is said at most once per match: "tics_used" in the request lists those already said.
 Then reply with a JSON object instead of the array: {{"texts": [the array of cards], "duo": [{{"speaker": "wren" or "joss", "lang": string, "line": string, "claims": [{{"value": number, "source_field": string}}]}}]}}
 Duo example for the moment above: {json.dumps(EXAMPLE_DUO, ensure_ascii=False)}
@@ -127,8 +135,9 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
     sb = card["score_before"]
     score = f"{teams['home']} {sb['home']}-{sb['away']} {teams['away']}"
     f = card["facts"]
-    facts: dict[str, Any] = {"minute": card["minute_label"], "score_before": score}
-    meanings = {"minute": "match minute of the moment", "score_before": "score just before the moment"}
+    facts: dict[str, Any] = {"minute": card["minute_label"], "score_before": score, "team_at_home": team == "home"}
+    meanings = {"minute": "match minute of the moment", "score_before": "score just before the moment",
+                "team_at_home": f"true if {name} play at home: only a home goal makes the stadium roar or wake up"}
     player = card["player"]["name"]
     if card["moment"] == "goal":
         after = dict(sb)
@@ -140,6 +149,9 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
         if isinstance(card.get("scorer_match_goals"), int):
             facts["scorer_match_goals"] = card["scorer_match_goals"]
             meanings["scorer_match_goals"] = f"goals {player} has scored in this match, this one included"
+        if card.get("previous_player") and card.get("previous_player") != player:
+            facts["previous_scorer"] = card["previous_player"]
+            meanings["previous_scorer"] = f"player the goal was first credited to; the feed has since credited it to {player}: tell the change of scorer"
         if low_stake(card):
             facts["stake"] = "low"
             meanings["stake"] = "the goal hardly changes the result: write it as a milestone or a story line, with no probability and no points"
@@ -160,8 +172,11 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
     elif card["moment"] == "red_card":
         facts |= {"event": f"{name} player sent off", "player_sent_off": player,
                   f"{slug}_wp_before_pct": shown(f["team_wp_before_pct"]), f"{slug}_wp_after_pct": shown(f["team_wp_after_pct"])}
-        meanings |= {"player_sent_off": "player shown the red card", f"{slug}_wp_before_pct": f"{name}'s chance of winning the match before the red card, in %",
+        meanings |= {"player_sent_off": "player shown the red card, to be named in the headline or the why", f"{slug}_wp_before_pct": f"{name}'s chance of winning the match before the red card, in %",
                      f"{slug}_wp_after_pct": f"{name}'s chance of winning the match with ten men, in %"}
+        if card.get("card_kind") in CARD_KINDS:
+            facts["card_kind"] = CARD_KINDS[card["card_kind"]]
+            meanings["card_kind"] = "how the player was sent off: " + "; ".join(f"{k}: {v}" for k, v in CARD_KIND_MEANINGS.items())
     else:  # a chance that did not go in
         facts |= {"event": f"{name} chance missed", "shooter": player, "shot_xg_pct": f["xg_pct"],
                   f"{slug}_wp_before_pct": shown(f["team_wp_before_pct"]), f"{slug}_wp_if_goal_pct": shown(f["team_wp_if_goal_pct"])}
@@ -169,10 +184,33 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
                      f"{slug}_wp_before_pct": f"{name}'s chance of winning the match, in %",
                      f"{slug}_wp_if_goal_pct": f"{name}'s chance of winning the match if the shot had gone in, in %"}
     season = card.get("season_context") or {}
-    if season.get("facts"):  # what the score means for the season (worker.storyline.live_context), prefixed so it never collides with the match facts
-        facts |= {f"season_{k}": v for k, v in season["facts"].items()}
-        meanings |= {f"season_{k}": v for k, v in season.get("meanings", {}).items()}
+    if season.get("facts"):  # what the score means for the season (worker.storyline.live_context), prefixed so it never collides with the match facts; no league table points
+        kept = {k: v for k, v in season["facts"].items() if not league_points_field(k)}
+        facts |= {f"season_{k}": v for k, v in kept.items()}
+        meanings |= {f"season_{k}": v for k, v in season.get("meanings", {}).items() if k in kept}
     return facts, meanings
+
+
+CARD_KINDS = {"second_yellow": "second_yellow", "red": "straight_red"}  # card["card_kind"], set by the worker -> the card_kind fact
+CARD_KIND_MEANINGS = {"second_yellow": "a second booking in the match, so a red card", "straight_red": "a straight red card"}
+
+
+def league_points_field(name: str) -> bool:
+    """A field of league table points ("rovers_points_if_win", "points_gap"): never sent to the model, since "points" on air is only a gap between two chances."""
+    return "points" in name.split("_")
+
+
+OFF_AIR_FIELDS = ("one_in", "surprisal_bits", "history_opportunities", "history_per_season", "times_rarer_than_runner_up", "runner_up_surprisal_bits",
+                  "top_value", "runner_up", "runner_up_value")  # rarity measures and desk ranking: the producer sees them in the console, the audience never
+
+
+def on_air(facts: dict, meanings: dict) -> tuple[dict, dict]:
+    """The facts the Writer may write from: an insight's facts without the league-wide rates, match counts, ratios, bits and desk values, and without league table points. For a feat the league sees every season, its count and rank in the history go too: "the 151st brace by a substitute" is a league-wide count, while "only the 6th in 50 seasons" tells a rare feat."""
+    from worker.insight_texts import often
+
+    off = OFF_AIR_FIELDS + (("history_count", "history_rank") if often(facts) else ())
+    kept = {k: v for k, v in facts.items() if k not in off and not league_points_field(k)}
+    return kept, {k: v for k, v in meanings.items() if k in kept}
 
 
 TIGHT_OFFSIDE_CM = 30  # a player at 7.5 m/s covers 30 cm between two frames at 25 Hz: below that, a number would be false precision
@@ -182,14 +220,24 @@ def offside_call(margin_cm: int) -> str:
     return "tight" if margin_cm <= TIGHT_OFFSIDE_CM else "clear"
 
 
+def var_ruling(card: dict) -> dict:
+    """Why VAR ruled a goal out: {reason, call, margin_cm}. The reason and the call (tight or clear, what goes on air) come from the worker's `var_decision` (`{reason, call, margin_m}`) first, else from the desk's `ruled_out`. The margin is only what `ruled_out.margin_cm` holds: `var_decision.margin_m` is never read, so the margin is never copied into what reads the ruling (the duo, the recap document)."""
+    ruled, var = card.get("ruled_out") or {}, card.get("var_decision") or {}
+    cause = str(var.get("reason") or ruled.get("cause") or "")
+    reason = ruled.get("reason") or (cause[4:] if cause.startswith("var_") else cause) or "other"
+    margin = ruled.get("margin_cm") if isinstance(ruled.get("margin_cm"), int) and not isinstance(ruled.get("margin_cm"), bool) else None
+    call = var.get("call") if var.get("call") in ("tight", "clear") else offside_call(margin) if margin is not None else None
+    return {"reason": reason, "call": call if reason == "offside" else None, "margin_cm": margin}
+
+
 def ruling_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
-    """A goal card's facts plus why VAR ruled it out: the reason, and for offside whether it was tight or clear (the margin in centimetres stays on the card for the console, never on air)."""
+    """A goal card's facts plus why VAR ruled it out: the reason, and for offside whether it was tight or clear (the margin stays on the card for the console, never on air)."""
     facts, meanings = card_facts(card, teams)
-    ruled = card.get("ruled_out") or {}
-    facts["ruled_out_reason"] = ruled.get("reason") or "other"
+    ruling = var_ruling(card)
+    facts["ruled_out_reason"] = ruling["reason"]
     meanings["ruled_out_reason"] = "why VAR ruled the goal out: offside, handball or other"
-    if isinstance(ruled.get("margin_cm"), int):
-        facts["offside_call"] = offside_call(ruled["margin_cm"])
+    if ruling["call"]:
+        facts["offside_call"] = ruling["call"]
         meanings["offside_call"] = "how close the offside was: tight (within the distance a sprinting player covers between two frames) or clear"
     return facts, meanings
 
@@ -233,6 +281,23 @@ def normalise(text: str) -> str:
     return text.replace("\xa0", " ").replace("\u202f", " ")
 
 
+EM_DASH = "\u2014"
+
+
+def no_em_dash(text: str) -> str:
+    """A model's text with each em dash replaced by a comma, or dropped after a punctuation mark: the long dash is not broadcast punctuation."""
+    if not isinstance(text, str) or EM_DASH not in text:
+        return text
+    text = re.sub(rf"([.!?:;,])\s*{EM_DASH}\s*", r"\1 ", text)
+    text = re.sub(rf"\s*{EM_DASH}\s*", ", ", text)
+    return re.sub(r"^[,\s]+|[,\s]+$", "", text)
+
+
+def word_count(text: str) -> int:
+    """Words of a text, French typography aside: "44 %" or "Rovers :" count as one word."""
+    return sum(1 for w in normalise(text).split() if re.search(r"[\w\u00c0-\u00ff]", w))
+
+
 def claim_ok(claim: Any, facts: dict) -> bool:
     if not isinstance(claim, dict) or not isinstance(claim.get("value"), (int, float)):
         return False
@@ -261,6 +326,11 @@ FR_ARTICLE = r"(?i:\b(?:l['’]\s?|d['’]\s?|(?:le|la|les|du|des|au|aux)\s+))"
 LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
     "en": [
         ("jargon", "warning", r"(?i)\bwin chances?\b"),
+        ("league_points_verb", "error", r"(?i)\b(?:take|takes|took|taken|taking|gain|gains|gained|gaining|win|wins|won|winning|earn|earns|earned|earning|collect|collects|collected"
+                                        r"|bank|banks|banked|(?:pick|picks|picked|picking)\s+up)\s+(?:\w+\s+)?(?:\d+|a|one|three)\s+points?\b"),  # "points" with a verb of league points, a draw as "a point"
+        ("league_rate", "error", r"(?i)\b(?:one|1|once)\s+(?:(?:match|game)\s+)?(?:in|out of)\s+(?:every\s+)?\d+(?!\d|\s+seasons?\b)"  # "not once in 50 seasons" is a landmark, not a rate
+                                 r"|\b(?:\d+(?:[.,]\d+)?|once|twice|\w+\s+times)\s+(?:a|per|each|every)\s+season\b"),
+        ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+times\s+(?:rarer|more\s+rare|less\s+likely)\b|\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+(?:matches|games)\b|\b\d{3,}\s+(?:matches|games)\b"),
     ],
     "fr": [
         ("forbidden_word", "error", r"(?i)\bswing\w*"),
@@ -269,6 +339,10 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("article_before_team", "error", FR_ARTICLE + r"{team}\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|turnover|win)\b"),
         ("percent_without_space", "warning", r"\d%"),
+        ("league_points_verb", "error", r"(?i)\b(?:prendre|prend|prennent|pris|prenait|gagner|gagne|gagnent|gagné|gagnés|gagnait|empocher|empoche|empochent|empoché|décrocher|décroche"
+                                        r"|décrochent|décroché|récolter|récolte|récoltent|récolté|ramener|ramène|ramènent|ramené)\s+(?:\w+\s+)?(?:\d+|un|le|trois)\s+points?\b"),
+        ("league_rate", "error", r"(?i)\b(?:un|1)\s+match\s+sur\s+\d|\bune\s+fois\s+sur\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+fois\s+)par\s+saison\b|\b\d+(?:[.,]\d+)?\s+fois\s+plus\s+rare"),
+        ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+matchs\b|\b\d{3,}\s+matchs\b"),
     ],
     "es": [
         ("forbidden_word", "error", r"(?i)\bswing\w*"),
@@ -276,8 +350,25 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("forbidden_word", "error", r"(?i)\bgame[- ]?changer\b"),
         ("clumsy_phrase", "warning", r"(?i)\ben puntos de diferencia\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|win)\b"),
+        ("league_points_verb", "error", r"(?i)\b(?:ganar|gana|ganan|ganó|ganado|ganaba|sumar|suma|suman|sumó|sumado|conseguir|consigue|consiguen|consiguió|conseguido|lograr|logra"
+                                        r"|logran|logró|logrado|sacar|saca|sacan|sacó|sacado|rascar|rasca|rascó)\s+(?:\w+\s+)?(?:\d+|un|el|tres)\s+puntos?\b"),
+        ("league_rate", "error", r"(?i)\b(?:un|1)\s+partido\s+de\s+cada\s+\d|\b(?:una\s+vez|uno)\s+(?:de\s+)?cada\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+(?:vez|veces)\s+)(?:por|cada|a\s+la)\s+temporada\b"
+                                 r"|\b\d+(?:[.,]\d+)?\s+veces\s+más\s+rar[oa]"),
+        ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+partidos\b|\b\d{3,}\s+partidos\b"),
     ],
 }
+AIR_RULES = ("league_points_verb", "league_rate")  # the on-air rules that also hold for texts that are not cards (the post-match recap)
+# What a red card text may say only when the card_kind fact says it.
+CARD_KIND_WORDS = {
+    "second_yellow": {"en": r"(?i)\bsecond (?:yellow|booking)|\bbooked (?:twice|again)\b|\btwo bookings\b",
+                      "fr": r"(?i)\b(?:second|deuxième) (?:carton jaune|jaune|avertissement)|\baverti (?:deux fois|une deuxième fois)|\bdouble avertissement",
+                      "es": r"(?i)\bsegunda (?:tarjeta )?amarilla|\bdoble amarilla|\bdos amarillas"},
+    "straight_red": {"en": r"(?i)\bstraight red", "fr": r"(?i)\b(?:carton )?rouge direct", "es": r"(?i)\b(?:tarjeta )?roja directa"},
+}
+# A value "if goal" after one of these words reads as where the team started from: "from 9%", "de 9 %", "del 9%".
+IF_GOAL_START = re.compile(r"(?i)\b(?:from|de|del|d['’])\s*(?:(?:un|una|the|a)\s+)?$")
+NOT_A_START = re.compile(r"(?i)\b(?:au lieu|en lugar|en vez"  # "au lieu de 24 %", "en lugar del 24%": instead of
+                         r"|été|plus|moins|près|loin|autour|sido|paso|lejos|cerca|más|menos|alrededor|away|far)\s*$")  # "auraient été de 70 %", "a un paso del 70%", "a goal away from 70%": the value itself
 
 # Words that speak of a win probability: a sentence that uses one must name a club.
 PROBABILITY_WORDS = {
@@ -293,12 +384,16 @@ COUNT_WORDS["fr"].pop("neuf")  # also "new"
 STRUCTURAL_RULES = {
     "signed_number": ("error", r"(?<![\w])[+±]\s?\d+"),  # "+24": say the direction with a verb
     "decimal_percent": ("error", r"\d+[.,]\d+\s?%"),  # "34.5%": percentages are whole numbers
+    "em_dash": ("error", EM_DASH),  # the long dash: a comma, a colon or a full stop instead
     "headline_starts_with_number": ("error", r"^\W*\d"),  # "52' ...": the graphic already shows the minute
     "minute_in_headline": ("warning", r"(?i)\d+(?:\+\d+)?\s?['’′]|\bmin(?:ute|uto)?s?\b"),
     "probability_without_team": ("error", None),  # a probability word in a sentence that names no club
     "probability_number_without_team": ("error", None),  # a number from a <team>_wp_ field in a sentence without that team
     "points_unit_missing": ("error", None),  # a number from a _pts field not followed by the word for points
     "points_not_from_pts_field": ("error", None),  # "54 points" where 54 is a percentage
+    "if_goal_as_start": ("error", None),  # "from 9%" where 9% is what the chance would have been had the shot gone in
+    "card_kind_unbacked": ("error", None),  # "second yellow" or "straight red" when the card_kind fact does not say so
+    "player_not_named": ("error", None),  # a red card whose headline and why do not name the player (card texts only)
     "count_word_unbacked": ("warning", None),  # "fifth" when no whole-number fact is 5
     "too_long": ("warning", None),  # headline over 8 words or why over 25
 }
@@ -339,19 +434,24 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
         for p in ([pattern.replace("{team}", re.escape(t)) for t in teams] if "{team}" in pattern else [pattern]):
             for m in re.finditer(p, body):
                 add(rule, m.group(0), severity)
-    for rule in ("signed_number", "decimal_percent"):
+    for rule in ("signed_number", "decimal_percent", "em_dash"):
         for m in re.finditer(STRUCTURAL_RULES[rule][1], body):
             add(rule, m.group(0))
     for rule in ("headline_starts_with_number", "minute_in_headline"):
         found = re.search(STRUCTURAL_RULES[rule][1], headline)
         if found:
             add(rule, headline)
-    if len(headline.split()) > HEADLINE_MAX_WORDS or len(why.split()) > WHY_MAX_WORDS:
-        add("too_long", f"{len(headline.split())} + {len(why.split())} words")
+    if word_count(headline) > HEADLINE_MAX_WORDS or word_count(why) > WHY_MAX_WORDS:
+        add("too_long", f"{word_count(headline)} + {word_count(why)} words")
     counts = {v for v in facts.values() if isinstance(v, int) and not isinstance(v, bool)}
     for w in re.findall(r"[\wÀ-ÿ]+", body.lower()):
         if w in COUNT_WORDS.get(lang, {}) and COUNT_WORDS[lang][w] not in counts:
             add("count_word_unbacked", w)
+    if "player_sent_off" in facts:
+        for kind, words in CARD_KIND_WORDS.items():
+            found = re.search(words[lang], body) if lang in words else None
+            if found and facts.get("card_kind") != kind:
+                add("card_kind_unbacked", found.group(0))
 
     wp_teams = {}  # value -> clubs whose win probability has that value
     pts_values = set()
@@ -383,10 +483,26 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
             near = [any(point.match(w) for w in re.findall(r"[\wÀ-ÿ]+", body[end:end + 40])[:3]) for end in ends]
             if ends and not any(near):
                 add("points_unit_missing", f"{value:g}")
+    goal_values = {float(c["value"]) for c in claims if "_if_goal" in str(c.get("source_field", ""))}
+    goal_values -= {float(c["value"]) for c in claims if "_if_goal" not in str(c.get("source_field", ""))}  # a value two fields share is not attributed
+    for value, start, _ in number_spans(body):
+        before = body[max(0, start - 40):start]
+        found = IF_GOAL_START.search(before) if value in goal_values else None
+        if found and not NOT_A_START.search(before[:found.start()]):
+            add("if_goal_as_start", (before[found.start():] + body[start:start + 4]).strip())
 
     errors = [{"rule": r, "text": t} for s, r, t in issues if s == "error"]
     warnings = [{"rule": r, "text": t} for s, r, t in issues if s == "warning"]
     return errors, warnings
+
+
+def air_issues(text: str, lang: str) -> list[dict]:
+    """The on-air rules that also hold for a text that is not a card (the post-match recap): `AIR_RULES` of the language, and no em dash."""
+    body = normalise(text)
+    found = [{"rule": rule, "text": m.group(0)} for rule, _, pattern in LANGUAGE_RULES.get(lang, []) if rule in AIR_RULES for m in re.finditer(pattern, body)]
+    if EM_DASH in body:
+        found.append({"rule": "em_dash", "text": EM_DASH})
+    return found
 
 
 def check_numbers(body: str, claims: list, facts: dict) -> dict:
@@ -423,6 +539,9 @@ def verify(text: str, languages: list[str], facts: dict, style: bool = True) -> 
         claims = d.get("claims") if isinstance(d.get("claims"), list) else []
         nums = check_numbers(body, claims, facts)
         errors, warnings = style_issues(str(d.get("headline", "")), str(d.get("why", "")), str(d.get("lang")), nums["good"], facts) if style else ([], [])
+        sent_off = str(facts.get("player_sent_off") or "")
+        if style and sent_off and not any(n in body for n in (sent_off, sent_off.split()[-1])):
+            errors.append({"rule": "player_not_named", "text": sent_off})
         entry = {
             "lang": d.get("lang"),
             "keys_ok": all(isinstance(d.get(k), str) for k in ("headline", "why", "lang")),
@@ -430,7 +549,7 @@ def verify(text: str, languages: list[str], facts: dict, style: bool = True) -> 
             "unclaimed_numbers": nums["unclaimed_numbers"],
             "wrong_unit": nums["wrong_unit"],
             "unknown_names": sorted(set(names_ok(str(d.get("headline", "")), facts)) | set(names_ok(str(d.get("why", "")), facts))),  # each starts a sentence
-            "length_ok": len(str(d.get("headline", "")).split()) <= HEADLINE_MAX_WORDS and len(str(d.get("why", "")).split()) <= WHY_MAX_WORDS,
+            "length_ok": word_count(str(d.get("headline", ""))) <= HEADLINE_MAX_WORDS and word_count(str(d.get("why", ""))) <= WHY_MAX_WORDS,
             "style_errors": errors,
             "style_warnings": warnings,
         }
@@ -457,8 +576,8 @@ def verify_duo(lines: Any, languages: list[str], facts: dict) -> dict:
         nums = check_numbers(text, claims, facts)
         errors, warnings = style_issues("", text, str(l.get("lang")), nums["good"], facts)
         warnings = [w for w in warnings if w["rule"] != "too_long"]
-        if len(text.split()) > DUO_LINE_MAX_WORDS:
-            warnings.append({"rule": "too_long", "text": f"{len(text.split())} words"})
+        if word_count(text) > DUO_LINE_MAX_WORDS:
+            warnings.append({"rule": "too_long", "text": f"{word_count(text)} words"})
         entry = {"lang": l.get("lang"), "speaker": l.get("speaker"), "keys_ok": isinstance(l.get("line"), str) and bool(text.strip()) and l.get("lang") in languages,
                  "bad_claims": nums["bad_claims"], "unclaimed_numbers": nums["unclaimed_numbers"], "wrong_unit": nums["wrong_unit"],
                  "unknown_names": names_ok(text, facts, ALLOWED_NAMES), "style_errors": errors, "style_warnings": warnings}
@@ -483,20 +602,30 @@ def parse_reply(text: str) -> tuple[Any, Any, bool]:
             if isinstance(obj, (dict, list)):
                 break
     if isinstance(obj, dict) and "texts" in obj:
-        return obj.get("texts"), obj.get("duo"), valid
-    return (obj if isinstance(obj, list) else []), None, valid
+        return dashless(obj.get("texts"), ("headline", "why")), dashless(obj.get("duo"), ("line",)), valid
+    return dashless(obj if isinstance(obj, list) else [], ("headline", "why")), None, valid
+
+
+def dashless(items: Any, keys: tuple[str, ...]) -> Any:
+    """The texts or duo lines of a reply with their em dashes normalised (`no_em_dash`)."""
+    if not isinstance(items, list):
+        return items
+    return [{**d, **{k: no_em_dash(d[k]) for k in keys if isinstance(d.get(k), str)}} if isinstance(d, dict) else d for d in items]
 
 
 def verify_reply(text: str, languages: list[str], facts: dict, duo: bool = False, memory: PhraseMemory | None = None, doc_id: str = "") -> tuple[list[dict], list[dict], dict]:
-    """Texts and duo of a reply, checked: the card checks, the duo checks when asked, and repetition against the rest of the match."""
+    """Texts and duo of a reply, checked: the card checks, the duo checks when asked, and repetition against the rest of the match (a repeated headline fails the texts, a repeated duo line the duo)."""
     texts_raw, duo_raw, valid = parse_reply(text)
     texts, report = verify(json.dumps(texts_raw if isinstance(texts_raw, list) else [], ensure_ascii=False), languages, facts)
     report["json_valid"] = valid and report["json_valid"]
     lines = [l for l in duo_raw if isinstance(l, dict)] if isinstance(duo_raw, list) else []
     errors, warnings = memory.issues(doc_id, texts, lines if duo else []) if memory is not None else ([], [])
     report["repetition"] = {"errors": errors, "warnings": warnings}
-    report["texts_verified"] = report["verified"] and report["json_valid"] and not errors
+    report["texts_verified"] = report["verified"] and report["json_valid"] and not [e for e in errors if e["rule"] != "repeated_line"]
     report["duo"] = verify_duo(lines, languages, facts) if duo else None
+    if duo:
+        report["duo"]["repeated_lines"] = [e for e in errors if e["rule"] == "repeated_line"]
+        report["duo"]["verified"] = report["duo"]["verified"] and not report["duo"]["repeated_lines"]
     report["verified"] = report["texts_verified"] and (report["duo"]["verified"] if duo else True)
     return texts, lines, report
 
@@ -514,7 +643,8 @@ def feedback(report: dict) -> str:
         if problems:
             lines.append(f"{e['lang']}: " + "; ".join(problems))
     for i in (report.get("repetition") or {}).get("errors", []):
-        lines.append(f"{i['lang']}: headline already used in this match: {i['text']}")
+        what = "duo line already said" if i["rule"] == "repeated_line" else "headline already used"
+        lines.append(f"{i['lang']}: {what} in this match: {i['text']}")
     duo = report.get("duo")
     if duo and not duo["verified"]:
         for lang, v in duo["languages"].items():
@@ -581,27 +711,50 @@ TEMPLATES = {
                         "Una parada de {value} puntos para el {team}: {before}% de opciones de ganar en vez del {other}%.",
                         "El {team} se aferra a su {before}% de opciones de ganar; un gol lo habría dejado en el {other}%."]},
     },
-    "red_card": {
-        "en": {"headlines": ["{player} sent off", "Red card for {player}", "{player} is shown red", "{player} has to go", "{team} down to ten"],
+    "red_card": {  # every headline names the player; "kinds" by the card_kind fact, the generic lines when the feed does not say
+        "en": {"headlines": ["{player} sent off", "Red card for {player}", "{player} is shown red", "{player} has to go"],
+               "kinds": {"second_yellow": {"headlines": ["Second yellow for {player}", "{player} off after a second yellow", "{player}: second yellow, {team} down to ten",
+                                                         "Two bookings, and {player} is off"],
+                                           "whys": ["Second yellow for {player}: {team} are down to ten and go from {before}% to {after}% to win.",
+                                                    "{team} down to ten after a second yellow: from {before}% to {after}% to win.",
+                                                    "Booked twice, {player} leaves {team} with ten, from {before}% to {after}% to win."]},
+                         "straight_red": {"headlines": ["Straight red for {player}", "{player} sees a straight red", "A straight red, and {player} is off"],
+                                          "whys": ["Straight red for {player}: {team} are down to ten and go from {before}% to {after}% to win.",
+                                                   "A straight red leaves {team} with ten: from {before}% to {after}% to win."]}},
                "whys": ["Down to ten men, {team} go from {before}% to {after}% to win.", "{team} drop from {before}% to {after}% to win with ten men.",
                         "With a man less, {team} are down to {after}% to win, from {before}%.", "The red card costs {team}: from {before}% to {after}% to win."]},
-        "fr": {"headlines": ["{player} expulsé", "Carton rouge pour {player}", "{player} doit sortir", "{team} réduit à dix", "Rouge pour {player}"],
+        "fr": {"headlines": ["{player} expulsé", "Carton rouge pour {player}", "{player} doit sortir", "Rouge pour {player}"],
+               "kinds": {"second_yellow": {"headlines": ["Second jaune pour {player}", "{player} exclu sur un second jaune", "Deuxième avertissement pour {player}",
+                                                         "{player} averti deux fois et exclu"],
+                                           "whys": ["Second jaune pour {player} : {team}, réduit à dix, passe de {before} % à {after} % de chances de gagner.",
+                                                    "{team} réduit à dix après un second jaune : de {before} % à {after} % de chances de gagner.",
+                                                    "Averti deux fois, {player} laisse {team} à dix, qui passe de {before} % à {after} % de chances de gagner."]},
+                         "straight_red": {"headlines": ["Rouge direct pour {player}", "{player} exclu sur un rouge direct", "Carton rouge direct pour {player}"],
+                                          "whys": ["Rouge direct pour {player} : {team}, réduit à dix, passe de {before} % à {after} % de chances de gagner.",
+                                                   "Un rouge direct laisse {team} à dix : de {before} % à {after} % de chances de gagner."]}},
                "whys": ["Réduit à dix, {team} passe de {before} % à {after} % de chances de gagner.", "{team} tombe de {before} % à {after} % de chances de gagner à dix contre onze.",
                         "Avec un homme de moins, {team} n'a plus que {after} % de chances de gagner, contre {before} %.", "Le carton rouge coûte cher à {team} : de {before} % à {after} % de chances de gagner."]},
-        "es": {"headlines": ["{player}, expulsado", "Roja para {player}", "{player} se va a la calle", "El {team}, con diez", "Tarjeta roja para {player}"],
+        "es": {"headlines": ["{player}, expulsado", "Roja para {player}", "{player} se va a la calle", "Tarjeta roja para {player}"],
+               "kinds": {"second_yellow": {"headlines": ["Segunda amarilla para {player}", "{player}, expulsado por doble amarilla", "Doble amarilla para {player}"],
+                                           "whys": ["Segunda amarilla para {player}: el {team}, con diez, pasa del {before}% al {after}% de opciones de ganar.",
+                                                    "El {team}, con diez tras una segunda amarilla: del {before}% al {after}% de opciones de ganar.",
+                                                    "Con dos amarillas, {player} deja al {team} con diez, que pasa del {before}% al {after}% de opciones de ganar."]},
+                         "straight_red": {"headlines": ["Roja directa para {player}", "{player}, expulsado con roja directa"],
+                                          "whys": ["Roja directa para {player}: el {team}, con diez, pasa del {before}% al {after}% de opciones de ganar.",
+                                                   "Una roja directa deja al {team} con diez: del {before}% al {after}% de opciones de ganar."]}},
                "whys": ["Con diez, el {team} pasa del {before}% al {after}% de opciones de ganar.", "El {team} cae del {before}% al {after}% de opciones de ganar con uno menos.",
                         "Con un hombre menos, al {team} le queda un {after}% de opciones de ganar, frente al {before}%.", "La roja le cuesta caro al {team}: del {before}% al {after}% de opciones de ganar."]},
     },
     "chance": {
         "en": {"headlines": ["Big chance for {team}", "{player} so close for {team}", "{player} misses a big one", "{team} go close", "{player} cannot finish"],
                "whys": ["A goal would have taken {team} from {before}% to {other}% to win.", "{team} stay on {before}% to win; that one would have put them on {other}%.",
-                        "Had it gone in, {team} would be on {other}% to win instead of {before}%.", "{team} were one finish away from {other}% to win; they stay on {before}%."]},
+                        "Had it gone in, {team} would be on {other}% to win instead of {before}%.", "One finish more, and {team} would be on {other}% to win; they stay on {before}%."]},
         "fr": {"headlines": ["Grosse occasion pour {team}", "{player} tout près", "{player} n'en profite pas", "{team} passe tout près", "Occasion manquée pour {team}"],
                "whys": ["Un but aurait fait passer {team} de {before} % à {other} % de chances de gagner.", "{team} reste à {before} % de chances de gagner ; ce but l'aurait porté à {other} %.",
-                        "S'il était entré, {team} serait à {other} % de chances de gagner au lieu de {before} %.", "{team} est passé à un geste de {other} % de chances de gagner ; il reste à {before} %."]},
+                        "S'il était entré, {team} serait à {other} % de chances de gagner au lieu de {before} %.", "Il manquait un geste à {team} pour passer à {other} % de chances de gagner ; {team} reste à {before} %."]},
         "es": {"headlines": ["Ocasión clara del {team}", "{player} rozó el gol", "{player} no acierta", "El {team} perdona", "Oportunidad perdida del {team}"],
                "whys": ["Un gol habría llevado al {team} del {before}% al {other}% de opciones de ganar.", "El {team} sigue en el {before}% de opciones de ganar; ese gol lo habría puesto en el {other}%.",
-                        "Si entraba, el {team} estaría en el {other}% de opciones de ganar en lugar del {before}%.", "El {team} se quedó a un remate del {other}% de opciones de ganar; sigue en el {before}%."]},
+                        "Si entraba, el {team} estaría en el {other}% de opciones de ganar en lugar del {before}%.", "Al {team} le faltó un remate para llegar al {other}% de opciones de ganar; sigue en el {before}%."]},
     },
 }
 
@@ -648,8 +801,33 @@ def minute_number(label: str) -> int:
     return int(found.group(0)) if found else 0
 
 
+def digits(score_line: Any) -> str | None:
+    """"3-2" from "Rovers 3-2 United"."""
+    found = re.search(r"\d+-\d+", str(score_line or ""))
+    return found.group(0) if found else None
+
+
+def conditions(card: dict, facts: dict) -> dict:
+    """The conditions of the duo lines (`duo.CONDITIONS`): "" when the line is true for this card, None to skip it."""
+    slug = card["team_name"].lower()
+    swing, value = facts.get("swing_pts"), facts.get("save_value_pts")
+    before = facts.get(f"{slug}_wp_before_pct", facts.get(f"{slug}_wp_after_save_pct"))
+    other = facts.get(f"{slug}_wp_if_goal_pct")
+    goals, team_goals = facts.get("scorer_match_goals"), facts.get("team_goals_after")
+    true = {
+        "if_home": card["team"] == "home",
+        "if_away": card["team"] == "away",
+        "if_new_scorer": goals == 1 and isinstance(team_goals, int) and team_goals >= 2,  # his first goal, not his team's: the previous one was someone else's
+        "if_tilt": isinstance(swing, int) and abs(swing) > TILT_PTS,
+        "if_small_margin": isinstance(value, int) and value < SMALL_MARGIN_PTS,
+        "if_big_margin": isinstance(value, int) and value >= SMALL_MARGIN_PTS,
+        "if_big_chance": isinstance(before, int) and isinstance(other, int) and abs(other - before) >= SMALL_MARGIN_PTS,
+    }
+    return {k: "" if true.get(k) else None for k in CONDITIONS}
+
+
 def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
-    """The placeholders of a card's templates, and the fact field behind each numeric one."""
+    """The placeholders of a card's templates, the conditions of its duo lines, and the fact field behind each numeric placeholder."""
     slug = card["team_name"].lower()
     teams = teams_in(facts)
     player = card["player"]["name"]
@@ -658,16 +836,30 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
         "team": card["team_name"], "other_team": next((t for t in teams if t != card["team_name"]), None), "scorer": facts.get("scorer"), "player": player,
         "before": facts.get(before_field), "after": facts.get(f"{slug}_wp_after_pct"), "other": facts.get(f"{slug}_wp_if_goal_pct"),
         "swing": facts.get("swing_pts"), "value": facts.get("save_value_pts"), "xg": facts.get("shot_xg_pct"), "minute": facts.get("minute"),
-        "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player),
+        "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player), "previous_scorer": facts.get("previous_scorer"),
+        "score_now": digits(facts.get("score_after")), "score_then": digits(facts.get("score_before")),
     }
     team_n, scorer_n = count_words(lang, facts.get("team_goals_after")), count_words(lang, facts.get("scorer_match_goals"))
+    several = facts.get("scorer_match_goals", 0) >= 2
     values |= {"team_nth": team_n.get("nth"), "team_nth_adj": team_n.get("nth_adj"), "team_count": team_n.get("count"),
-               "team_count_cap": team_n.get("count", "").capitalize() or None, "scorer_nth": scorer_n.get("nth") if facts.get("scorer_match_goals", 0) >= 2 else None, "scorer_count": scorer_n.get("count")}
+               "team_count_cap": team_n.get("count", "").capitalize() or None, "scorer_nth": scorer_n.get("nth") if several else None,
+               "scorer_nth_adj": scorer_n.get("nth_adj") if several else None, "scorer_count": scorer_n.get("count")}
+    values |= conditions(card, facts)
     fields = {"before": before_field, "after": f"{slug}_wp_after_pct", "other": f"{slug}_wp_if_goal_pct", "swing": "swing_pts", "value": "save_value_pts",
-              "xg": "shot_xg_pct", "minute": "minute"}
+              "xg": "shot_xg_pct", "minute": "minute", "score_now": "score_after", "score_then": "score_before"}
     return values, fields
 
 
+FRESH = {  # closes a required duo line when the match has already heard every variant: the score and the minute make it new
+    "en": {"goal": "{score_now} at {minute}.", "other": "Still {score_then} at {minute}."},
+    "fr": {"goal": "{score_now} à la {minute}.", "other": "Toujours {score_then} à la {minute}."},
+    "es": {"goal": "{score_now} en el {minute}.", "other": "Sigue el {score_then} en el {minute}."},
+}
+FRESH_INSIGHT = {  # the same for an insight's last line once its kind and the storyline have no line left: the minute makes it new
+    "en": ["Remember the minute: {minute}.", "Write down the minute: {minute}."],
+    "fr": fr_typography(["Retenez la minute : {minute}.", "Notez la minute : {minute}."]),
+    "es": ["Recuerden el minuto: el {minute}.", "Apunten el minuto: el {minute}."],
+}
 DEMOTED = 500  # a variant the control room turned down repeatedly: after every other one, before a repeat
 
 
@@ -707,8 +899,8 @@ class _Picker:
         self.headlines.add(self.memory.key(best[1][0]))
         return best[1]
 
-    def line(self, pool: list[str], values: dict, fields: dict, slot: str, optional: bool = False) -> tuple[str, list[dict]] | None:
-        """The least used variant; an optional line already said word for word in the match is dropped instead."""
+    def line(self, pool: list[str], values: dict, fields: dict, slot: str, optional: bool = False, fresh: tuple | list = ()) -> tuple[str, list[dict]] | None:
+        """The least used variant. When the match has already heard every variant word for word, an optional line is dropped and a required one is closed with a fresh fact (`fresh`, see FRESH)."""
         best = None
         for template in rotated(pool, self.doc_id, self.lang, slot):
             filled = fill(template, values, fields)
@@ -718,12 +910,30 @@ class _Picker:
             score = 1000 * repeat + 10 * self.openings.count(self.memory.opening(filled[0])) + len(self.memory.ngrams(filled[0]) & self.phrases) + self.penalty(filled[0])
             if best is None or score < best[0]:
                 best = (score, filled)
+        if best is not None and best[0] >= 1000 and not optional:
+            for suffix in fresh:
+                extra = fill(suffix, values, fields)
+                text = f"{best[1][0]} {extra[0]}" if extra else None
+                if text and self.memory.key(text) not in self.said:
+                    best = (best[0] - 1000, (text, best[1][1] + extra[1]))
+                    break
         if best is None or (optional and best[0] >= 1000):
             return None
-        self.openings.append(self.memory.opening(best[1][0]))
-        self.phrases |= self.memory.ngrams(best[1][0])
-        self.said.add(self.memory.key(best[1][0]))
-        return best[1]
+        return self._said(best[1])
+
+    def first(self, pool: list[str], values: dict, fields: dict) -> tuple[str, list[dict]] | None:
+        """The first variant, in the order given, that the match has not heard word for word (the plain phrasing first, the others for a repeat); None when every one was said."""
+        for template in pool:
+            filled = fill(template, values, fields)
+            if filled and self.memory.key(filled[0]) not in self.said:
+                return self._said(filled)
+        return None
+
+    def _said(self, filled: tuple[str, list[dict]]) -> tuple[str, list[dict]]:
+        self.openings.append(self.memory.opening(filled[0]))
+        self.phrases |= self.memory.ngrams(filled[0])
+        self.said.add(self.memory.key(filled[0]))
+        return filled
 
     def penalty(self, text: str) -> int:
         return DEMOTED if self.demoted and skeleton(text, self.facts) in self.demoted else 0
@@ -760,12 +970,17 @@ class TemplateWriter:
             pick = _Picker(memory, card["id"], lang, facts, self.demoted)
             if facts.get("stake") == "low":
                 t = LOW_STAKE_TEMPLATES[lang]
-                pools = [t["headlines"]]
+                pools, whys = [t["headlines"]], t["whys"]
             else:
                 t = TEMPLATES[card["moment"]][lang]
-                pools = [t.get("situations", {}).get(facts.get("goal_situation"), []), t["headlines"]]
+                kind = t.get("kinds", {}).get(facts.get("card_kind"))
+                if kind:  # how the player was sent off is told: the headlines of that kind only, its whys first
+                    pools, whys = [kind["headlines"]], kind["whys"] + t["whys"]
+                else:
+                    pools, whys = [t.get("situations", {}).get(facts.get("goal_situation"), []), t["headlines"]], t["whys"]
             headline, h_claims = pick.headline([p for p in pools if p], values, fields, "headline")
-            why, w_claims = pick.line(t["whys"], values, fields, "why")
+            pick.openings.append(pick.memory.opening(headline))  # neither the why nor the duo starts like the headline
+            why, w_claims = pick.line(whys, values, fields, "why")
             claims = [dict(c) for c in {tuple(sorted(c.items())): c for c in h_claims + w_claims}.values()]
             texts.append({"headline": headline, "why": why, "lang": lang, "claims": claims})
             if duo:
@@ -773,6 +988,8 @@ class TemplateWriter:
         return json.dumps({"texts": texts, "duo": lines} if duo else texts, ensure_ascii=False)
 
     def _duo(self, card: dict, facts: dict, lang: str, values: dict, fields: dict, pick: _Picker) -> list[dict]:
+        if facts.get("previous_scorer"):  # the feed credited the goal to another player: the duo tells the correction, not the goal again
+            return self._reassigned(lang, values, fields, pick)
         kind = "goal_low" if facts.get("stake") == "low" else card["moment"]
         slots = LINES[kind][lang]
         seed = stable(card["id"], card.get("version", 1), lang, "n")
@@ -783,19 +1000,27 @@ class TemplateWriter:
         if kind == "goal_low":
             n = min(n, 3)
         more = slots.get("eye_more", {}).get(story_key(facts) if kind.startswith("goal") else "any", []) or slots.get("eye_more", {}).get("any", [])
-        heart = slots["heart"].get(facts.get("goal_situation"), []) if isinstance(slots["heart"], dict) else slots["heart"]
+        heart = slots["heart"]
+        if isinstance(heart, dict):  # a goal by its situation, a red card by how the player was sent off
+            heart = heart.get(facts.get("goal_situation") or facts.get("card_kind")) or heart.get("any", [])
+        if kind.startswith("goal") and facts.get("score_after") in pick.memory.ruled_out:
+            heart = LINES["goal"][lang]["again"]  # VAR took a goal at this score away earlier: this one counts
+        fresh = [FRESH[lang]["goal" if kind.startswith("goal") else "other"]]
         plan = [(HEART, heart, "heart"), (EYE, slots["eye"], "eye"), (HEART, slots["heart_back"], "heart_back"), (EYE, more, "eye_more")]
-        if kind == "save" and seed % 2 == 0 and n >= 3:  # the old goalkeeper speaks first
-            plan = [(EYE, slots["eye_open"], "eye_open"), (HEART, heart, "heart"), (EYE, slots["eye"], "eye"), (HEART, slots["heart_back"], "heart_back")]
+        lines = []
+        if kind == "save" and seed % 2 == 0 and n >= 3:  # the old goalkeeper speaks first, if the match has not heard it yet
+            opener = pick.line(slots["eye_open"], values, fields, "eye_open", optional=True)
+            if opener:
+                lines.append({"speaker": EYE, "lang": lang, "line": opener[0], "claims": opener[1]})
+                plan = plan[:3]
         if kind.startswith("goal") and isinstance(facts.get("scorer_match_goals"), int) and facts["scorer_match_goals"] >= 3 and more:
             n = max(n, 4)  # the story of the scorer is worth a line
-        lines = []
         for speaker, pool, slot in plan:
             if len(lines) >= n:
                 break
             if not pool:
                 break
-            filled = pick.line(pool, values, fields, slot, optional=slot in ("heart_back", "eye_more"))
+            filled = pick.line(pool, values, fields, slot, optional=slot in ("heart_back", "eye_more"), fresh=fresh)
             if not filled:
                 break
             text, claims = filled
@@ -809,6 +1034,16 @@ class TemplateWriter:
             lines = lines[:2] + season
         return lines
 
+    @staticmethod
+    def _reassigned(lang: str, values: dict, fields: dict, pick: _Picker) -> list[dict]:
+        slots, fresh = LINES["reassigned"][lang], [FRESH[lang]["goal"]]
+        out = []
+        for speaker, slot in ((HEART, "heart"), (EYE, "eye")):
+            filled = pick.line(slots[slot], values, fields, slot, fresh=fresh)
+            if filled:
+                out.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
+        return out
+
     def ruling(self, card: dict, facts: dict, languages: list[str], memory: PhraseMemory | None = None) -> list[dict]:
         """What the duo says when VAR rules a goal out."""
         out = []
@@ -818,56 +1053,66 @@ class TemplateWriter:
             pick = _Picker(memory, card["id"] + "#ruling", lang, facts, self.demoted)
             reason = facts.get("ruled_out_reason", "other")
             key = f"offside_{facts['offside_call']}" if reason == "offside" and facts.get("offside_call") else reason if reason in slots["eye"] else "other"
-            heart = pick.line(slots["heart"], values, fields, "heart")
-            eye = pick.line(slots["eye"][key], values, fields, "eye")
+            fresh = [FRESH[lang]["other"]]  # the score the goal would have made does not stand
+            heart = pick.line(slots["heart"], values, fields, "heart", fresh=fresh)
+            eye = pick.line(slots["eye"][key], values, fields, "eye", fresh=fresh)
             if key == "offside_tight" and eye:
                 tic = PERSONAS[EYE].voices[lang].tics[0]  # "Look at the line."
                 if tic not in pick.tics:
                     eye = (f"{tic} {eye[0]}", eye[1])
-            back = pick.line(slots["heart_back"].get(key) or slots["heart_back"]["any"], values, fields, "heart_back")
+            back = pick.line(slots["heart_back"].get(key) or slots["heart_back"]["any"], values, fields, "heart_back", optional=True)
             out += [{"speaker": s, "lang": lang, "line": f[0], "claims": f[1]} for s, f in ((HEART, heart), (EYE, eye), (HEART, back)) if f]
         return out
 
     def write_insight(self, doc: dict, facts: dict, languages: list[str], memory: PhraseMemory | None = None, duo: bool = False) -> str:
-        """An insight or the storyline: the document's own texts when it brings verified ones, else a line true for its kind."""
+        """An insight or the storyline: the document's own texts when it brings verified ones, else its family's texts, else a line true for its kind; the duo lines of its family, else of its kind."""
         kind = doc.get("kind") or ("storyline" if doc.get("type") == "storyline" else "record")
         subject = next((str(facts[k]) for k in ("player", "player_name", "scorer", "subject", "team", "club", "team_name") if isinstance(facts.get(k), str)), None)
         own = {t.get("lang"): t for t in doc.get("texts") or [] if isinstance(t, dict)}
+        air, _ = on_air(facts, {})  # a text of the document's own is kept only if it says nothing off air
         texts, lines = [], []
         for lang in languages:
             pick = _Picker(memory, doc["id"], lang, facts, self.demoted)
-            values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team")}
+            values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team"), "minute": facts.get("minute")}
             mine = own.get(lang)
-            if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], facts)[1]["verified"] and memory_key_free(pick, mine):
-                texts.append(mine)
-                if duo and (own_lines := insight_fact_text(doc, facts, lang, pick, duo)):
-                    lines += own_lines[1]  # the document's text, the family's duo lines
-                    continue
-            elif fact_text := insight_fact_text(doc, facts, lang, pick, duo):
-                texts.append(fact_text[0])
-                lines += fact_text[1]
-                continue
+            if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], air)[1]["verified"] and memory_key_free(pick, mine):
+                texts.append(mine)  # the document's text, the family's duo lines
+                fact = insight_fact_text(doc, facts, lang, pick, duo) if duo else None
             else:
-                pairs = INSIGHT_TEMPLATES[lang].get(kind) or INSIGHT_TEMPLATES[lang]["storyline"]
-                chosen = None
-                for headline, why in rotated(pairs, doc["id"], lang):
-                    h, w = fill(headline, values, {}), fill(why, values, {})
-                    if h and w and pick.memory.key(h[0]) not in pick.headlines:
-                        chosen = (h[0], w[0])
-                        break
-                if chosen is None:
-                    chosen = (fill(pairs[-1][0], values, {}) or (pairs[-1][0], []))[0], (fill(pairs[-1][1], values, {}) or (pairs[-1][1], []))[0]
-                texts.append({"headline": chosen[0], "why": chosen[1], "lang": lang, "claims": []})
+                fact = insight_fact_text(doc, facts, lang, pick, duo)
+                texts.append(fact[0] if fact else self._kind_text(doc, kind, lang, values, pick))
             if duo:
-                slots = LINES["insight"][lang]
-                for speaker, pool, slot in ((HEART, slots["heart"].get(kind, []), "heart"), (EYE, slots["eye"].get(kind, []), "eye")):
-                    filled = pick.line(pool, values, {}, slot) or pick.line(slots[slot]["storyline"], values, {}, slot)
-                    lines.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
+                lines += (fact[1] if fact else None) or self._kind_lines(kind, lang, values, pick)
         return json.dumps({"texts": texts, "duo": lines} if duo else texts, ensure_ascii=False)
 
+    @staticmethod
+    def _kind_text(doc: dict, kind: str, lang: str, values: dict, pick: _Picker) -> dict:
+        """A headline and why true for the kind of fact, with no number."""
+        pairs = INSIGHT_TEMPLATES[lang].get(kind) or INSIGHT_TEMPLATES[lang]["storyline"]
+        chosen = None
+        for headline, why in rotated(pairs, doc["id"], lang):
+            h, w = fill(headline, values, {}), fill(why, values, {})
+            if h and w and pick.memory.key(h[0]) not in pick.headlines:
+                chosen = (h[0], w[0])
+                break
+        if chosen is None:
+            chosen = (fill(pairs[-1][0], values, {}) or (pairs[-1][0], []))[0], (fill(pairs[-1][1], values, {}) or (pairs[-1][1], []))[0]
+        return {"headline": chosen[0], "why": chosen[1], "lang": lang, "claims": []}
 
-def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: bool) -> tuple[dict, list[dict]] | None:
-    """The text (and duo lines) of an insight from its family's templates, with its numbers claimed; None when no family covers it or a line cannot be filled."""
+    @staticmethod
+    def _kind_lines(kind: str, lang: str, values: dict, pick: _Picker) -> list[dict]:
+        """Two duo lines true for the kind of fact, with no number; the storyline's lines when the kind's were all said, closed with the minute (`FRESH_INSIGHT`) when those were too."""
+        slots = LINES["insight"][lang]
+        out = []
+        for speaker, slot in ((HEART, "heart"), (EYE, "eye")):
+            filled = (pick.line(slots[slot].get(kind, []), values, {}, slot, optional=True) or pick.line(slots[slot]["storyline"], values, {}, slot, optional=True)
+                      or pick.line(slots[slot]["storyline"], values, {"minute": "minute"}, slot, fresh=FRESH_INSIGHT[lang]))
+            out.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
+        return out
+
+
+def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: bool) -> tuple[dict, list[dict] | None] | None:
+    """The text and duo lines of an insight from its family's templates, with its numbers claimed: None when no family covers it or its text cannot be filled; no lines (None) when the match has already heard every line the family has for it."""
     from worker import insight_texts as it
 
     fam = it.family(doc)
@@ -875,52 +1120,68 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
         return None
     t = it.T[fam][lang]
     vals, fields = it.values(facts, lang)
+    stat = "top_fact" in facts  # the stat of the match
 
     def pool(templates: list[str]) -> list[str]:
         return [it.clean(x) for x in templates if it.usable(x, facts)]
 
-    headline = pick.headline([pool(it.part(t, "headlines", facts))], vals, fields, "headline")
+    heads = pool(it.part(t, "headlines", facts))
+    if stat:
+        heads = [h for h in heads if ":" not in h] or heads  # after its own prefix, a second colon reads badly
+    headline = pick.headline([heads], vals, fields, "headline")
     why = pick.line(pool(it.part(t, "whys", facts)), vals, fields, "why")
     if not headline or not why:
         return None
     text, claims = headline[0], headline[1]
     body, body_claims = why
-    if "top_fact" in facts:  # the stat of the match
+    if stat:
         names = {w for v in facts.values() if isinstance(v, str) for w in v.split()}
         text = it.STAT_PREFIX[lang] + (text if text.split()[0] in names else text[:1].lower() + text[1:])
         extra = fill(it.STAT_WHY[lang], vals, fields)
         if extra:
             body, body_claims = body + extra[0], body_claims + extra[1]
     out = {"headline": text, "why": body, "lang": lang, "claims": claims + body_claims}
-    lines = []
-    if duo:
-        heart = pick.line(pool(it.part(t, "heart", facts)), vals, fields, "heart")
-        eye = pick.line(pool(it.part(t, "eye", facts)), vals, fields, "eye")
-        if not heart or not eye:
-            return None
-        lines = [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]
-    return out, lines
+    if not duo:
+        return out, []
+    hearts = it.STAT_HEART.get(fam, it.STAT_HEART["any"])[lang] if stat else it.part(t, "heart", facts)
+    heart = pick.line(pool(hearts), vals, fields, "heart", optional=True)
+    eye = pick.line(pool(it.part(t, "eye", facts)), vals, fields, "eye", optional=True)
+    if not heart or not eye:
+        return out, None
+    return out, [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]
 
 
 SEASON_LINES = {  # the duo on what a goal does to the table: Wren asks, Joss answers with the rank and the relegation chance if the score holds
-    "en": {"ask": ["And the table, Joss?", "What does it do to the table, Joss?"],
-           "leaves": "If it stays {score}, {club} climb out of the drop zone, up to {rank_ord}.", "enters": "If it stays {score}, {club} drop into the drop zone, down to {rank_ord}.",
-           "up": "If it stays {score}, {club} go up to {rank_ord}, and their chance of going down falls to {chance}%.",
-           "down": "If it stays {score}, {club} slip to {rank_ord}, and their chance of going down rises to {chance}%."},
-    "fr": {"ask": ["Et au classement, Joss ?", "Qu'est-ce que ça change au classement, Joss ?"],
-           "leaves": "Si ça reste {score}, {club} sort de la zone rouge et remonte {rank_ord}.", "enters": "Si ça reste {score}, {club} tombe dans la zone rouge, {rank_ord}.",
-           "up": "Si ça reste {score}, {club} remonte {rank_ord}, et son risque de descente tombe à {chance} %.",
-           "down": "Si ça reste {score}, {club} recule {rank_ord}, et son risque de descente monte à {chance} %."},
-    "es": {"ask": ["¿Y en la tabla, Joss?", "¿Qué cambia en la tabla, Joss?"],
-           "leaves": "Si se mantiene el {score}, el {club} sale del descenso y sube al {rank_ord} puesto.", "enters": "Si se mantiene el {score}, el {club} cae al descenso, {rank_ord}.",
-           "up": "Si se mantiene el {score}, el {club} sube al {rank_ord} puesto, y su riesgo de descenso baja al {chance}%.",
-           "down": "Si se mantiene el {score}, el {club} baja al {rank_ord} puesto, y su riesgo de descenso sube al {chance}%."},
+    "en": {"ask": ["And the table, Joss?", "What does it do to the table, Joss?", "How does the table look now, Joss?", "Joss, what about the table?",
+                   "And in the standings, Joss?", "What does {score} do to the table, Joss?"],
+           "leaves": ["If it stays {score}, {club} climb out of the drop zone, up to {rank_ord}.", "If it stays {score}, {club} are out of the drop zone and up to {rank_ord}."],
+           "enters": ["If it stays {score}, {club} drop into the drop zone, down to {rank_ord}.", "If it stays {score}, {club} are in the drop zone, down in {rank_ord}."],
+           "up": ["If it stays {score}, {club} go up to {rank_ord}, and their chance of going down falls to {chance}%.",
+                  "If it stays {score}, {club} rise to {rank_ord}, with a {chance}% chance of going down."],
+           "down": ["If it stays {score}, {club} slip to {rank_ord}, and their chance of going down rises to {chance}%.",
+                    "If it stays {score}, {club} fall to {rank_ord}, with a {chance}% chance of going down."]},
+    "fr": {"ask": ["Et au classement, Joss ?", "Qu'est-ce que ça change au classement, Joss ?", "Et le classement, Joss, il dit quoi ?", "Joss, et le classement ?",
+                   "Où en est-on au classement, Joss ?", "Que change ce {score} au classement, Joss ?"],
+           "leaves": ["Si ça reste {score}, {club} sort de la zone rouge et remonte {rank_ord}.", "Si ça reste {score}, {club} quitte la zone rouge, {rank_ord}."],
+           "enters": ["Si ça reste {score}, {club} tombe dans la zone rouge, {rank_ord}.", "Si ça reste {score}, {club} plonge dans la zone rouge, {rank_ord}."],
+           "up": ["Si ça reste {score}, {club} remonte {rank_ord}, et son risque de descente tombe à {chance} %.",
+                  "Si ça reste {score}, {club} grimpe {rank_ord}, avec {chance} % de risque de descente."],
+           "down": ["Si ça reste {score}, {club} recule {rank_ord}, et son risque de descente monte à {chance} %.",
+                    "Si ça reste {score}, {club} glisse {rank_ord}, avec {chance} % de risque de descente."]},
+    "es": {"ask": ["¿Y en la tabla, Joss?", "¿Qué cambia en la tabla, Joss?", "¿Cómo queda la tabla, Joss?", "Joss, ¿y la clasificación?",
+                   "¿Y la clasificación, Joss?", "¿Qué hace este {score} en la tabla, Joss?"],
+           "leaves": ["Si se mantiene el {score}, el {club} sale del descenso y sube al {rank_ord} puesto.", "Si se mantiene el {score}, el {club} abandona el descenso: {rank_ord}."],
+           "enters": ["Si se mantiene el {score}, el {club} cae al descenso, {rank_ord}.", "Si se mantiene el {score}, el {club} se mete en el descenso: {rank_ord}."],
+           "up": ["Si se mantiene el {score}, el {club} sube al {rank_ord} puesto, y su riesgo de descenso baja al {chance}%.",
+                  "Si se mantiene el {score}, el {club} escala al {rank_ord} puesto, con un {chance}% de riesgo de descenso."],
+           "down": ["Si se mantiene el {score}, el {club} baja al {rank_ord} puesto, y su riesgo de descenso sube al {chance}%.",
+                    "Si se mantiene el {score}, el {club} cae al {rank_ord} puesto, con un {chance}% de riesgo de descenso."]},
 }
 SEASON_LINES = {lang: fr_typography(v) if lang == "fr" else v for lang, v in SEASON_LINES.items()}
 
 
 def season_lines(card: dict, facts: dict, lang: str, pick: _Picker) -> list[dict] | None:
-    """Two duo lines on the table when a goal changes it: a club entering or leaving the drop zone first, else the scoring club moving two places or more."""
+    """Two duo lines on the table when a goal changes it: a club entering or leaving the drop zone first, else the scoring club moving two places or more. None when the match has already heard both lines word for word."""
     from worker.insight_texts import Ord
 
     score_field = "season_score_now"
@@ -947,8 +1208,8 @@ def season_lines(card: dict, facts: dict, lang: str, pick: _Picker) -> list[dict
     rank = facts[f"season_{c}_rank_if_score_holds"]
     values = {"score": score, "club": club, "rank_ord": Ord(rank, lang), "chance": facts.get(f"season_{c}_relegation_chance_if_score_holds_pct")}
     fields = {"score": score_field, "rank_ord": f"season_{c}_rank_if_score_holds", "chance": f"season_{c}_relegation_chance_if_score_holds_pct"}
-    answer = fill(SEASON_LINES[lang][move], values, fields)
-    ask = pick.line(SEASON_LINES[lang]["ask"], {}, {}, "season_ask")
+    answer = pick.first(SEASON_LINES[lang][move], values, fields)  # the plain answer, the second one when a goal VAR ruled out already gave it
+    ask = pick.line(SEASON_LINES[lang]["ask"], values, fields, "season_ask", optional=True) if answer else None
     if not answer or not ask:
         return None
     return [{"speaker": HEART, "lang": lang, "line": ask[0], "claims": ask[1]}, {"speaker": EYE, "lang": lang, "line": answer[0], "claims": answer[1]}]
@@ -1045,6 +1306,7 @@ async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list
     ask_duo = duo and accepts(writer, "duo")
     if memory is not None:
         memory.learn_names(facts)
+        memory.begin(doc["id"], doc.get("version", 1))  # a new version is checked against the lines of the last one
     if not isinstance(writer, TemplateWriter):
         for _ in range(min(2, calls_left)):
             attempts += 1
@@ -1076,7 +1338,7 @@ async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list
         lines = lines if lines is not None else fallback_lines
     _, _, report = verify_reply(json.dumps({"texts": texts, "duo": lines or []}, ensure_ascii=False), languages, facts, duo=duo, memory=memory, doc_id=doc["id"])
     if memory is not None:
-        memory.record(doc["id"], texts, lines or [], facts)
+        memory.record(doc["id"], texts, lines or [], facts, version=doc.get("version", 1))
     return Draft(doc["id"], doc.get("version", 1), name, attempts, texts, report, sorted(MACHINE_TRANSLATED & set(languages)), lines or [], duo_name)
 
 
@@ -1090,17 +1352,20 @@ async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] 
 
 async def draft_insight(doc: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2, memory: PhraseMemory | None = None, duo: bool = False,
                         preferences: str | None = None, demoted=None) -> Draft:
-    """Writes and verifies an insight or the storyline, through the same path as a card."""
+    """Writes and verifies an insight or the storyline, through the same path as a card. The model and the Verifier get the on-air facts only (`on_air`); the templates read every fact to know which lines are true (a feat seen at least once a season is told without the rate)."""
     facts, meanings = insight_facts(doc, teams)
-    return await _draft(doc, facts, meanings, writer, languages, calls_left, memory, duo,
+    air, air_meanings = on_air(facts, meanings)
+    return await _draft(doc, air, air_meanings, writer, languages, calls_left, memory, duo,
                         lambda mem: TemplateWriter(demoted).write_insight(doc, facts, languages, memory=mem, duo=duo), preferences)
 
 
 def ruling_duo(card: dict, teams: dict[str, str], languages: list[str] = list(LANGUAGES), memory: PhraseMemory | None = None) -> tuple[list[dict], dict]:
-    """The duo's reaction when VAR rules a goal out (templates only: no model call for a retraction), checked like any duo."""
+    """The duo's reaction when VAR rules a goal out (templates only: no model call for a retraction), checked like any duo. The memory keeps the score the goal would have made: the next goal at that score is the one that counts."""
     facts, _ = ruling_facts(card, teams)
     lines = TemplateWriter().ruling(card, facts, languages, memory)
     report = verify_duo(lines, languages, facts)
-    if memory is not None and report["verified"]:
-        memory.record(card["id"] + "#ruling", [], lines, facts)
+    if memory is not None:
+        memory.mark_ruled_out(facts.get("score_after"))
+        if report["verified"]:
+            memory.record(card["id"] + "#ruling", [], lines, facts)
     return (lines if report["verified"] else []), report
