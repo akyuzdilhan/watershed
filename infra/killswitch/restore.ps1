@@ -16,8 +16,9 @@ param(
     [string] $AppResourceGroup = 'rg-watershed-dev',
     [string] $FoundryResourceGroup = 'rg-watershed-foundry',
     [string] $FoundryAccount = 'watershed-foundry-da',
+    # gpt-5.4-nano was raised to capacity 50 (50k tokens, 50 requests per minute) on 25/10/2026; restoring it at 20 would lower it again.
     [object[]] $Deployments = @(
-        @{ name = 'gpt-5.4-nano'; model = 'gpt-5.4-nano'; version = '2026-03-17'; sku = 'GlobalStandard'; capacity = 20 },
+        @{ name = 'gpt-5.4-nano'; model = 'gpt-5.4-nano'; version = '2026-03-17'; sku = 'GlobalStandard'; capacity = 50 },
         @{ name = 'gpt-5-mini'; model = 'gpt-5-mini'; version = '2025-08-07'; sku = 'GlobalStandard'; capacity = 20 }
     ),
     [switch] $DryRun
