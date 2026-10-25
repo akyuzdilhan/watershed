@@ -1298,6 +1298,7 @@ async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list
     ask_duo = duo and accepts(writer, "duo")
     if memory is not None:
         memory.learn_names(facts)
+        memory.begin(doc["id"], doc.get("version", 1))  # a new version is checked against the lines of the last one
     if not isinstance(writer, TemplateWriter):
         for _ in range(min(2, calls_left)):
             attempts += 1

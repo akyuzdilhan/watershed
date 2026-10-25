@@ -709,6 +709,70 @@ def test_an_identical_duo_line_fails_and_a_new_version_keeps_what_the_old_one_sa
     assert memory.issues("a", [], [other])[0] == []  # a retry of version 2 is not a repeat
 
 
+def test_a_new_version_is_drafted_against_the_lines_of_the_last_one():
+    """The real order: version 1 is drafted and recorded, then version 2 is drafted (a card rewritten, the same goal). None of its lines is one the commentary team was already given."""
+    memory = PhraseMemory()
+    card = make_card()
+    first = asyncio.run(draft(card, TEAMS, TemplateWriter(), LANGS, memory=memory, duo=True))
+    second = asyncio.run(draft(dict(card, version=2), TEAMS, TemplateWriter(), LANGS, memory=memory, duo=True))
+    assert first.report["verified"] and second.report["verified"] and second.version == 2
+    said = {(l["lang"], PhraseMemory.key(l["line"])) for l in first.duo}
+    assert not [l["line"] for l in second.duo if (l["lang"], PhraseMemory.key(l["line"])) in said]
+    third = asyncio.run(draft(dict(card, version=2), TEAMS, TemplateWriter(), LANGS, memory=memory, duo=True))  # version 2 again: a retry, not a new version
+    assert third.report["verified"] and third.duo == second.duo
+
+
+def test_a_model_that_proposes_the_lines_of_the_last_version_again_is_refused():
+    memory = PhraseMemory()
+    asyncio.run(draft(make_card(), TEAMS, FakeWriter([reply()]), ["en"], memory=memory, duo=True))
+    writer = FakeWriter([reply(), reply()])
+    d = asyncio.run(draft(dict(make_card(), version=2), TEAMS, writer, ["en"], memory=memory, duo=True))
+    assert d.writer == "fake" and d.duo_writer == "template" and d.report["verified"] and "duo line already said" in writer.calls[1]["note"]
+    old = {PhraseMemory.key(l["line"]) for l in json.loads(reply())["duo"]}
+    assert not [l["line"] for l in d.duo if PhraseMemory.key(l["line"]) in old]
+
+
+def test_insights_back_after_a_goal_ruled_out_get_lines_of_their_own():
+    """The facts a goal ruled out took away come back as version 2 when the next goal restores them, as in the demo: the same documents, drafted again after their first version."""
+    desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
+    docs = match_insights()
+    said = [l for doc in docs for l in desk.write_insight(doc, TEAMS)["duo"]]
+    for doc in docs[:5]:
+        doc["version"] = 2
+        again = desk.write_insight(doc, TEAMS)
+        assert again["verification"]["verified"] and again["duo"], doc["id"]
+        said += again["duo"]
+    for lang in LANGS:
+        lines = [PhraseMemory.key(l["line"]) for l in said if l["lang"] == lang]
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+
+
+class EveryVersion(MemorySink):
+    """Keeps the duo of every version of a card, not only the last one."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.duos: dict[tuple[str, int], list[dict]] = {}
+
+    def card(self, card: dict) -> None:
+        super().card(card)
+        if card.get("duo"):
+            self.duos[(card["id"], card.get("version", 1))] = card["duo"] + card.get("duo_ruling", [])
+
+
+def test_no_duo_line_repeats_across_the_versions_of_the_demo_cards():
+    stream, _ = generate_match(7, "demo")
+    sink = EveryVersion()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    assert [key for key in sink.duos if key[1] > 1]  # the goal credited to a team-mate is written twice
+    for lang in LANGS:
+        lines = [PhraseMemory.key(l["line"]) for duo in sink.duos.values() for l in duo if l["lang"] == lang]
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+
+
 def test_a_model_duo_line_already_said_is_refused():
     memory = PhraseMemory()
     scorer = make_card()["player"]["name"]

@@ -572,15 +572,23 @@ class PhraseMemory:
         if score_after:
             self.ruled_out.add(score_after)
 
+    def begin(self, doc_id: str, version: int | None) -> None:
+        """Before a document is drafted: when the draft is a new version (a goal credited to another player, an insight updated or back after a correction), the duo lines of the version in memory are kept apart, under `<doc_id>@v<version>`. The commentary team may already have said them, so the new draft is checked against them and never proposes them again; a retry of the same version is not."""
+        if version is None:
+            return
+        before = self.versions.get(doc_id)
+        if before is not None and before != version and doc_id in self.docs:
+            said = [i for i in self.docs[doc_id] if i[1] == "duo"]
+            if said:
+                self.docs[f"{doc_id}@v{before}"] = said
+            self.docs[doc_id] = [i for i in self.docs[doc_id] if i[1] != "duo"]
+        self.versions[doc_id] = version
+
     def record(self, doc_id: str, texts: list[dict], duo: list[dict], facts: dict | None = None, version: int | None = None) -> None:
-        """Keeps what a document finally says; a new draft replaces the old one. When the new draft is a new version (a goal credited to another player, an insight updated), the duo lines of the earlier version stay remembered: the commentary team may already have said them."""
+        """Keeps what a document finally says; a new draft replaces the old one. When the new draft is a new version, the duo lines of the earlier version stay remembered (`begin`, which the Writer calls before drafting)."""
         if facts:
             self.learn_names(facts)
-        before = self.versions.get(doc_id)
-        if version is not None and before is not None and before != version and doc_id in self.docs:
-            self.docs[f"{doc_id}@v{before}"] = [i for i in self.docs[doc_id] if i[1] == "duo"]
-        if version is not None:
-            self.versions[doc_id] = version
+        self.begin(doc_id, version)
         items = []
         for t in texts or []:
             items += [(t.get("lang"), "headline", str(t.get("headline", ""))), (t.get("lang"), "why", str(t.get("why", "")))]
