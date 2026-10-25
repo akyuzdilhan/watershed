@@ -83,5 +83,6 @@ Before, a card action from the feed was written twice when a desk was running: t
 - With `retry_total=0` the SDK no longer retries transient receive errors inside a session; the loop reopens the session instead, which costs a session accept (sub-second).
 - A write that still fails after the retries is logged and counted, and the message is completed anyway: the event or card is lost in Cosmos DB until the next write of the same document. Cards are rewritten on each change, events are not.
 - A KeyError or TypeError raised by a bug in the Spotter or the desk is treated as an unreadable message and dead-lettered, as before.
+- A card's `var_decision` takes the offside margin from the messages received when its void is processed. The feed sends the margin just before the void and the reorder buffer keeps the two in order; a margin that arrives more than `hold_s` after its void is not added to the card.
 - Memory: a Match keeps every message with its freeze frame, about 10 MB per match; in `--forever` mode finished matches are never evicted. Fine for a matchday, a long-running container should be restarted between matchdays.
 - Throughput on Azure is an estimate; it has not been measured.
