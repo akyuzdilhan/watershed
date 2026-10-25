@@ -278,6 +278,17 @@ def test_rate_limit_answers_429_on_pages_and_callbacks_only():
     assert client.get("/", headers=spoofed).status_code == 429  # a forged first entry does not reset the count
 
 
+def test_rate_limit_lets_the_desk_the_graphics_and_the_overlay_run_together(monkeypatch):
+    monkeypatch.delenv("RATE_LIMIT_PER_MIN", raising=False)
+    assert security.install(Flask("default")).per_minute == 600
+    monkeypatch.setenv("RATE_LIMIT_PER_MIN", "50")
+    assert security.install(Flask("set")).per_minute == 50
+    limiter = security.RateLimiter()
+    # one address, one minute: the desk ticks every 0.75 s (two callbacks a 1.5 s tick), the graphics panel every 5 s, the overlay every second
+    times = sorted([0.75 * i for i in range(80)] + [5.0 * i for i in range(12)] + [1.0 * i for i in range(60)])
+    assert len(times) > 120 and all(limiter.allow("1.2.3.4", now=t) for t in times)
+
+
 # --- match graphics, insights and storyline -------------------------------------------------------
 
 REPLAY_DIR = Path(__file__).resolve().parents[1] / "data" / "replay"

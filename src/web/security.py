@@ -1,6 +1,8 @@
 """Public safety: a per-IP rate limit on the Flask server, and the sign-in gate on producer actions.
 
 In Azure Container Apps, Easy Auth signs the producer in and passes the user in the `X-MS-CLIENT-PRINCIPAL-NAME` header. Anyone can send that header to an app without Easy Auth, so it is trusted only when `EASY_AUTH_ENABLED` is true. `PUBLIC_MODE` (on unless set to 0) makes the console and the producer callbacks require a trusted user, optionally one of `PRODUCERS` (comma-separated); with `PUBLIC_MODE=0`, locally, everyone is the local producer.
+
+The rate limit counts page loads and Dash callbacks per IP over a sliding minute: `RATE_LIMIT_PER_MIN`, 600 by default. The console's desk (about 80 requests a minute), its graphics or insights panel (12) and the overlay (60), open together from one address, send about 150.
 """
 
 import os
@@ -12,6 +14,7 @@ from flask import Flask, Response, request
 
 PRINCIPAL_HEADER = "X-MS-CLIENT-PRINCIPAL-NAME"
 LOCAL_PRODUCER = "local-producer"
+DEFAULT_PER_MIN = 600
 LIMITED_PREFIXES = ("/_dash-update-component", "/_dash-layout", "/_dash-dependencies")
 PAGES = ("/", "/overlay")
 
@@ -50,10 +53,16 @@ def client_ip() -> str:
     return forwarded[-1] if forwarded else (request.remote_addr or "unknown")
 
 
+def rate_limit() -> int:
+    """Requests a minute per IP: `RATE_LIMIT_PER_MIN`, DEFAULT_PER_MIN when it is not set."""
+    value = os.environ.get("RATE_LIMIT_PER_MIN", "").strip()
+    return int(value) if value else DEFAULT_PER_MIN
+
+
 class RateLimiter:
     """Sliding one-minute window per key, in memory (per process: each gunicorn worker counts on its own)."""
 
-    def __init__(self, per_minute: int = 120, window_s: float = 60.0) -> None:
+    def __init__(self, per_minute: int = DEFAULT_PER_MIN, window_s: float = 60.0) -> None:
         self.per_minute = per_minute
         self.window_s = window_s
         self.hits: dict[str, deque] = {}
@@ -81,7 +90,7 @@ def limited(path: str) -> bool:
 
 def install(server: Flask, per_minute: int | None = None) -> RateLimiter:
     """Answers 429 to an IP past its quota on page and callback routes; static assets are not counted."""
-    limiter = RateLimiter(per_minute or int(os.environ.get("RATE_LIMIT_PER_MIN", "120")))
+    limiter = RateLimiter(per_minute or rate_limit())
 
     @server.before_request
     def _rate_limit():
