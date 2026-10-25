@@ -67,11 +67,11 @@ def test_no_retracted_card_is_cited(demo):
 def test_recap_tells_the_goals_ruled_out_and_why(demo):
     _, _, _, recap = demo
     assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
-        ("63'", "Dorian Lightfoot", "offside", 25), ("69'", "Vito Valtonen", "handball", None)]
+        ("63'", "Dorian Lightfoot", "offside", None), ("69'", "Vito Valtonen", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
     texts = {t["lang"]: t for t in recap["texts"]}
-    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside by a whisker) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
-    assert "hors-jeu d'un rien" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
-    assert "fuera de juego por muy poco" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
+    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
+    assert "(hors-jeu)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
+    assert "(fuera de juego)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]
     claims = {(c["source_field"], c["value"]) for t in recap["texts"] for c in t["claims"]}
     assert ("disallowed_2_minute", 69) in claims and not any("25" in t["recap"] for t in recap["texts"])

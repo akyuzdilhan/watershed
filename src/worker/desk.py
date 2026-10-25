@@ -2,7 +2,7 @@
 
 Statuses: `pending` (written and checked, waiting for a producer), `approved` (on air), `rejected`, `retracted` (the feed took the moment back; a card that was on air must come off). A rewrite (goal credited to another player) writes a new version, which waits for approval again. In auto-approve mode (announced to the judges), a verified card goes on air without a click; a card the Verifier failed and the template replaced is approved too, since the template only uses checked fields.
 
-Each card carries the duo's suggested lines (`duo`: text proposed to the commentary team, never voiced), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres from the card's `var_decision`, for the producer only) and the duo's lines about it (`duo_ruling`). A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
+Each card carries the duo's suggested lines (`duo`: text proposed to the commentary team, never voiced), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason and minute; its `margin_cm` stays null) and the duo's lines about it (`duo_ruling`). The offside margin and how close it was (`var_decision.margin_m` and `call`, set by the Spotter) are for the producer only: neither the duo nor the recap gets them, so no line says "by a whisker" or "clear". A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
 Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards and the recap); the post-match recap by `recap_writer` (`worker.recap.RecapWriter` on Foundry; the recap template when it is None).
 
@@ -116,9 +116,8 @@ class Desk:
             card["retracted_on_air"] = was_on_air
             cause = str(action.get("cause", ""))
             if card["moment"] == "goal" and cause.startswith("var_"):
-                margin_m = (card.get("var_decision") or {}).get("margin_m")
-                card["ruled_out"] = {"reason": cause[4:], "cause": cause, "minute_label": action.get("minute_label"),
-                                     "margin_cm": round(100 * margin_m) if isinstance(margin_m, (int, float)) else None}
+                # the margin and its call stay in var_decision, for the producer: what reads ruled_out (the duo, the recap) writes for air
+                card["ruled_out"] = {"reason": cause[4:], "cause": cause, "minute_label": action.get("minute_label"), "margin_cm": None}
                 card["duo_ruling"], _ = ruling_duo(card, teams, self.languages, self.memory(card["match_id"]))
             self._audit(card, "retracted", "feed", {**detail, "was_on_air": was_on_air})
         elif action["action"] == "rewrite":

@@ -30,7 +30,7 @@ Every document carries `match_id`, the partition key in Cosmos DB.
 | `facts` | object | `xg_pct`, `team_wp_before_pct`, then `team_wp_after_pct` (goal, red card) or `team_wp_if_goal_pct` (save, chance), and the draw equivalents; the win and draw percentages are between 1 and 99, as on air (a moment is always before the final whistle) |
 | `card_kind` | `red` or `second_yellow` | red card cards only: the card the feed shows on the foul; absent on other cards |
 | `previous_player` | string | a rewritten card (version 2 or more) whose player changed: the name credited by the previous version; absent when the rewrite keeps the player, and on a card never rewritten |
-| `var_decision` | `{reason, call, margin_m}` | set by the worker when a correction voids the card (and kept on the card, so it reaches Cosmos DB): `reason` the cause of the correction (`var_offside`, `var_handball`, or another cause such as `provider_review`), `margin_m` the offside margin in metres the feed sends on the pass in a correction tied to the same VAR decision (else null), `call` `tight` or `clear` from that margin (`writer.offside_call`: tight up to 30 cm), else null. The margin is for the producer only: never on air, never shown to anonymous visitors. Neither the margin nor the call is said on air (no "by a whisker", "clear") |
+| `var_decision` | `{reason, call, margin_m}` | set by the worker when a correction voids the card (and kept on the card, so it reaches Cosmos DB): `reason` the cause of the correction (`var_offside`, `var_handball`, or another cause such as `provider_review`), `margin_m` the offside margin in metres the feed sends on the pass in a correction tied to the same VAR decision (else null), `call` `tight` or `clear` from that margin (`writer.offside_call`: tight up to 30 cm), else null. The margin is for the producer only: never on air, never shown to anonymous visitors. Neither the margin nor the call is said on air (no "by a whisker", "clear"): the desk does not copy them into `ruled_out`, which the duo and the recap read |
 | `texts` | array of `{headline, why, lang, claims}` | one per language (`en`, `fr`, `es`); absent before the Writer |
 | `machine_translated` | array of language codes | to label on air (`es`) |
 | `writer` | string | model name or `template` |
@@ -110,7 +110,7 @@ Speakers are `wren` (Wren Calder, emotion and story) and `joss` (Joss Ferrier, d
 |---|---|---|
 | `on_air_priority` | `normal` or `low` | `low`: a goal that moves its team's chance of winning by less than 2 points; its texts give no probability (milestone or story line) |
 | `scorer_match_goals` | int | goals cards: the scorer's goals in the match so far, this one included, goals ruled out excluded |
-| `ruled_out` | `{reason, cause, minute_label, margin_cm}` | set by the desk when VAR voids a goal card: `reason` `offside`, `handball` or another cause, `minute_label` of the decision, `margin_cm` the offside margin in centimetres, from the card's `var_decision` (else null); like the margin there, for the producer only |
+| `ruled_out` | `{reason, cause, minute_label, margin_cm}` | set by the desk when VAR voids a goal card: `reason` `offside`, `handball` or another cause, `minute_label` of the decision; `margin_cm` is always null: the duo and the recap read `ruled_out`, and the margin and its call stay in the card's `var_decision`, for the producer |
 | `duo_ruling` | array, as `duo` | the duo's suggested lines when VAR rules the goal out (templates only, verified) |
 | `verification.repetition_warnings` | int | phrases, openings or tics already used in the match (warnings; an identical headline fails the draft) |
 
@@ -120,7 +120,7 @@ Insights and the storyline are written by `Desk.write_insight(doc, teams)`: same
 
 Model calls: at most 40 per match (`Desk.max_calls_per_match`), shared by every draft sent to a model, one call each and two when the Verifier sends the draft back; beyond the budget, the templates write. With the defaults, the demo match asks for 12 card drafts (11 cards and one rewrite) and one recap: 13 calls when every draft passes the first time, 26 at most.
 
-The recap (`type: "recap"`) adds `analysis.disallowed_goals`: `[{card_id, minute_label, team, player, reason, margin_cm}]`, read from the `ruled_out` records of retracted goal cards (or passed to `build_recap(..., disallowed=...)`); the texts name them only as ruled out, with the reason. The margin, in centimetres or in words (tight, clear, by a whisker), is for the producer: it is never said on air.
+The recap (`type: "recap"`) adds `analysis.disallowed_goals`: `[{card_id, minute_label, team, player, reason, margin_cm}]`, read from the `ruled_out` records of retracted goal cards (or passed to `build_recap(..., disallowed=...)`); the texts name them only as ruled out, with the reason. Its `margin_cm` is null, as in `ruled_out`: the margin, in centimetres or in words (tight, clear, by a whisker), is for the producer, in the card's `var_decision`, and is never said on air. Only a `disallowed` passed with a margin would bring the call back into the texts; the worker never passes one.
 
 ## Producer feedback (`type: "feedback"`)
 

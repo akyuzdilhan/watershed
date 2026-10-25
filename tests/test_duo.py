@@ -218,12 +218,13 @@ def test_the_scorer_story_is_counted_without_goals_ruled_out(demo):
 def test_var_ruling_is_recorded_with_its_reason_and_margin(demo):
     sink, _ = demo
     offside, handball = at(sink, "63'"), at(sink, "69'")
-    assert offside["ruled_out"] == {"reason": "offside", "cause": "var_offside", "minute_label": "64'", "margin_cm": 25}
+    assert offside["ruled_out"] == {"reason": "offside", "cause": "var_offside", "minute_label": "64'", "margin_cm": None}
+    assert (offside["var_decision"]["margin_m"], offside["var_decision"]["call"]) == (0.25, "tight")  # the margin and its call, for the producer
     assert handball["ruled_out"]["reason"] == "handball" and handball["ruled_out"]["margin_cm"] is None
     for card in (offside, handball):
         facts, _ = ruling_facts(card, TEAMS)
         assert verify_duo(card["duo_ruling"], LANGS, facts)["verified"]
-    assert any("whisker" in l["line"] for l in offside["duo_ruling"] if l["lang"] == "en")  # 25 cm is a tight call
+    assert not any(w in l["line"].lower() for l in offside["duo_ruling"] for w in ("whisker", "that close", "d'un rien", "si peu", "por muy poco", "tan poco"))  # nor how close it was
     assert not any(w in l["line"] for l in offside["duo_ruling"] for w in ("25", "cm", "centim"))  # the margin never goes on air
     assert all("VAR" in " ".join(l["line"] for l in handball["duo_ruling"] if l["lang"] == lang) or lang != "en" for lang in LANGS)
 
