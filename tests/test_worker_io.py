@@ -17,7 +17,7 @@ from worker import azure_io
 from worker.azure_io import ErrorLog, NoSession, consume, with_retry
 from worker.desk import Desk
 from worker.match import Match
-from worker.pipeline import MemorySink, Pipeline, ThreadedSink
+from worker.pipeline import JsonFileSink, MemorySink, Pipeline, ThreadedSink
 from worker.writer import TemplateWriter
 
 
@@ -633,6 +633,31 @@ def test_a_card_action_after_the_final_whistle_writes_the_recap_again(demo):
     side = last["team"]
     assert recap["analysis"]["score"][side] == at_whistle[side] - 1 and f"card-{last['event_id']}" in recap["analysis"]["cards_retracted"]
     assert recap["verification"]["verified"]
+
+
+def test_approvals_the_console_writes_survive_the_next_cards(demo, tmp_path):
+    """Locally the console writes each approval into cards.json while the match goes on (here every card once, as soon as it is written): the worker's later writes keep them, and the recap counts them."""
+    stream, _ = demo
+    sink = JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()))
+    path = tmp_path / "demo-0007" / "cards.json"
+    console = Desk(MemorySink())  # what the console's desk does to a card before writing it back
+    approved = set()
+    for m in stream:
+        if not pipeline.handle(m):
+            continue
+        cards = json.loads(path.read_text(encoding="utf-8"))
+        fresh = {c["id"] for c in cards if c["status"] == "pending" and (c["id"], c["version"]) not in approved}
+        if fresh:
+            approved |= {(c["id"], c["version"]) for c in cards if c["id"] in fresh}
+            path.write_text(json.dumps([console.approve(c, "producer") if c["id"] in fresh else c for c in cards]), encoding="utf-8")
+    pipeline.flush()
+    stored = {c["id"]: c for c in json.loads(path.read_text(encoding="utf-8"))}
+    kept = [stored[i]["status"] for i, version in approved if stored[i]["version"] == version]
+    assert len(kept) >= 8 and set(kept) == {"approved", "retracted"}  # retracted: on air when VAR ruled the goal out
+    assert sink.cards == stored
+    on_air = {i for i, c in stored.items() if c["status"] == "approved"}
+    assert set(pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"]) == on_air
 
 
 def test_the_final_whistle_is_processed_even_if_the_recap_fails(demo, caplog):

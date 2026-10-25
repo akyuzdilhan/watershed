@@ -18,6 +18,7 @@ from worker.spotter import Spotter
 log = logging.getLogger("worker")
 
 PRODUCER_FIELDS = ("status", "texts", "history", "retracted_on_air")  # what the console may change on a card
+INSIGHT_PRODUCER_FIELDS = ("status", "texts", "history")  # what the console may change on an insight
 
 
 class MemorySink:
@@ -61,7 +62,7 @@ class MemorySink:
 
 
 class JsonFileSink(MemorySink):
-    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json, audit.jsonl and, at the final whistle, recap.json. The console reads these files when Cosmos DB is not configured."""
+    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json, audit.jsonl and, at the final whistle, recap.json. The console reads these files when Cosmos DB is not configured, and writes the producer's decisions into cards.json and insights.json: before rewriting one of them, the sink takes those decisions back from it for every document other than the one it writes, so a later card does not undo an approval."""
 
     def __init__(self, root: Path) -> None:
         super().__init__()
@@ -72,19 +73,36 @@ class JsonFileSink(MemorySink):
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _write_cards(self, match_id: str) -> None:
+    @staticmethod
+    def _keep_decisions(path: Path, docs: dict[str, dict], written_id: str, fields: tuple[str, ...]) -> None:
+        """The console's decisions in the file at `path` (`fields` of every document but `written_id`, at the version this sink last wrote) back into `docs`."""
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        except (OSError, ValueError):  # unreadable while the console replaces it: written as this process has it
+            return
+        for doc in stored if isinstance(stored, list) else []:
+            mine = docs.get(doc.get("id")) if isinstance(doc, dict) else None
+            if mine is None or doc["id"] == written_id or doc.get("version") != mine.get("version"):
+                continue
+            for k in fields:
+                if k in doc:
+                    mine[k] = doc[k]
+
+    def _write_cards(self, match_id: str, written_id: str) -> None:
+        path = self._dir(match_id) / "cards.json"
+        self._keep_decisions(path, self.cards, written_id, PRODUCER_FIELDS)
         cards = [c for c in self.cards.values() if c["match_id"] == match_id]
-        (self._dir(match_id) / "cards.json").write_text(json.dumps(cards, indent=1, ensure_ascii=False), encoding="utf-8")
+        path.write_text(json.dumps(cards, indent=1, ensure_ascii=False), encoding="utf-8")
 
     def card(self, card: dict) -> None:
         super().card(card)
-        self._write_cards(card["match_id"])
+        self._write_cards(card["match_id"], card["id"])
 
     def action(self, action: dict, card: dict) -> None:
         super().action(action, card)
         self.audit_entry(action)
         self.audit.pop()  # audit_entry already appended it once
-        self._write_cards(card["match_id"])
+        self._write_cards(card["match_id"], card["id"])
 
     def audit_entry(self, entry: dict) -> None:
         super().audit_entry(entry)
@@ -101,8 +119,10 @@ class JsonFileSink(MemorySink):
         if doc.get("type") == "storyline":
             (self._dir(doc["match_id"]) / "storyline.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
             return
+        path = self._dir(doc["match_id"]) / "insights.json"
+        self._keep_decisions(path, self.insights, doc["id"], INSIGHT_PRODUCER_FIELDS)
         docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"] and d.get("type") != "storyline"]
-        (self._dir(doc["match_id"]) / "insights.json").write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
+        path.write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
 
     def recap(self, doc: dict) -> None:
         """recap.json, as `python -m worker.recap` writes it."""

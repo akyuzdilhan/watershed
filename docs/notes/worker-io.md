@@ -46,6 +46,7 @@ Fix: the client is created with `retry_total=0` and `consume` handles retries it
 
 - Unreadable messages (bad JSON, unknown schema, a body that is not an object, a missing field) are dead-lettered with reason `unreadable` and the error type, and processing goes on. An unreadable message no longer creates an empty Match entry.
 - `ErrorLog` logs the first error of each kind and type, counts the others and prints a summary at the end: a Cosmos DB outage is two lines, not one per message.
+- Locally the console writes the producer's decisions into `cards.json` and `insights.json`, which `JsonFileSink` rewrites whole for each document. Before, the next card the worker wrote put every other card back as the worker last had it: an approval made in the console during the match went back to `pending` (its audit entry stayed). The sink now reads the file first and keeps `status`, `texts` and `history` of every other document at the version it last wrote (tests `test_approvals_the_console_writes_survive_the_next_cards` and `..._next_facts`). In Cosmos DB each card is its own document, so this never happened there.
 
 ## Recap at the final whistle
 

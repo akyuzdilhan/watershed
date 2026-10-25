@@ -64,7 +64,7 @@ With a desk the Spotter's own line is not written: the desk's entry for the same
 
 ## Producer decisions
 
-`worker.desk.Desk` owns every status change: `approve(card, by, texts=None)` (with edited texts: an `edited` entry, then `approved`), `reject(card, by)`. A retracted card can never be approved. The console calls these methods; it never writes a status itself. The worker never overwrites a decision: before the feed changes a card (VAR check, correction) it reloads the stored card and keeps `status`, `texts`, `history` and `retracted_on_air` from it.
+`worker.desk.Desk` owns every status change: `approve(card, by, texts=None)` (with edited texts: an `edited` entry, then `approved`), `reject(card, by)`. A retracted card can never be approved. The console calls these methods; it never writes a status itself. The worker never overwrites a decision: before the feed changes a card (VAR check, correction) it reloads the stored card and keeps `status`, `texts`, `history` and `retracted_on_air` from it. Locally, where the worker rewrites the whole of `cards.json` or `insights.json` for each document, it first takes back from the file the decisions on every other document of the same version (`status`, `texts`, `history`), so writing a new card never undoes an approval made in the console.
 
 ## Feed and CDF
 

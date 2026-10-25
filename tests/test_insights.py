@@ -417,6 +417,29 @@ def test_json_file_sink_and_threaded_sink(demo, history, tmp_path):
     assert inner.insights["insight-demo-0007-stat-of-the-match"]["headline_facts"]["top_fact"] == "scorer-home-20-4"
 
 
+def test_approvals_the_console_writes_survive_the_next_facts(demo, history, tmp_path):
+    """Locally the console writes each approval into insights.json while the match goes on (here every fact once, as soon as it is written): the next facts the worker writes keep them."""
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    sink = JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()), history=history)
+    path = tmp_path / "demo-0007" / "insights.json"
+    console = Desk(MemorySink())  # what the console's desk does to a fact before writing it back
+    approved = set()
+    for m in demo[0]:
+        pipeline.handle(m)
+        docs = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        fresh = {d["id"] for d in docs if d["status"] == "pending" and (d["id"], d["version"]) not in approved}
+        if fresh:
+            approved |= {(d["id"], d["version"]) for d in docs if d["id"] in fresh}
+            path.write_text(json.dumps([console.approve(d, "producer") if d["id"] in fresh else d for d in docs]), encoding="utf-8")
+    pipeline.flush()
+    stored = {d["id"]: d for d in json.loads(path.read_text(encoding="utf-8"))}
+    kept = [stored[i]["status"] for i, version in approved if stored[i]["version"] == version]
+    assert len(kept) >= 4 and set(kept) <= {"approved", "superseded"} and "approved" in kept
+
+
 class TextDesk:
     """A desk with the methods the pipeline calls, write_insight included."""
 
