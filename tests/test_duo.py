@@ -730,6 +730,26 @@ def test_after_a_goal_ruled_out_the_next_one_at_that_score_counts(demo):
 
 # --- a goal credited to another player, a red card --------------------------------------------------------
 
+def test_a_goal_credited_to_another_player_is_told_as_a_correction(demo):
+    sink, _ = demo
+    card = json.loads(json.dumps(at(sink, "31'")))  # the feed credits it to a team-mate after a deflection: version 2
+    scorer = card["player"]["name"]
+    previous = next(n for n in replay_names()[card["team"]] if n != scorer)
+    assert card["version"] == 2 and "previous_scorer" not in card_facts(dict(card, previous_player=scorer), TEAMS)[0]
+    card["previous_player"] = previous
+    facts, _ = card_facts(card, TEAMS)
+    assert facts["previous_scorer"] == previous and facts["scorer"] == scorer
+    out = json.loads(TemplateWriter().write(card, facts, LANGS, memory=PhraseMemory(), duo=True))
+    assert verify_duo(out["duo"], LANGS, facts)["verified"]
+    for lang in LANGS:
+        values, fields = template_values(card, facts, lang)
+        corrections = {f[0] for t in LINES["reassigned"][lang]["heart"] if (f := fill(t, values, fields))}
+        lines = [l["line"] for l in out["duo"] if l["lang"] == lang]
+        assert lines[0] in corrections and scorer in lines[0], (lang, lines)  # the change of scorer, not the goal again
+        for template in all_strings(LINES["reassigned"][lang]):  # every variant, whatever its condition
+            line = fill(template, values | {c: "" for c in CONDITIONS}, fields)
+            assert verify_duo([{"speaker": HEART, "lang": lang, "line": line[0], "claims": line[1]}, {"speaker": EYE, "lang": lang, "line": "Yes.", "claims": []}],
+                              [lang], facts)["verified"], (lang, template)
 
 
 @pytest.mark.parametrize("kind", ["second_yellow", "red", None])

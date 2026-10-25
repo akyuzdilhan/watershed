@@ -134,6 +134,7 @@ CONDITIONS = {  # filled by writer.conditions: "" when the line is true for the 
     "if_small_margin": "the save is worth less than SMALL_MARGIN_PTS points",
     "if_big_margin": "the save is worth SMALL_MARGIN_PTS points or more",
     "if_big_chance": "the miss cost SMALL_MARGIN_PTS points or more of the chance of winning",
+    "if_deflection": "the feed credited the goal to another player after a deflection",
 }
 TILT_PTS, SMALL_MARGIN_PTS = 20, 15
 
@@ -383,6 +384,17 @@ LINES: dict[str, dict[str, dict]] = {
                        "other": ["La revisión dice que no, y el gol desaparece del marcador.", "La revisión borra el gol. No hay nada que hacer."]},
                "heart_back": {"offside_tight": ["Tan poco, Joss. Toda una celebración, por nada.", "Un pelo, Joss. No hizo falta más."],
                               "any": ["Toda esa alegría, y no cuenta para nada.", "Toda esa alegría, esfumada de golpe."]}},
+    },
+    "reassigned": {  # a goal the feed credits to another player: the duo tells the change of scorer instead of the goal again
+        "en": {"heart": ["Correction on that goal: it goes to {scorer}, not {previous_scorer}.", "Change of scorer: that goal now belongs to {scorer}.",
+                         "The goal now goes to {scorer}, after a deflection.{if_deflection}"],
+               "eye": ["Same goal, same story for {team}: only the scorer's name changes.", "Nothing changes for {team} but the name on the scoresheet."]},
+        "fr": {"heart": ["Correction sur ce but : il revient à {scorer}, et non à {previous_scorer}.", "Changement de buteur : ce but est désormais attribué à {scorer}.",
+                         "Le but revient finalement à {scorer}, après une déviation.{if_deflection}"],
+               "eye": ["Même but, même histoire pour {team} : seul le nom du buteur change.", "Rien ne change pour {team}, sauf le nom sur la feuille de match."]},
+        "es": {"heart": ["Corrección en ese gol: es para {scorer}, no para {previous_scorer}.", "Cambio de goleador: el gol pasa a ser de {scorer}.",
+                         "El gol es finalmente para {scorer}, tras un desvío.{if_deflection}"],
+               "eye": ["Mismo gol, misma historia para el {team}: solo cambia el nombre del goleador.", "Nada cambia para el {team}, salvo el nombre en el acta."]},
     },
     "insight": {  # keyed by insight kind, for the facts no family of worker.insight_texts covers: no number, a line true for the kind
         "en": {"heart": {"record": ["Hold on, Joss, are you telling me nobody has done this in the league before?", "Joss, where does this one sit in the history books?"],

@@ -89,6 +89,7 @@ Commentary duo. When the request has "duo": true, also write what two fictional 
 - Same rules as the card for numbers, units, club names and each language's style: every number in a line is listed in that line's claims, and a line that gives a win probability names the team.
 - Only a goal by the home team (team_at_home true) makes the stadium roar or wake up; for an away goal, speak of the away fans or the bench.
 - The words match the size of the number: "small margins" only for a save worth less than {SMALL_MARGIN_PTS} points, "the whole match just tilted" only for a change of more than {TILT_PTS} points.
+- When the facts have previous_scorer, the feed has credited the goal to another player: the duo announces the change of scorer, not the goal again.
 - A tic is said at most once per match: "tics_used" in the request lists those already said.
 Then reply with a JSON object instead of the array: {{"texts": [the array of cards], "duo": [{{"speaker": "wren" or "joss", "lang": string, "line": string, "claims": [{{"value": number, "source_field": string}}]}}]}}
 Duo example for the moment above: {json.dumps(EXAMPLE_DUO, ensure_ascii=False)}
@@ -144,6 +145,9 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
         if isinstance(card.get("scorer_match_goals"), int):
             facts["scorer_match_goals"] = card["scorer_match_goals"]
             meanings["scorer_match_goals"] = f"goals {player} has scored in this match, this one included"
+        if card.get("previous_player") and card.get("previous_player") != player:
+            facts["previous_scorer"] = card["previous_player"]
+            meanings["previous_scorer"] = f"player the goal was first credited to; the feed has since credited it to {player}: tell the change of scorer"
         if low_stake(card):
             facts["stake"] = "low"
             meanings["stake"] = "the goal hardly changes the result: write it as a milestone or a story line, with no probability and no points"
@@ -750,6 +754,7 @@ def conditions(card: dict, facts: dict) -> dict:
         "if_small_margin": isinstance(value, int) and value < SMALL_MARGIN_PTS,
         "if_big_margin": isinstance(value, int) and value >= SMALL_MARGIN_PTS,
         "if_big_chance": isinstance(before, int) and isinstance(other, int) and abs(other - before) >= SMALL_MARGIN_PTS,
+        "if_deflection": card.get("rewrite_cause") == "deflection",
     }
     return {k: "" if true.get(k) else None for k in CONDITIONS}
 
@@ -764,7 +769,7 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
         "team": card["team_name"], "other_team": next((t for t in teams if t != card["team_name"]), None), "scorer": facts.get("scorer"), "player": player,
         "before": facts.get(before_field), "after": facts.get(f"{slug}_wp_after_pct"), "other": facts.get(f"{slug}_wp_if_goal_pct"),
         "swing": facts.get("swing_pts"), "value": facts.get("save_value_pts"), "xg": facts.get("shot_xg_pct"), "minute": facts.get("minute"),
-        "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player),
+        "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player), "previous_scorer": facts.get("previous_scorer"),
         "score_now": digits(facts.get("score_after")), "score_then": digits(facts.get("score_before")),
     }
     team_n, scorer_n = count_words(lang, facts.get("team_goals_after")), count_words(lang, facts.get("scorer_match_goals"))
@@ -911,6 +916,8 @@ class TemplateWriter:
         return json.dumps({"texts": texts, "duo": lines} if duo else texts, ensure_ascii=False)
 
     def _duo(self, card: dict, facts: dict, lang: str, values: dict, fields: dict, pick: _Picker) -> list[dict]:
+        if facts.get("previous_scorer"):  # the feed credited the goal to another player: the duo tells the correction, not the goal again
+            return self._reassigned(lang, values, fields, pick)
         kind = "goal_low" if facts.get("stake") == "low" else card["moment"]
         slots = LINES[kind][lang]
         seed = stable(card["id"], card.get("version", 1), lang, "n")
@@ -954,6 +961,16 @@ class TemplateWriter:
         if season:  # the table matters more than a third remark: the duo ends on it
             lines = lines[:2] + season
         return lines
+
+    @staticmethod
+    def _reassigned(lang: str, values: dict, fields: dict, pick: _Picker) -> list[dict]:
+        slots, fresh = LINES["reassigned"][lang], [FRESH[lang]["goal"]]
+        out = []
+        for speaker, slot in ((HEART, "heart"), (EYE, "eye")):
+            filled = pick.line(slots[slot], values, fields, slot, fresh=fresh)
+            if filled:
+                out.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
+        return out
 
     def ruling(self, card: dict, facts: dict, languages: list[str], memory: PhraseMemory | None = None) -> list[dict]:
         """What the duo says when VAR rules a goal out."""
