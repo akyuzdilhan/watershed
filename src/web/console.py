@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from web import panels, security
+from web.overlay import previous_scorer
 from web.store import get_store
 from worker import feedback as FB
 from worker.duo import PERSONAS
@@ -21,6 +22,8 @@ LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
 MOMENTS = {"goal": "Goal", "save": "Save", "red_card": "Red card", "chance": "Chance"}
 STATUS = {"proposed": ("Writing", "st-proposed"), "pending": ("Pending", "st-pending"), "approved": ("On air", "st-approved"),
           "rejected": ("Rejected", "st-rejected"), "retracted": ("Retracted", "st-retracted")}
+VAR_REASONS = {"var_offside": "Offside", "var_handball": "Handball", "var_foul": "Foul"}
+VAR_CALLS = {"tight": "tight call", "clear": "clear call"}
 SYSTEM_ACTORS = ("template", "auto-approve", "feed")  # who decided, besides a producer and the writer models
 COLORS = {"home": "#3987e5", "draw": "#9a998f", "away": "#d95926", "muted": "#6f6e69", "ink": "#f0efec", "ink2": "#c3c2b7", "surface": "#1a1a19", "grid": "#2c2c2a"}
 
@@ -133,6 +136,25 @@ def language_block(card: dict, t: dict, verdicts: dict | None, facts: dict, mean
                      checks_view(lang, t, duo_lines, facts, style)], className="text-block")
 
 
+def corrections(card: dict, show_margin: bool) -> list:
+    """What the feed changed on the card: another scorer credited, or VAR ruling it out (the offside margin only for a producer, never on air)."""
+    out = []
+    prev = previous_scorer(card)
+    if prev:
+        out.append(html.Div(f"Scorer corrected: {prev} → {card.get('player', {}).get('name', '')}", className="correction"))
+    v = card.get("var_decision")
+    if isinstance(v, dict):
+        reason = str(v.get("reason") or "")
+        words = VAR_REASONS.get(reason) or (reason.removeprefix("var_").replace("_", " ").capitalize() or "Other")
+        call = VAR_CALLS.get(v.get("call"))
+        parts = [html.Span(f"VAR decision: {words}" + (f", {call}" if call else ""))]
+        margin = v.get("margin_m")
+        if show_margin and isinstance(margin, (int, float)) and not isinstance(margin, bool):
+            parts.append(html.Span(f" (margin {margin:.2f} m, producer only: never on air or to visitors)", className="muted small"))
+        out.append(html.Div(parts, className="correction"))
+    return out
+
+
 def actor(by: str, action: str, card: dict, read_only: bool) -> str:
     """Who did it, as shown: in the read-only view a producer's identity becomes "a producer"."""
     if not read_only or action == "written" or by in SYSTEM_ACTORS or by in (card.get("writer"), card.get("duo_writer")):
@@ -151,7 +173,7 @@ def history_view(card: dict, audit: list[dict], read_only: bool) -> html.Ol:
 
 
 def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None, teams: dict | None = None, read_only: bool = False) -> html.Div:
-    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no feedback."""
+    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no margin, no feedback."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
     verdicts = None if read_only else FB.by_target(feedback or [])
@@ -167,7 +189,8 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     sb = card.get("score_before", {})
     head = html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
                      html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, priority {card.get('value_pts', 0)}, version {card.get('version', 1)}", className="muted"),
-                               *badges(card)], className="detail-meta")])
+                               *badges(card)], className="detail-meta"),
+                     *corrections(card, show_margin=not read_only)])
     duo = panels.duo_block(card, verdicts=verdicts, pane="d")
     suggested = [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo] if duo is not None else []
     out = [head, html.Div(texts), *suggested, html.H3("Verification"), verification, html.H3("History"), history_view(card, audit, read_only)]

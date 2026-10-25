@@ -9,7 +9,7 @@ from dash import no_update
 from flask import Flask
 
 from generator import generate_match
-from web import console, overlay, panels, security, store
+from web import console, matchfeed, overlay, panels, security, store
 from web.app import app, route
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, Pipeline
@@ -201,6 +201,47 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
     blocks = text_blocks(console.detail(edited, [], [], teams))
     assert "Verifier: fails" in texts_in(blocks[0]) and "every number claimed: 33" in texts_in(blocks[0])
     assert all("Verifier: passes" in texts_in(b) for b in blocks[1:])
+
+
+def test_a_scorer_correction_is_shown_in_the_console_and_on_the_overlay(desk):
+    rewritten = next(c for c in desk.cards(MATCH) if c.get("version", 1) >= 2)
+    first = next(m for m in matchfeed.load(REPLAY_DIR / f"{MATCH}.jsonl.gz") if m["type"] == "action" and m["event_id"] == rewritten["event_id"])  # the goal as first credited
+    previous, now = first["player"]["name"], rewritten["player"]["name"]
+    assert previous != now
+    corrected = dict(rewritten, previous_player=previous)
+    assert f"Scorer corrected: {previous} → {now}" in texts_in(console.detail(corrected, []))
+    assert "Scorer corrected" not in texts_in(console.detail(rewritten, []))  # no field: nothing changes
+    assert "Scorer corrected" not in texts_in(console.detail(dict(corrected, version=1), []))
+    for lang, label in (("en", "Scorer corrected"), ("fr", "Buteur corrigé"), ("es", "Gol reasignado")):
+        assert label in texts_in(overlay.lower_third({"kind": "card", "card": dict(corrected, status="approved"), "detail": None}, lang))
+        assert label not in texts_in(overlay.lower_third({"kind": "card", "card": dict(rewritten, status="approved"), "detail": None}, lang))
+    cards = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
+    (desk.root / MATCH / "cards.json").write_text(json.dumps([dict(c, previous_player=previous) if c["id"] == rewritten["id"] else c for c in cards]), encoding="utf-8")
+    assert console.decide("approve", MATCH, rewritten["id"], "producer-1")[1]
+    assert "Buteur corrigé" in texts_in(overlay.render(f"?match={MATCH}&lang=fr"))
+
+
+def test_a_var_decision_shows_its_reason_and_call_and_the_margin_only_to_a_producer(desk, monkeypatch):
+    decision = {"reason": "var_offside", "call": "tight", "margin_m": 0.37}
+    ruled = dict(card_at(desk, "63'"), var_decision=decision)
+    seen_by_producer, seen_by_visitor = texts_in(console.detail(ruled, desk.audit(MATCH))), texts_in(console.detail(ruled, desk.audit(MATCH), read_only=True))
+    assert "VAR decision: Offside, tight call" in seen_by_producer and "0.37 m" in seen_by_producer
+    assert "VAR decision: Offside, tight call" in seen_by_visitor and "0.37" not in seen_by_visitor
+    assert "VAR decision: Handball" in texts_in(console.detail(dict(ruled, var_decision={"reason": "var_handball", "call": None, "margin_m": None}), []))
+    assert "VAR decision" not in texts_in(console.detail(card_at(desk, "63'"), []))
+    cards = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
+    (desk.root / MATCH / "cards.json").write_text(json.dumps([dict(c, var_decision=decision) if c["id"] == ruled["id"] else c for c in cards]), encoding="utf-8")
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    with app.server.test_request_context("/"):
+        shown = texts_in(console._refresh_cb(1, 0, MATCH, ruled["id"], None)[2])
+    assert "tight call" in shown and "0.37" not in shown
+    monkeypatch.setenv("PUBLIC_MODE", "0")
+    with app.server.test_request_context("/"):
+        assert "0.37 m" in texts_in(console._refresh_cb(1, 0, MATCH, ruled["id"], None)[2])
+    for lang in overlay.LANGS:  # never on the overlay
+        for item in ({"kind": "retraction", "card": dict(ruled, retracted_on_air=True), "detail": None}, {"kind": "card", "card": dict(ruled, status="approved"), "detail": None}):
+            on_screen = texts_in(overlay.lower_third(item, lang))
+            assert "0.37" not in on_screen and "37 cm" not in on_screen and "tight" not in on_screen
 
 
 # --- overlay --------------------------------------------------------------------------------------

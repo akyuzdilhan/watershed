@@ -15,6 +15,7 @@ from web.store import get_store
 LANGS = ("en", "fr", "es")
 MACHINE_TRANSLATED_LABEL = {"en": "machine-translated", "fr": "traduction automatique", "es": "traducción automática"}
 VAR_LABEL = {"en": "VAR check", "fr": "Vérification VAR", "es": "Revisión VAR"}
+SCORER_CORRECTED = {"en": "Scorer corrected", "fr": "Buteur corrigé", "es": "Gol reasignado"}
 RETRACTION = {
     "goal": {"en": "Goal ruled out: card withdrawn", "fr": "But refusé : info retirée", "es": "Gol anulado: información retirada"},
     "other": {"en": "Card withdrawn", "fr": "Info retirée", "es": "Información retirada"},
@@ -120,6 +121,14 @@ def text_for(card: dict, lang: str) -> dict | None:
     return next((t for t in texts if t.get("lang") == lang), next((t for t in texts if t.get("lang") == "en"), texts[0] if texts else None))
 
 
+def previous_scorer(card: dict) -> str | None:
+    """The scorer of the version before, when the feed credited a goal card to another player (`previous_player`, version 2 or more)."""
+    prev = card.get("previous_player")
+    if isinstance(prev, dict):
+        prev = prev.get("name")
+    return prev if isinstance(prev, str) and prev.strip() and int(card.get("version") or 1) >= 2 else None
+
+
 def params(search: str | None) -> dict:
     q = {k: v[-1] for k, v in parse_qs((search or "").lstrip("?")).items()}
     lang = q.get("lang", "en")
@@ -148,6 +157,8 @@ def lower_third(item: dict | None, lang: str) -> html.Div:
     tags = []
     if card.get("type") == "insight":
         tags.append(html.Span(INSIGHT_LABEL[lang], className="ov-tag ov-detail"))
+    if previous_scorer(card):
+        tags.append(html.Span(SCORER_CORRECTED[lang], className="ov-tag ov-corrected"))
     if card.get("under_review"):
         tags.append(html.Span(VAR_LABEL[lang], className="ov-tag ov-var"))
     if t.get("lang") in (card.get("machine_translated") or []):
