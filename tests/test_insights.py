@@ -269,7 +269,7 @@ def test_unscripted_matches(seed, history):
 # --- what holds at the current score, and while VAR checks a goal --------------------------------------
 
 def test_a_lost_half_time_lead_is_told_only_while_the_team_trails(demo, history):
-    """United lead at the break, trail from the second Rovers comeback goal, are level when their goal stands for a minute, trail again when VAR rules it out."""
+    """United lead at the break. The fact is told while they trail, withdrawn each time they are level again (the 63' goal ruled out, then their own goal until VAR rules it out), told again when they trail, and replaced by the defeat at full time."""
     stream, truth = demo
     pipeline = Pipeline(sink=MemorySink(), history=history)
     for m in stream:
