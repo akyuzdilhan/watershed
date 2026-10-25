@@ -80,7 +80,6 @@ class Spotter:
         margin = max(found, key=lambda c: c["seq"])["changes"]["offside"]["margin_m"] if found else None
         return {"reason": void.get("cause"), "call": offside_call(round(100 * margin)) if margin is not None else None, "margin_m": margin}
 
-
     def _moment(self, a: dict) -> dict | None:
         match, model = self.match, self.model
         kind = a["action_type"]
@@ -146,13 +145,16 @@ class Spotter:
         return {"id": f"{card['id']}-{m['message_id']}", "match_id": card["match_id"], "card_id": card["id"], "event_id": card["event_id"], "action": action, "cause": cause, "message_id": m["message_id"], "minute_label": m["minute_label"]}
 
 
+CARD_ACTIONS = {"retract": "retract", "rewrite": "rewrite", "retracted": "retract", "rewrite_requested": "rewrite"}  # the Spotter's names, and the desk's when a desk audits the action
+
+
 def score_against_truth(cards: dict[str, dict], actions: list[dict], truth: dict) -> dict:
-    """Recall of the moments the truth says deserve a card, precision of the cards, and the actions taken on cards the feed changed."""
+    """Recall of the moments the truth says deserve a card, precision of the cards, and the actions taken on cards the feed changed (`actions`: the audit trail, with or without a desk)."""
     wanted = {g["event_id"] for g in truth["goals"]}
     wanted |= {m["event_id"] for m in truth["moments"] if m["kind"] in ("goal", "save") or (m["kind"] == "foul" and m["key"].startswith("red"))}
     found = {i for c in cards.values() for i in (c["event_id"], c["shot_event_id"])} & wanted
     expected = {g["event_id"]: g["expected_card_action"] for g in truth["goals"] if g["expected_card_action"] != "none"}
-    done = {a["event_id"]: a["action"] for a in actions if a["action"] in ("retract", "rewrite")}
+    done = {a["event_id"]: CARD_ACTIONS[a["action"]] for a in actions if a.get("action") in CARD_ACTIONS and a.get("event_id")}
     return {
         "moments": len(wanted),
         "recall": len(found) / len(wanted) if wanted else 1.0,

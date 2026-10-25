@@ -7,12 +7,13 @@ After each relevant message (goal, red card, substitution, VAR check, period end
 - a group that is no longer true (its goal was ruled out) is superseded with no successor;
 - an insight whose goals are under a VAR check is flagged `under_review`.
 
-Every fact is deterministic: the same feed and the same history give the same insights. Every number a text may show is in `headline_facts`, with its meaning in `field_meanings` (contract, "Insight"). At full time the engine adds a "stat of the match" insight: the top fact, why it ranks first, and a short ranked list.
+Every fact is deterministic: the same feed and the same history give the same insights. Every number a text may show is in `headline_facts`, with its meaning in `field_meanings` (contract, "Insight"). At full time the engine adds a "stat of the match" insight: the top fact, why it ranks first, and a short ranked list. Each step of an insight's life (proposed, updated, revived, superseded) is in its `history` and, when the engine is given an `audit` callable, in the audit trail.
 
 The detectors are listed in `DETECTORS`; the rarity method is in `worker.insight_rarity`, the history view in `worker.insight_history`, the catalogue and a worked example in `docs/notes/insights.md`.
 """
 
 import copy
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -82,7 +83,8 @@ def shown_minute(a: dict) -> int:
 
 
 class InsightEngine:
-    def __init__(self, match: Match, view: HistoryView, spotter=None, cap_per_period: int = 4, min_value: int = 40, load: Callable | None = None, profile=None) -> None:
+    def __init__(self, match: Match, view: HistoryView, spotter=None, cap_per_period: int = 4, min_value: int = 40, load: Callable | None = None, profile=None,
+                 audit: Callable | None = None) -> None:
         self.profiles = profile_source(profile)  # the producers' approval rate per family weighs the value (worker.feedback.adjust_value)
         self.match = match
         self.view = view
@@ -90,6 +92,7 @@ class InsightEngine:
         self.cap = cap_per_period
         self.min_value = min_value
         self.load = load  # (match_id, doc_id) -> stored doc, for the producer's decisions
+        self.audit = audit  # audit entry -> None: every step of an insight's life, as the desk audits its own
         self.docs: dict[str, dict] = {}  # key -> insight
         self.current: dict[str, str] = {}  # group -> key of its active insight
         self.bucket_of: dict[str, object] = {}
@@ -239,15 +242,23 @@ class InsightEngine:
                 if k in stored:
                     doc[k] = copy.deepcopy(stored[k])
 
-    def _mark(self, doc: dict, action: str) -> None:
-        doc.setdefault("history", []).append({"action": action, "by": BY, "version": doc["version"]})
+    def _mark(self, doc: dict, action: str, detail: dict | None = None) -> None:
+        """One step of the insight's life: in its history and, with an `audit` callable, in the audit trail (same entry shape as the desk's)."""
+        history = doc.setdefault("history", [])
+        if self.audit is not None:
+            self.audit({"id": f"{doc['id']}-v{doc['version']}-{action}-{len(history)}", "match_id": doc["match_id"], "card_id": doc["id"], "action": action, "by": BY,
+                        "version": doc["version"], "at": time.time(), **(detail or {})})
+        history.append({"action": action, "by": BY, "version": doc["version"]})
 
     def _supersede(self, doc: dict, by: str | None, cause: str) -> None:
         self._refresh(doc)
+        if cause != "outranked" and any(e in self.match.voided for e in doc.get("evidence", [])):
+            cause = "goal ruled out"  # a goal it counted was voided, even when the void is released together with an earlier message
+        was_on_air = doc.get("status") == "approved"
         doc["status"] = "superseded"
         doc["superseded_by"] = f"insight-{self.match.match_id}-{by}" if by else None
         doc["supersede_cause"] = cause
-        self._mark(doc, "superseded")
+        self._mark(doc, "superseded", {"cause": cause, "superseded_by": doc["superseded_by"], "was_on_air": was_on_air})
         self.current.pop(doc["group"], None)
 
     def _fill(self, doc: dict, f: Fact, r: dict, val: int) -> None:

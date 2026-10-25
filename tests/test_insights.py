@@ -250,6 +250,23 @@ def test_unscripted_matches(seed, history):
     assert sum(1 for d in docs if d.get("stat_of_the_match")) <= 1
 
 
+# --- what holds at the current score, and while VAR checks a goal --------------------------------------
+
+def test_every_step_of_a_fact_is_audited_once(demo, history):
+    """The audit trail has each step of every insight's history, in order, and nothing twice: the facts VAR took back are there, with whether they were on air."""
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    stream, truth = demo
+    sink = MemorySink()
+    pipeline = run(stream, history, sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    for d in pipeline.insights("demo-0007"):
+        assert [e["action"] for e in sink.audit if e["card_id"] == d["id"]] == [h["action"] for h in d["history"]], d["key"]
+    assert len({e["id"] for e in sink.audit}) == len(sink.audit)
+    taken_back = {e["card_id"][len("insight-demo-0007-"):] for e in sink.audit if e["action"] == "superseded" and e["cause"] == "goal ruled out" and e["was_on_air"]}
+    assert {"scorer-home-20-3", "comeback-home-2-2", "ht-lead-lost-away-1"} <= taken_back  # the three facts that counted the 63' goal, on air when VAR ruled it out
+
+
 def test_without_history_the_pipeline_is_unchanged(demo):
     pipeline = Pipeline()
     for m in demo[0]:
@@ -270,7 +287,7 @@ def test_json_file_sink_and_threaded_sink(demo, history, tmp_path):
 
 
 class TextDesk:
-    """A desk that already has write_insight (another lot adds it to worker.desk.Desk)."""
+    """A desk with the methods the pipeline calls, write_insight included."""
 
     def __init__(self) -> None:
         self.written = []

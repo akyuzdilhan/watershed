@@ -1,6 +1,6 @@
 """From the wire to the desk: one Match and one Spotter per match, and a sink that stores what they produce.
 
-The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription.
+The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription. With a desk, the desk writes every card and audits every card action once (the Spotter's action goes to the audit trail only when there is no desk).
 """
 
 import copy
@@ -286,9 +286,10 @@ class Pipeline:
                 produced = True
                 card = spotter.cards[result["event_id"]]
                 if "action" in result:
-                    self.sink.action(result, card)
                     if self.desk is not None:
-                        self.desk.on_action(card, result, teams)
+                        self.desk.on_action(card, result, teams)  # audits the action once, with its own fields, and stores the card
+                    else:
+                        self.sink.action(result, card)
                 else:
                     self._season(match, card)
                     self.sink.card(result)
@@ -312,7 +313,7 @@ class Pipeline:
             if self._history_view is None:
                 self._history_view = HistoryView(self.history)
             engine = self.engines[match.match_id] = InsightEngine(match, self._history_view, spotter, self.insight_cap, self.insight_min_value,
-                                                                  load=getattr(self.sink, "load_insight", None))
+                                                                  load=getattr(self.sink, "load_insight", None), audit=getattr(self.sink, "audit_entry", None))
         store = getattr(self.sink, "insight", None)
         write = getattr(self.desk, "write_insight", None) if self.desk is not None else None
         for doc, needs_text in engine.process(m):

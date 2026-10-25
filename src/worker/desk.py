@@ -2,7 +2,7 @@
 
 Statuses: `pending` (written and checked, waiting for a producer), `approved` (on air), `rejected`, `retracted` (the feed took the moment back; a card that was on air must come off). A rewrite (goal credited to another player) writes a new version, which waits for approval again. In auto-approve mode (announced to the judges), a verified card goes on air without a click; a card the Verifier failed and the template replaced is approved too, since the template only uses checked fields.
 
-Each card carries its commentary duo (`duo`), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres from the card's `var_decision`) and what the duo says about it (`duo_ruling`).
+Each card carries its commentary duo (`duo`), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres from the card's `var_decision`) and what the duo says about it (`duo_ruling`). A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
 The producers can also judge every sentence (`feedback`: thumbs up or down, reasons, a note). The desk stores it, audits it, and reads the producer profile built from it (`worker.feedback`) before each draft: the Writer prompt gets the control room's preferences, the template writer picks the variants they turned down last.
 """
@@ -13,6 +13,8 @@ import time
 from worker import feedback as fb
 from worker.duo import PhraseMemory
 from worker.writer import LANGUAGES, TemplateWriter, card_facts, draft, draft_insight, insight_facts, low_stake, ruling_duo
+
+ACTION_FIELDS = ("event_id", "message_id", "minute_label", "cause")  # what the desk's audit entry keeps of a card action from the feed
 
 
 class Desk:
@@ -90,6 +92,8 @@ class Desk:
         return self._stage(doc, d, getattr(self.sink, "insight", None) or self.sink.card)
 
     def on_action(self, card: dict, action: dict, teams: dict[str, str]) -> dict:
+        """A card action from the feed: one audit entry, which keeps the action's event, message, minute and cause, then the card stored (a rewrite writes a new version)."""
+        detail = {k: action[k] for k in ACTION_FIELDS if k in action}
         if action["action"] == "retract":
             was_on_air = action.get("previous_status") == "approved"
             card["status"] = "retracted"
@@ -100,12 +104,12 @@ class Desk:
                 card["ruled_out"] = {"reason": cause[4:], "cause": cause, "minute_label": action.get("minute_label"),
                                      "margin_cm": round(100 * margin_m) if isinstance(margin_m, (int, float)) else None}
                 card["duo_ruling"], _ = ruling_duo(card, teams, self.languages, self.memory(card["match_id"]))
-            self._audit(card, "retracted", "feed", {"cause": action["cause"], "was_on_air": was_on_air})
+            self._audit(card, "retracted", "feed", {**detail, "was_on_air": was_on_air})
         elif action["action"] == "rewrite":
-            self._audit(card, "rewrite_requested", "feed", {"cause": action["cause"]})
+            self._audit(card, "rewrite_requested", "feed", detail)
             return self.write(card, teams)
         else:  # hold, release: the card stays where it is, flagged
-            self._audit(card, action["action"], "feed", {"cause": action["cause"]})
+            self._audit(card, action["action"], "feed", detail)
         self.sink.card(card)
         return card
 
