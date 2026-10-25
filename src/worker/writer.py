@@ -822,7 +822,6 @@ def conditions(card: dict, facts: dict) -> dict:
         "if_small_margin": isinstance(value, int) and value < SMALL_MARGIN_PTS,
         "if_big_margin": isinstance(value, int) and value >= SMALL_MARGIN_PTS,
         "if_big_chance": isinstance(before, int) and isinstance(other, int) and abs(other - before) >= SMALL_MARGIN_PTS,
-        "if_deflection": card.get("rewrite_cause") == "deflection",
     }
     return {k: "" if true.get(k) else None for k in CONDITIONS}
 

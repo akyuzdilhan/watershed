@@ -134,7 +134,6 @@ CONDITIONS = {  # filled by writer.conditions: "" when the line is true for the 
     "if_small_margin": "the save is worth less than SMALL_MARGIN_PTS points",
     "if_big_margin": "the save is worth SMALL_MARGIN_PTS points or more",
     "if_big_chance": "the miss cost SMALL_MARGIN_PTS points or more of the chance of winning",
-    "if_deflection": "the feed credited the goal to another player after a deflection",
 }
 TILT_PTS, SMALL_MARGIN_PTS = 20, 15
 
@@ -192,7 +191,7 @@ LINES: dict[str, dict[str, dict]] = {
             "again": ["This time it counts! {scorer} for {team}!", "Again, and this time it counts! {scorer} for {team}!"],
             "eye": ["{team} were on {before}% to win before that; now {after}%, a jump of {swing} points.", "That goal is worth {swing} points to {team}: from {before}% to {after}% to win.",
                     "Put a number on it: {team} go from {before}% to {after}% to win.", "{team} now on {after}% to win, up {swing} points from {before}%.",
-                    "Before the goal, {team} had {before}% to win; it is {after}% now.", "Look at the jump: {swing} points in one kick, and {team} are on {after}% to win."],
+                    "Before the goal, {team} had {before}% to win; it is {after}% now.", "Look at the jump: {swing} points in one go, and {team} are on {after}% to win."],
             "heart_back": ["You can feel it, Joss. The whole match just tilted.{if_tilt}", "And look at {scorer}'s face. That is what it means.",
                            "Numbers or no numbers, that is a moment {team} fans will keep.", "I'll take your word for it. I'm just enjoying the noise!{if_home}",
                            "I'll take your word for it. Just listen to the away end!{if_away}", "That's the thing about this game: one touch, and the story changes."],
@@ -387,13 +386,13 @@ LINES: dict[str, dict[str, dict]] = {
     },
     "reassigned": {  # a goal the feed credits to another player: the duo tells the change of scorer instead of the goal again
         "en": {"heart": ["Correction on that goal: it goes to {scorer}, not {previous_scorer}.", "Change of scorer: that goal now belongs to {scorer}.",
-                         "The goal now goes to {scorer}, after a deflection.{if_deflection}"],
+                         "Change on the scoresheet: {scorer} gets the credit, not {previous_scorer}."],
                "eye": ["Same goal, same story for {team}: only the scorer's name changes.", "Nothing changes for {team} but the name on the scoresheet."]},
         "fr": {"heart": ["Correction sur ce but : il revient à {scorer}, et non à {previous_scorer}.", "Changement de buteur : ce but est désormais attribué à {scorer}.",
-                         "Le but revient finalement à {scorer}, après une déviation.{if_deflection}"],
+                         "Changement sur la feuille de match : le but est pour {scorer}, pas pour {previous_scorer}."],
                "eye": ["Même but, même histoire pour {team} : seul le nom du buteur change.", "Rien ne change pour {team}, sauf le nom sur la feuille de match."]},
         "es": {"heart": ["Corrección en ese gol: es para {scorer}, no para {previous_scorer}.", "Cambio de goleador: el gol pasa a ser de {scorer}.",
-                         "El gol es finalmente para {scorer}, tras un desvío.{if_deflection}"],
+                         "Cambio en el acta: el gol es de {scorer}, no de {previous_scorer}."],
                "eye": ["Mismo gol, misma historia para el {team}: solo cambia el nombre del goleador.", "Nada cambia para el {team}, salvo el nombre en el acta."]},
     },
     "insight": {  # keyed by insight kind, for the facts no family of worker.insight_texts covers: no number, a line true for the kind
