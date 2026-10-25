@@ -44,6 +44,7 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .ru-value { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .ru-who { color: var(--ink-2); margin: 2px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ru-retracted .ru-top, .ru-retracted .ru-who { text-decoration: line-through; color: var(--muted); }
+.rundown .dash-options-list-option:has(.ru-waiting) { border-left: 3px solid var(--warn); }
 
 .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; margin-right: 4px; border: 1px solid currentColor; }
 .st-proposed { color: var(--muted); }
@@ -67,6 +68,12 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .h-action { color: var(--ink); font-weight: 600; }
 
 .actions { display: flex; gap: 8px; margin-top: 14px; }
+.detail-head { padding-bottom: 4px; }
+.detail-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.detail-bar .actions { margin-top: 10px; }
+.lang-switch { margin-top: 10px; margin-left: auto; }
+.attempts { margin-top: 6px; font-size: 12px; }
+.attempts th { text-align: left; color: var(--muted); font-weight: 600; padding: 2px 12px 2px 0; }
 .btn { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px 16px; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .btn-approve:not(:disabled) { background: var(--ok); border-color: var(--ok); color: #fff; }
@@ -136,6 +143,8 @@ body:has(.ov-page) { background: #0b0b0b; }
 .ov-retraction .ov-headline { color: var(--bad); }
 .ov-struck { text-decoration: line-through; color: var(--muted); }
 .ov-corrected { color: var(--warn); border-color: var(--warn); }
+.ov-auto { color: var(--muted); border-color: var(--muted); }
+.ov-ai { color: var(--ink-2); border-style: dashed; }
 .ov-second { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
 .ov-second-text { font-size: 16px; color: var(--ink-2); }
 @media (max-width: 600px) { .ov-headline { font-size: 18px; } .ov-why { font-size: 14px; } .ov-second-text { font-size: 13px; } .ov-lower { left: 16px; right: 16px; } .ov-bug { left: 16px; } }
