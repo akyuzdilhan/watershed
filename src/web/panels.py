@@ -18,7 +18,10 @@ from web.store import get_store
 from worker import feedback as FB
 from worker import tactics as T
 
-PANEL_REFRESH_MS = 5000  # per IP: the desk ticks every 1.5 s (two callbacks, about 80 requests a minute), the visible panel adds 12 and an overlay open on the same machine 60 (it ticks every second): about 152 a minute, under the default RATE_LIMIT_PER_MIN of 600
+PANEL_REFRESH_MS = 5000  # per IP: the desk ticks every 1.5 s (two callbacks, about 80 requests a minute), the visible panel adds 12 and an overlay open on the same machine 60 (it ticks every second): about 152 a minute, under a RATE_LIMIT_PER_MIN of 600
+# The desk tick sets the match picker again with the same value, and Dash runs every callback that takes it as an input each time: the panels take c-p-match instead,
+# a copy that this function, run in the browser, writes only when the match changes, so the tick sends them no request.
+SAME_MATCH = "function(value, current) { if (value === undefined) { value = null; } return value === (current === undefined ? null : current) ? window.dash_clientside.no_update : value; }"
 THEME = dict(pitch.THEMES["dark"], paper="#1a1a19")
 KINDS = [
     {"value": "shots", "label": "Shot map"},
@@ -233,7 +236,8 @@ def graphics_pane() -> html.Section:
         html.Div([dcc.Dropdown(id="c-g-kind", options=KINDS, value="shots", clearable=False, className="match-picker"),
                   dcc.Dropdown(id="c-g-item", options=[], clearable=False, className="match-picker g-item", placeholder="Moment")], className="g-controls"),
         dcc.Graph(id="c-g-figure", figure=empty_figure("Loading."), config={"displayModeBar": False}, className="g-figure"),
-        html.P(id="c-g-note", className="muted small"), dcc.Store(id="c-g-sig"), dcc.Interval(id="c-g-tick", interval=PANEL_REFRESH_MS, disabled=True)], id="c-pane-graphics", className="col pane", style={"display": "none"})
+        html.P(id="c-g-note", className="muted small"), dcc.Store(id="c-g-sig"), dcc.Store(id="c-p-match"), dcc.Interval(id="c-g-tick", interval=PANEL_REFRESH_MS, disabled=True)],
+        id="c-pane-graphics", className="col pane", style={"display": "none"})
 
 
 # --- insights and storyline ---------------------------------------------------------------------------
@@ -454,13 +458,14 @@ def _decide_cb(_a, _r, _sa, _sr, match_id, doc_id, rev):
 def register(app) -> None:
     app.callback(Output("c-pane-desk", "style"), Output("c-pane-graphics", "style"), Output("c-pane-insights", "style"), Output("c-g-tick", "disabled"), Output("c-i-tick", "disabled"),
                  Input("c-view", "value"))(view_styles)
+    app.clientside_callback(SAME_MATCH, Output("c-p-match", "data"), Input("c-match", "value"), State("c-p-match", "data"))
     app.callback(Output("c-g-item", "options"), Output("c-g-item", "value"), Output("c-g-figure", "figure"), Output("c-g-note", "children"), Output("c-g-sig", "data"),
-                 Input("c-g-tick", "n_intervals"), Input("c-match", "value"), Input("c-g-kind", "value"), Input("c-g-item", "value"), Input("c-view", "value"),
+                 Input("c-g-tick", "n_intervals"), Input("c-p-match", "data"), Input("c-g-kind", "value"), Input("c-g-item", "value"), Input("c-view", "value"),
                  State("c-g-sig", "data"))(_graphics_cb)
     app.callback(Output("c-i-list", "options"), Output("c-i-list", "value"), Output("c-i-detail", "children"), Output("c-i-figure", "figure"), Output("c-s-detail", "children"),
                  Output("c-i-approve", "disabled"), Output("c-i-reject", "disabled"), Output("c-s-approve", "disabled"), Output("c-s-reject", "disabled"), Output("c-i-sig", "data"),
                  Output("c-r-detail", "children"), Output("c-r-sig", "data"),
-                 Input("c-i-tick", "n_intervals"), Input("c-i-rev", "data"), Input("c-match", "value"), Input("c-i-list", "value"), Input("c-view", "value"),
+                 Input("c-i-tick", "n_intervals"), Input("c-i-rev", "data"), Input("c-p-match", "data"), Input("c-i-list", "value"), Input("c-view", "value"),
                  State("c-i-sig", "data"), State("c-r-sig", "data"))(_insights_cb)
     app.callback(Output("c-i-message", "children"), Output("c-i-rev", "data"),
                  Input("c-i-approve", "n_clicks"), Input("c-i-reject", "n_clicks"), Input("c-s-approve", "n_clicks"), Input("c-s-reject", "n_clicks"),

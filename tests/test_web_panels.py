@@ -1,6 +1,8 @@
 import json
 import math
+import shutil
 import statistics
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,8 +19,8 @@ from worker.writer import TemplateWriter
 
 MATCH = "demo-0007"
 REPLAY = Path(__file__).resolve().parents[1] / "data" / "replay" / f"{MATCH}.jsonl.gz"
-ON_INSIGHTS = {"c-match.value": MATCH, "c-view.value": "insights", "c-i-rev.data": 0}  # callback values, by "id.property"
-ON_GRAPHICS = {"c-match.value": MATCH, "c-view.value": "graphics"}
+ON_INSIGHTS = {"c-p-match.data": MATCH, "c-view.value": "insights", "c-i-rev.data": 0}  # callback values, by "id.property"
+ON_GRAPHICS = {"c-p-match.data": MATCH, "c-view.value": "graphics"}
 PRODUCER = {security.PRINCIPAL_HEADER: "producer@example.com"}  # with EASY_AUTH_ENABLED: a signed-in producer; without the header, a visitor
 
 
@@ -358,3 +360,24 @@ def test_a_visitor_cannot_approve_or_reject_an_insight_or_the_storyline(public):
     out = dash_post("c-i-message.children", {**values, "c-i-approve.n_clicks": 1}, "c-i-approve.n_clicks", PRODUCER)
     assert f"On air, by {PRODUCER[security.PRINCIPAL_HEADER]}" in words(out["c-i-message"]) and out["c-i-rev"]["data"] == 1
     assert {d["id"]: d for d in public.insights(MATCH)}[docs[0]["id"]]["status"] == "approved"
+
+
+# --- requests per tick ------------------------------------------------------------------------------
+
+def test_the_desk_tick_sends_the_panels_no_request():
+    """The match list sets the picker on every desk tick; the panels take the copy kept in the browser, written only when the match changes."""
+    picker, copy = {"id": "c-match", "property": "value"}, {"id": "c-p-match", "property": "data"}
+    clientside = next(c for c in app._callback_list if c["output"] == "c-p-match.data")
+    assert clientside["clientside_function"] and clientside["inputs"] == [picker]  # run in the browser: no request
+    for output in ("c-g-figure.figure", "c-i-detail.children"):
+        spec = next(v for k, v in app.callback_map.items() if output in k.strip(".").split("..."))
+        assert picker not in spec["inputs"] and copy in spec["inputs"], output
+    assert "c-p-match" in [getattr(c, "id", None) for c in panels.graphics_pane().children]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_copy_of_the_picker_changes_only_with_the_match():
+    script = (f"const window = {{dash_clientside: {{no_update: 'no_update'}}}}; const same = {panels.SAME_MATCH};"
+              "console.log(JSON.stringify([same('m1', 'm1'), same('m2', 'm1'), same(undefined, undefined), same(null, undefined), same('m1', undefined), same(null, 'm1')]));")
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=60).stdout
+    assert json.loads(out) == ["no_update", "m2", "no_update", "no_update", "m1", None]
