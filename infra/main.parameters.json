@@ -13,6 +13,10 @@
     "foundryModelFallback": { "value": "${FOUNDRY_MODEL_FALLBACK=gpt-5-mini}" },
     "foundryReasoningEffort": { "value": "${FOUNDRY_REASONING_EFFORT=medium}" },
     "workerExtraArgs": { "value": "${WORKER_EXTRA_ARGS=}" },
-    "webAuthClientId": { "value": "${WEB_AUTH_CLIENT_ID=}" }
+    "workerMinReplicas": { "value": "${WORKER_MIN_REPLICAS=0}" },
+    "webAuthClientId": { "value": "${WEB_AUTH_CLIENT_ID=}" },
+    "webProducers": { "value": "${PRODUCERS=}" },
+    "webMinReplicas": { "value": "${WEB_MIN_REPLICAS=0}" },
+    "webRateLimitPerMin": { "value": "${RATE_LIMIT_PER_MIN=600}" }
   }
 }

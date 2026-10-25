@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-Undoes the Watershed kill switch: recreates the Foundry deployments, re-enables the Service Bus subscriptions, starts the container apps.
+Undoes the Watershed kill switch: recreates the Foundry deployments, re-enables the worker subscription, starts the worker container app.
 
 .DESCRIPTION
-Run by a human with `az login` (Contributor on the two resource groups is enough).
+Run by hand, signed in with `az login` (Contributor on the two resource groups is enough).
+The kill switch leaves the web app running, so there is nothing to restore there. A replay it stopped is not resumed: start a new run of the job when needed.
 The default deployments match the settings the runbook prints as RESTORE-SETTINGS in its job output; check them there if they changed.
--DryRun prints what would be done.
+-DryRun prints what would be done. If a listing fails, the script stops with an error and does not report the restore as finished.
 
 .EXAMPLE
 ./infra/killswitch/restore.ps1 -DryRun
@@ -23,8 +24,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Names from infra/resources.bicep, as in Stop-Watershed.ps1: the worker app's azd tag and its subscription.
+$workerService = 'worker'
+$workerSubscription = 'worker'
 $subscriptionId = az account show --query id -o tsv
-if (-not $subscriptionId) { throw 'Run az login first.' }
+if ($LASTEXITCODE -ne 0 -or -not $subscriptionId) { throw 'Run az login first.' }
 $arm = 'https://management.azure.com'
 $tmp = New-Item -ItemType Directory -Force -Path (Join-Path ([IO.Path]::GetTempPath()) "ws-restore-$PID")
 
@@ -33,6 +37,13 @@ function Step([string] $Description, [scriptblock] $Action) {
     & $Action
     if ($LASTEXITCODE -ne 0) { throw "FAILED $Description" }
     Write-Host "DONE   $Description"
+}
+
+# The output of an az listing; a failed call stops the script instead of looking like an empty list.
+function Get-AzOutput([string] $What, [scriptblock] $Command) {
+    $out = & $Command
+    if ($LASTEXITCODE -ne 0) { throw "Could not list $What (az exit code $LASTEXITCODE). Restore not finished." }
+    @($out | Where-Object { $_ })
 }
 
 try {
@@ -54,20 +65,24 @@ try {
         }
     }
 
-    # 2. Service Bus subscriptions back to Active.
-    foreach ($ns in (az servicebus namespace list -g $AppResourceGroup --query "[].name" -o tsv)) {
-        foreach ($topic in (az servicebus topic list -g $AppResourceGroup --namespace-name $ns --query "[].name" -o tsv)) {
-            foreach ($sub in (az servicebus topic subscription list -g $AppResourceGroup --namespace-name $ns --topic-name $topic --query "[?status!='Active'].name" -o tsv)) {
-                Step "enable subscription $ns/$topic/$sub" {
-                    az servicebus topic subscription update -g $AppResourceGroup --namespace-name $ns --topic-name $topic -n $sub --status Active | Out-Null
-                }
+    # 2. The worker subscription of each topic back to Active (the kill switch disables no other).
+    foreach ($ns in (Get-AzOutput "Service Bus namespaces in $AppResourceGroup" { az servicebus namespace list -g $AppResourceGroup --query "[].name" -o tsv })) {
+        foreach ($topic in (Get-AzOutput "topics of $ns" { az servicebus topic list -g $AppResourceGroup --namespace-name $ns --query "[].name" -o tsv })) {
+            $status = Get-AzOutput "subscriptions of $ns/$topic" { az servicebus topic subscription list -g $AppResourceGroup --namespace-name $ns --topic-name $topic --query "[?name=='$workerSubscription'].status" -o tsv }
+            if ($status.Count -eq 0) { continue }
+            if ($status[0] -eq 'Active') { Write-Host "SKIP   subscription $ns/$topic/$workerSubscription already active"; continue }
+            Step "enable subscription $ns/$topic/$workerSubscription" {
+                az servicebus topic subscription update -g $AppResourceGroup --namespace-name $ns --topic-name $topic -n $workerSubscription --status Active | Out-Null
             }
         }
     }
 
-    # 3. Container apps: start (ingress and revisions come back as they were before the stop).
-    foreach ($id in (az containerapp list -g $AppResourceGroup --query "[].id" -o tsv)) {
-        Step "start container app $(Split-Path -Leaf $id)" {
+    # 3. The worker container app: start (ingress and revisions come back as they were before the stop). The web app is not touched.
+    $apps = (Get-AzOutput "container apps in $AppResourceGroup" { az resource list -g $AppResourceGroup --resource-type Microsoft.App/containerApps -o json }) -join "`n" | ConvertFrom-Json
+    foreach ($app in $apps) {
+        if ($app.tags.'azd-service-name' -ne $workerService) { Write-Host "KEEP   container app $($app.name)"; continue }
+        $id = $app.id
+        Step "start container app $($app.name)" {
             az rest --method post --url "$arm$id/start?api-version=2024-03-01" | Out-Null
         }
     }
@@ -75,4 +90,5 @@ try {
 finally {
     Remove-Item -Recurse -Force $tmp
 }
-Write-Host 'Restore finished. Check: az containerapp show -g' $AppResourceGroup '-n <app> --query properties.runningStatus'
+if ($DryRun) { Write-Host 'Dry run finished: nothing was changed.' }
+else { Write-Host 'Restore finished. Check: az containerapp show -g' $AppResourceGroup '-n <worker app> --query properties.runningStatus' }

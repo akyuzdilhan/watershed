@@ -1,5 +1,6 @@
 // Watershed kill switch. Deployed on its own with deploy.ps1, never by azd: infra/main.bicep does not reference this file.
-// Budget alert at 80 % (and 90 %) actual -> action group -> Automation webhook -> runbook Stop-Watershed (Mode=Kill).
+// Budget alert at 80 % (and 90 %) actual -> action group -> Automation webhook -> runbook Stop-Watershed (Mode=Kill),
+// which stops the worker, the replay and the models and leaves the web app running.
 targetScope = 'subscription'
 
 @description('Region of the Automation account.')
@@ -47,13 +48,16 @@ resource killSwitchRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
   name: guid(subscription().id, 'watershed-killswitch-operator')
   properties: {
     roleName: 'Watershed kill switch operator'
-    description: 'Stop container apps, disable Service Bus subscriptions and delete Foundry deployments. Used by the kill switch runbook.'
+    description: 'Stop container apps and running job executions, disable Service Bus subscriptions and delete Foundry deployments. Used by the kill switch runbook, which stops the worker and the replay and leaves the web app running.'
     type: 'customRole'
     permissions: [
       {
         actions: [
           'Microsoft.App/containerApps/read'
           'Microsoft.App/containerApps/stop/action'
+          // List the jobs, then list and stop their executions; starting a job (jobs/start/action) stays out
+          'Microsoft.App/jobs/read'
+          'Microsoft.App/jobs/executions/*'
           'Microsoft.ServiceBus/namespaces/read'
           'Microsoft.ServiceBus/namespaces/topics/read'
           'Microsoft.ServiceBus/namespaces/topics/subscriptions/read'

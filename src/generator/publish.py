@@ -2,12 +2,13 @@
 
 Every message carries session_id = match_id, so the worker receives each match in order. Late messages and duplicates from the replay file are sent as they are: the worker must handle them. Authentication goes through DefaultAzureCredential (az login locally, managed identity in Azure); there is no connection string.
 
-Pacing is built for a live demo: the match runs `--speed` times faster than real time, except around key moments (goals, red cards, big chances, VAR checks, corrections), which play in real time so that a card can be written, approved and aired before the feed changes it. Half-time is cut to a few seconds, and a correction never arrives sooner than `--min-correction-delay` real seconds after the action it corrects.
+Pacing is built for a live demo: the match runs `--speed` times faster than real time, except around key moments (goals, red cards, big chances, VAR checks, corrections), which play in real time so that a card can be written, approved and aired before the feed changes it. Half-time is cut to a few seconds, and a correction never arrives sooner than `--min-correction-delay` real seconds after the action it corrects. `--min-var-delay` does the same for a VAR check and its goal (no extra wait by default): with a producer approving on screen, the goal card can be on air before the check starts.
 
 Usage:
     python -m generator.publish data/replay/demo-0007.jsonl.gz --dry --speed 0
     python -m generator.publish data/replay/demo-0007.jsonl.gz --speed 10
     python -m generator.publish data/replay/demo-0007.jsonl.gz --from-minute 60
+    python -m generator.publish data/replay/demo-0007.jsonl.gz --speed 10 --min-var-delay 45   # a producer approves the goal cards by hand
 Needs SERVICE_BUS_FQDN and SERVICE_BUS_TOPIC: from the environment, the .env file, or the azd environment (.azure/<env>/.env).
 """
 
@@ -37,7 +38,8 @@ def is_key(m: dict) -> bool:
     return m.get("card") in ("red", "second_yellow") or (shot is not None and (shot["outcome"] == "goal" or shot["xg"] >= 0.2))
 
 
-def schedule(messages: list[dict], speed: float, halftime_s: float = 10.0, from_minute: float | None = None, min_correction_delay: float = 40.0) -> list[float]:
+def schedule(messages: list[dict], speed: float, halftime_s: float = 10.0, from_minute: float | None = None, min_correction_delay: float = 40.0,
+             min_var_delay: float = 0.0) -> list[float]:
     """Real seconds after the start at which each message (in file order) is sent."""
     if speed <= 0:
         return [0.0] * len(messages)
@@ -64,6 +66,8 @@ def schedule(messages: list[dict], speed: float, halftime_s: float = 10.0, from_
                 real += gap if any(a <= t <= b for a, b in windows) else gap / speed
         if m["type"] == "correction" and m["target_event_id"] in sent:
             real = max(real, sent[m["target_event_id"]] + min_correction_delay)
+        if m["type"] == "var_check" and m["target_event_id"] in sent:  # the goal under review (action message id = event id)
+            real = max(real, sent[m["target_event_id"]] + min_var_delay)
         times.append(real)
         sent.setdefault(m["message_id"], real)
         prev, prev_period = t, period
@@ -81,18 +85,24 @@ def replay(messages: list[dict], send, speed: float, **pacing) -> None:
         send(m)
 
 
-def service_bus_settings() -> tuple[str, str]:
-    """Reads the Service Bus settings from the environment, the .env file, or the default azd environment."""
+def load_environment(needed: str) -> None:
+    """Loads the .env file and, when `needed` is still unset, the default azd environment (.azure/<env>/.env). A variable already set is kept."""
     from dotenv import dotenv_values, load_dotenv
 
     load_dotenv()
-    if not os.environ.get("SERVICE_BUS_FQDN"):
-        config = Path(".azure/config.json")
-        name = json.loads(config.read_text(encoding="utf-8")).get("defaultEnvironment") if config.exists() else None
-        azd_env = Path(".azure") / name / ".env" if name else None
-        if azd_env and azd_env.exists():
-            for key, value in dotenv_values(azd_env).items():
-                os.environ.setdefault(key, value or "")
+    if os.environ.get(needed):
+        return
+    config = Path(".azure/config.json")
+    name = json.loads(config.read_text(encoding="utf-8")).get("defaultEnvironment") if config.exists() else None
+    azd_env = Path(".azure") / name / ".env" if name else None
+    if azd_env and azd_env.exists():
+        for key, value in dotenv_values(azd_env).items():
+            os.environ.setdefault(key, value or "")
+
+
+def service_bus_settings() -> tuple[str, str]:
+    """Reads the Service Bus settings from the environment, the .env file, or the default azd environment."""
+    load_environment("SERVICE_BUS_FQDN")
     fqdn, topic = os.environ.get("SERVICE_BUS_FQDN"), os.environ.get("SERVICE_BUS_TOPIC", "match-events")
     if not fqdn:
         sys.exit("SERVICE_BUS_FQDN is not set: run `azd provision`, or copy it from `azd env get-values` into .env")
@@ -106,10 +116,11 @@ def main() -> None:
     parser.add_argument("--from-minute", type=float, help="send everything before this match minute at once, then pace the rest")
     parser.add_argument("--halftime-s", type=float, default=10.0, help="real seconds for the half-time break")
     parser.add_argument("--min-correction-delay", type=float, default=40.0, help="real seconds between an action and its correction, at least")
+    parser.add_argument("--min-var-delay", type=float, default=0.0, metavar="SECONDS", help="real seconds between a goal and its VAR check, at least: time for a producer to approve the goal card on screen")
     parser.add_argument("--dry", action="store_true", help="print the messages instead of sending them")
     args = parser.parse_args()
     messages = load(args.replay)
-    pacing = {"halftime_s": args.halftime_s, "from_minute": args.from_minute, "min_correction_delay": args.min_correction_delay}
+    pacing = {"halftime_s": args.halftime_s, "from_minute": args.from_minute, "min_correction_delay": args.min_correction_delay, "min_var_delay": args.min_var_delay}
 
     if args.dry:
         replay(messages, lambda m: print(m["emitted_at_s"], m.get("minute_label", ""), m["message_id"], m["type"], m.get("action_type", "")), args.speed, **pacing)

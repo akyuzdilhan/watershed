@@ -29,8 +29,25 @@ param foundryRoleId string = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 @description('Extra arguments for the worker, for example --auto-approve in judging mode.')
 param workerExtraArgs string = ''
 
+@minValue(0)
+@maxValue(1)
+@description('Minimum replicas of the worker: 0 lets KEDA scale it to zero when the subscription is idle, 1 keeps one replica up (no scale-in during a replay).')
+param workerMinReplicas int = 0
+
 @description('Client id of the Entra app registration for Easy Auth on the web app. Empty: Easy Auth is off.')
 param webAuthClientId string = ''
+
+@description('Optional allow-list of producers (comma-separated sign-in names) on the web app. Empty: any user Easy Auth signs in.')
+param webProducers string = ''
+
+@minValue(0)
+@maxValue(2)
+@description('Minimum replicas of the web app: 0 scales to zero when nobody visits, 1 keeps one replica warm (no cold start).')
+param webMinReplicas int = 0
+
+@minValue(1)
+@description('Requests per minute allowed to one client IP on the web app pages and callbacks.')
+param webRateLimitPerMin int = 600
 
 var suffix = uniqueString(resourceGroup().id)
 var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
@@ -172,17 +189,7 @@ resource workerReceiver 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// Web console (replay button) and replay job publish to the topic only
-resource webSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(topic.id, webIdentity.id, serviceBusSenderRoleId)
-  scope: topic
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusSenderRoleId)
-    principalId: webIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
+// Only the replay job publishes to the topic; the web app has no Service Bus role
 resource replaySender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(topic.id, replayIdentity.id, serviceBusSenderRoleId)
   scope: topic
@@ -366,23 +373,28 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
               value: 'cosmos'
             }
             {
-              name: 'SERVICE_BUS_FQDN'
-              value: serviceBusFqdn
-            }
-            {
-              name: 'SERVICE_BUS_TOPIC'
-              value: topicName
+              // Read-only console for visitors: producer actions need a signed-in producer (src/web/security.py)
+              name: 'PUBLIC_MODE'
+              value: '1'
             }
             {
               // Trust X-MS-CLIENT-PRINCIPAL-NAME only when Easy Auth is on: without it, a client can send the header itself.
               name: 'EASY_AUTH_ENABLED'
               value: string(easyAuthEnabled)
             }
+            {
+              name: 'PRODUCERS'
+              value: webProducers
+            }
+            {
+              name: 'RATE_LIMIT_PER_MIN'
+              value: string(webRateLimitPerMin)
+            }
           ]
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: webMinReplicas
         maxReplicas: 2
       }
     }
@@ -453,12 +465,13 @@ var workerEnv = [
     value: foundryReasoningEffort
   }
   {
-    name: 'WORKER_ARGS'
+    // Appended to the worker command by src/worker/Dockerfile
+    name: 'WORKER_EXTRA_ARGS'
     value: workerExtraArgs
   }
 ]
 
-// Worker: no ingress, scaled by KEDA on the worker subscription (0 when idle, 1 at most so one consumer owns each match)
+// Worker: no ingress, scaled by KEDA on the worker subscription (0 when idle unless workerMinReplicas is 1, 1 at most so one consumer owns each match)
 resource worker 'Microsoft.App/containerApps@2025-01-01' = {
   name: 'ca-worker-${suffix}'
   location: location
@@ -492,8 +505,11 @@ resource worker 'Microsoft.App/containerApps@2025-01-01' = {
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: workerMinReplicas
         maxReplicas: 1
+        // KEDA stops the replica 15 minutes after a poll last saw a message waiting (5 by default). The worker settles messages
+        // within seconds, so polls can find the subscription empty while a replay runs, and a replica stopped mid-match loses the match state.
+        cooldownPeriod: 900
         rules: [
           {
             name: 'match-events'

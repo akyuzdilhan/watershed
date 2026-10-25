@@ -32,7 +32,7 @@ resource runbook 'Microsoft.Automation/automationAccounts/runbooks@2023-11-01' =
   tags: tags
   properties: {
     runbookType: 'PowerShell'
-    description: 'Watershed kill switch: stop container apps, disable Service Bus subscriptions, delete Foundry deployments.'
+    description: 'Watershed kill switch: stop the worker app and the replay job, disable the worker subscription, delete Foundry deployments. The web app keeps running.'
     logProgress: false
     logVerbose: false
   }
