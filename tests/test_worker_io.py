@@ -1,10 +1,14 @@
-"""The worker's input and output without Azure: concurrent writes, card ordering, incremental match state, and the Service Bus loop on fakes."""
+"""The worker's input and output without Azure: concurrent writes, card ordering, incremental match state, the Service Bus loop on fakes, and the post-match recap."""
 
 import json
 import logging
+import os
 import random
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +19,9 @@ from worker.desk import Desk
 from worker.match import Match
 from worker.pipeline import MemorySink, Pipeline, ThreadedSink
 from worker.writer import TemplateWriter
+
+
+SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 @pytest.fixture(scope="module")
@@ -586,3 +593,118 @@ def test_thin_timeline_keeps_jumps_and_the_end():
     thinned = thin_timeline(points)
     assert len(thinned) < 25 and thinned[-1] is points[-1]
     assert points[49] in thinned and any(p is points[50] for p in thinned)
+
+
+# --- 5. the post-match recap and the writer options --------------------------------------------------
+
+
+def test_the_listener_writes_the_recap_at_the_final_whistle(demo):
+    """Through the Service Bus loop and the threaded sink, the desk writes the recap once the final whistle is processed, from the approved cards only."""
+    stream, _ = demo
+    inner = MemorySink()
+    sink = ThreadedSink(inner)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    clock, log = FakeClock(), {}
+    consume(pipeline, fake_bus({"demo": bodies(stream)}, clock, log), idle_s=30, clock=clock)
+    assert sink.close() == []
+    recap = inner.recaps["demo-0007"]
+    assert recap == pipeline.recaps["demo-0007"] and (recap["id"], recap["type"], recap["final"], recap["writer"]) == ("recap-demo-0007", "recap", True, "template")
+    assert recap["verification"]["verified"] and recap["analysis"]["score"] == next(iter(pipeline.matches.values())).score()
+    approved = {c["id"] for c in inner.cards.values() if c["status"] == "approved"}
+    assert recap["cited_cards"] and set(recap["cited_cards"] + recap["analysis"]["cards_on_air"]) <= approved
+
+
+def test_a_card_action_after_the_final_whistle_writes_the_recap_again(demo):
+    """A goal the provider voids after full time: the card comes off and the recap is written again on the new score."""
+    stream, truth = demo
+    last = max((g for g in truth["goals"] if g["counts"]), key=lambda g: g["clock_s"])
+    template = next(m for m in stream if m["type"] == "correction" and m["op"] == "void")
+    seq, at = max(m["seq"] for m in stream), max(m["emitted_at_s"] for m in stream)
+    void = {**template, "message_id": "extra-void", "seq": seq + 1, "emitted_at_s": at + 30, "target_event_id": last["event_id"], "cause": "provider_review", "related_message_id": None}
+    sink = MemorySink()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    at_whistle = pipeline.recaps["demo-0007"]["analysis"]["score"]
+    pipeline.handle(void)
+    pipeline.flush()
+    recap = sink.recaps["demo-0007"]
+    side = last["team"]
+    assert recap["analysis"]["score"][side] == at_whistle[side] - 1 and f"card-{last['event_id']}" in recap["analysis"]["cards_retracted"]
+    assert recap["verification"]["verified"]
+
+
+def test_the_final_whistle_is_processed_even_if_the_recap_fails(demo, caplog):
+    class BrokenRecapDesk(Desk):
+        def write_recap(self, cards, state, storyline=None):
+            raise KeyError("draw_after_pct")
+
+    stream, _ = demo
+    sink = MemorySink()
+    pipeline = Pipeline(sink=sink, desk=BrokenRecapDesk(sink, TemplateWriter(), auto_approve=True))
+    with caplog.at_level(logging.WARNING, logger="worker"):
+        for m in stream:
+            pipeline.handle(m)
+        pipeline.flush()
+    assert sink.states["demo-0007"]["final"] and pipeline.recaps == {}
+    assert any("recap of demo-0007 failed" in r.getMessage() for r in caplog.records)
+
+
+def test_no_recap_when_it_is_turned_off_or_without_a_desk(demo):
+    stream, _ = demo
+    sink = MemorySink()
+    off = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True), recap=False)
+    for m in stream:
+        off.handle(m)
+    off.flush()
+    bare, _ = offline(stream)
+    assert off.recaps == sink.recaps == {} and bare.recaps == bare.sink.recaps == {}
+
+
+class FakeContainer:
+    def __init__(self) -> None:
+        self.items: list[dict] = []
+
+    def upsert_item(self, item: dict) -> None:
+        self.items.append(item)
+
+
+def test_cosmos_sink_writes_the_recap_next_to_the_cards():
+    sink = object.__new__(azure_io.CosmosSink)  # no client: the containers are all it uses
+    sink.cards = FakeContainer()
+    sink.recap({"id": "recap-m", "type": "recap", "match_id": "m", "texts": []})
+    (item,) = sink.cards.items
+    assert (item["id"], item["type"], item["match_id"]) == ("recap-m", "recap", "m")
+
+
+def test_loading_the_worker_loads_no_model_client():
+    """Agent Framework and the Azure SDKs are imported only when a Foundry writer or an Azure sink is built."""
+    code = ("import sys, worker.__main__, worker.pipeline, worker.desk, worker.recap, worker.azure_io, worker.insights; "
+            "print(sorted(m for m in sys.modules if m.split('.')[0] in ('agent_framework', 'azure')))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env={**os.environ, "PYTHONPATH": str(SRC)}).stdout
+    assert out.strip() == "[]"
+
+
+def test_cli_writes_the_recap_and_takes_the_writer_options(tmp_path, monkeypatch, capsys):
+    from worker import __main__ as cli
+    from worker import desk as desk_module
+
+    made = []
+
+    class SpyDesk(Desk):
+        def __init__(self, *args, **kwargs):
+            made.append(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(desk_module, "Desk", SpyDesk)
+    replay = str(SRC.parent / "data" / "replay" / "demo-0007.jsonl.gz")
+    monkeypatch.setattr(sys, "argv", ["worker", replay, "--writer", "template", "--auto-approve", "--desk-dir", str(tmp_path / "a")])
+    cli.main()
+    recap = json.loads((tmp_path / "a" / "demo-0007" / "recap.json").read_text(encoding="utf-8"))
+    assert recap["id"] == "recap-demo-0007" and recap["verification"]["verified"]
+    assert "recap    template, verified True" in capsys.readouterr().out
+    assert isinstance(made[0]["insight_writer"], TemplateWriter) and made[0]["recap_writer"] is None  # by default the facts are written by template
+    monkeypatch.setattr(sys, "argv", ["worker", replay, "--writer", "template", "--desk-dir", str(tmp_path / "b"), "--insights-writer", "writer", "--no-recap"])
+    cli.main()
+    assert made[1]["insight_writer"] is None and (tmp_path / "b" / "demo-0007" / "cards.json").exists() and not (tmp_path / "b" / "demo-0007" / "recap.json").exists()

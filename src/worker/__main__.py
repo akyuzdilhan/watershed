@@ -7,7 +7,7 @@ Usage:
     python -m worker data/replay/demo-0007.jsonl.gz --history data/history/1                  # with the insight engine, against the league history
 Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment).
 
-With a writer, the desk writes the cards and their duo with it, and the insights and the storyline with the templates (unless --insights-writer writer). Every model call of a match comes out of one budget of 40 (worker.desk).
+With a writer, the desk writes the cards and their duo with it, the insights and the storyline with the templates (unless --insights-writer writer), and at the final whistle the post-match recap (unless --no-recap): with --writer foundry, the recap agent on Foundry. Every model call of a match comes out of one budget of 40 (worker.desk).
 """
 
 import argparse
@@ -44,7 +44,8 @@ def main() -> None:
     parser.add_argument("--desk-dir", type=Path, help="write cards, match state and audit as JSON files here (what the console reads without Cosmos DB)")
     parser.add_argument("--writer", choices=("none", "template", "foundry"), default="none", help="write the cards: fixed templates, or the Writer agent on Foundry")
     parser.add_argument("--insights-writer", choices=("template", "writer"), default="template",
-                        help="who writes the insights and the storyline: the templates (default: the model only writes the cards), or the --writer")
+                        help="who writes the insights and the storyline: the templates (default: the model only writes the cards and the recap), or the --writer")
+    parser.add_argument("--no-recap", action="store_true", help="do not write the post-match recap at the final whistle")
     parser.add_argument("--auto-approve", action="store_true", help="put every written card on air without a producer (judging mode)")
     parser.add_argument("--threshold", type=float, default=0.08, help="minimum value of a chance that is not a goal, as a share of the result probabilities")
     parser.add_argument("--forever", action="store_true", help="with --live: keep waiting for new sessions instead of stopping when the subscription is idle")
@@ -73,9 +74,13 @@ def main() -> None:
         from worker.desk import Desk
         from worker.writer import FoundryWriter, TemplateWriter
 
+        writer, recap_writer = TemplateWriter(), None
         if args.writer == "foundry":
+            from worker.recap import RecapWriter
+
             service_bus_settings()  # loads .env (Foundry endpoint and model)
-        desk = Desk(sink, FoundryWriter() if args.writer == "foundry" else TemplateWriter(), auto_approve=args.auto_approve,
+            writer, recap_writer = FoundryWriter(), RecapWriter()
+        desk = Desk(sink, writer, auto_approve=args.auto_approve, recap_writer=recap_writer,
                     insight_writer=TemplateWriter() if args.insights_writer == "template" else None)
     history = load_history(args.history) if args.history else None
     storyline_for = None
@@ -84,7 +89,7 @@ def main() -> None:
 
         def storyline_for(match_id: str, teams: dict) -> dict:
             return build_storyline(args.league_seed, args.matchday, history, match_id, home=teams["home"], away=teams["away"])
-    pipeline = Pipeline(sink=sink, desk=desk, threshold=args.threshold, history=history, storyline_for=storyline_for)
+    pipeline = Pipeline(sink=sink, desk=desk, threshold=args.threshold, history=history, storyline_for=storyline_for, recap=not args.no_recap)
 
     if args.live:
         from worker.azure_io import listen
@@ -115,6 +120,11 @@ def main() -> None:
     for doc in pipeline.insights(match.match_id):
         mark = "*" if doc.get("stat_of_the_match") else " "
         print(f" {mark}{doc['minute_label'] or '':>7}  insight  {doc['key']:<34} {doc['status']:<10} value {doc['value']:>3}  {doc['rarity']['basis']}")
+    recap = pipeline.recaps.get(match.match_id)
+    if recap:
+        print(f"  {'':>7}  recap    {recap['writer']}, verified {recap['verification']['verified']}")
+        for t in recap["texts"]:
+            print(f"           [{t['lang']}] {t['recap']}")
     print(f"{len(match.messages)} messages, {match.duplicates} duplicates dropped, {match.late} processed late; final score {match.score()}")
     if args.truth and isinstance(sink, MemorySink):
         spotter = next(iter(pipeline.spotters.values()))

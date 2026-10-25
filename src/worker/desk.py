@@ -4,9 +4,9 @@ Statuses: `pending` (written and checked, waiting for a producer), `approved` (o
 
 Each card carries its commentary duo (`duo`), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres from the card's `var_decision`) and what the duo says about it (`duo_ruling`). A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
-Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards).
+Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards and the recap); the post-match recap by `recap_writer` (`worker.recap.RecapWriter` on Foundry; the recap template when it is None).
 
-Cost guard: at most `max_calls_per_match` model calls per match (40), shared by every draft the desk sends to a model: a card costs one call, two when the Verifier sends it back; a rewrite is a new draft. Once the budget is spent, the templates write. Templates cost nothing.
+Cost guard: at most `max_calls_per_match` model calls per match (40), shared by every draft the desk sends to a model: a card costs one call, two when the Verifier sends it back, and so does the recap; a rewrite is a new draft. Once the budget is spent, the templates write. Templates cost nothing.
 
 The producers can also judge every sentence (`feedback`: thumbs up or down, reasons, a note). The desk stores it, audits it, and reads the producer profile built from it (`worker.feedback`) before each draft: the Writer prompt gets the control room's preferences, the template writer picks the variants they turned down last.
 """
@@ -23,12 +23,13 @@ ACTION_FIELDS = ("event_id", "message_id", "minute_label", "cause")  # what the 
 
 class Desk:
     def __init__(self, sink, writer=None, auto_approve: bool = False, languages: tuple[str, ...] = LANGUAGES, max_calls_per_match: int = 40,
-                 profile=None, insight_writer=None) -> None:
+                 profile=None, insight_writer=None, recap_writer=None) -> None:
         self.sink = sink
         self.max_calls_per_match = max_calls_per_match  # cost guard: beyond it, the templates write
         self.calls: dict[str, int] = {}
         self.writer = writer or TemplateWriter()
         self.insight_writer = insight_writer  # insights and the storyline; None: the card writer
+        self.recap_writer = recap_writer  # the post-match recap; None: the recap template
         self.auto_approve = auto_approve
         self.languages = list(languages)
         self.loop = asyncio.new_event_loop()
@@ -95,6 +96,16 @@ class Desk:
                                                        memory=self.memory(doc["match_id"]), duo=True, **self._preferences(doc)))
         self.calls[doc["match_id"]] = self.calls.get(doc["match_id"], 0) + d.attempts
         return self._stage(doc, d, getattr(self.sink, "insight", None) or self.sink.card)
+
+    def write_recap(self, cards: list[dict], state: dict, storyline: dict | None = None) -> dict:
+        """The post-match recap (`worker.recap`, approved cards only) by the recap writer within what is left of the match's call budget, then the template; stored through the sink's `recap` method when it has one, else `card` (Cosmos DB: type "recap", id `recap-<match_id>`)."""
+        from worker.recap import recap_async
+
+        match_id = state["match_id"]
+        doc = self.loop.run_until_complete(recap_async(cards, state, self.recap_writer, self.languages, calls_left=self._calls_left(match_id), storyline=storyline))
+        self.calls[match_id] = self.calls.get(match_id, 0) + doc["verification"]["attempts"]
+        (getattr(self.sink, "recap", None) or self.sink.card)(doc)
+        return doc
 
     def on_action(self, card: dict, action: dict, teams: dict[str, str]) -> dict:
         """A card action from the feed: one audit entry, which keeps the action's event, message, minute and cause, then the card stored (a rewrite writes a new version)."""

@@ -96,6 +96,10 @@ class CosmosSink:
         """Insights and the storyline live next to the cards, with type "insight" or "storyline" (contract)."""
         self._upsert(self.cards, {**doc, "type": "storyline" if doc.get("type") == "storyline" else "insight"})
 
+    def recap(self, doc: dict) -> None:
+        """The post-match recap lives next to the cards, with type "recap" and id `recap-<match_id>`, as `python -m worker.recap --cosmos` writes it (contract)."""
+        self._upsert(self.cards, {**doc, "type": "recap", "id": f"recap-{doc['match_id']}"})
+
     def load_insight(self, match_id: str, insight_id: str) -> dict | None:
         return self.load_card(match_id, insight_id)
 

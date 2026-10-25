@@ -350,17 +350,44 @@ class CountingWriter:
         return TemplateWriter().write(doc, facts[0], languages, duo=duo)
 
 
-def test_live_the_model_writes_the_cards_the_templates_write_the_facts(demo, history):
+class RecapModel:
+    """Stands in for the recap agent: a reply the Verifier refuses, so each recap costs two calls before the template."""
+
+    name = "recap-model"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def write_async(self, match_id, facts, languages, note=None):
+        self.calls += 1
+        return "not json"
+
+
+def test_live_the_model_writes_the_cards_and_the_recap_the_templates_write_the_facts(demo, history):
     from worker.desk import Desk
     from worker.writer import TemplateWriter
 
-    sink, model = MemorySink(), CountingWriter()
-    desk = Desk(sink, model, auto_approve=True, insight_writer=TemplateWriter())
+    sink, model, recap_model = MemorySink(), CountingWriter(), RecapModel()
+    desk = Desk(sink, model, auto_approve=True, insight_writer=TemplateWriter(), recap_writer=recap_model)
     pipeline = run(demo[0], history, sink=sink, desk=desk)
     written = [d for d in pipeline.insights("demo-0007") if "texts" in d]
     assert written and all(d["writer"] == "template" for d in written)
     assert set(model.asked) == {"card"} and 12 <= len(model.asked) <= 24  # 11 cards and a rewrite, a retry at most each
-    assert desk.calls["demo-0007"] == len(model.asked) <= desk.max_calls_per_match == 40
+    recap = pipeline.recaps["demo-0007"]
+    assert recap_model.calls == 2 and recap["writer"] == "template" and recap["verification"]["attempts"] == 2
+    assert desk.calls["demo-0007"] == len(model.asked) + recap_model.calls <= desk.max_calls_per_match == 40
+
+
+def test_the_call_budget_covers_the_cards_and_the_recap(demo, history):
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    sink, model, recap_model = MemorySink(), CountingWriter(), RecapModel()
+    desk = Desk(sink, model, auto_approve=True, insight_writer=TemplateWriter(), recap_writer=recap_model, max_calls_per_match=5)
+    pipeline = run(demo[0], history, sink=sink, desk=desk)
+    assert len(model.asked) == 5 and recap_model.calls == 0 and desk.calls["demo-0007"] == 5
+    assert pipeline.recaps["demo-0007"]["writer"] == "template" and pipeline.recaps["demo-0007"]["verification"]["verified"]
+    assert [c["writer"] for c in sink.cards.values()].count("template") >= len(sink.cards) - 5
 
 
 def test_the_facts_go_to_the_model_only_when_asked(demo, history):

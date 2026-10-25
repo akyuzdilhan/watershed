@@ -1,10 +1,11 @@
 """From the wire to the desk: one Match and one Spotter per match, and a sink that stores what they produce.
 
-The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription. With a desk, the desk writes every card and audits every card action once (the Spotter's action goes to the audit trail only when there is no desk).
+The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription. With a desk, the desk writes every card, audits every card action once (the Spotter's action goes to the audit trail only when there is no desk), and at the final whistle writes the post-match recap from the cards as the store has them.
 """
 
 import copy
 import json
+import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ from winprob.skellam import SkellamWinProb
 from worker.match import Match, make_model
 from worker.spotter import Spotter
 
+log = logging.getLogger("worker")
 
 PRODUCER_FIELDS = ("status", "texts", "history", "retracted_on_air")  # what the console may change on a card
 
@@ -26,6 +28,7 @@ class MemorySink:
         self.cards: dict[str, dict] = {}
         self.audit: list[dict] = []
         self.insights: dict[str, dict] = {}
+        self.recaps: dict[str, dict] = {}  # match id -> post-match recap
 
     def event(self, m: dict) -> None:
         self.events.append(m)
@@ -53,9 +56,12 @@ class MemorySink:
     def load_insight(self, match_id: str, insight_id: str) -> dict | None:
         return self.insights.get(insight_id)
 
+    def recap(self, doc: dict) -> None:
+        self.recaps[doc["match_id"]] = copy.deepcopy(doc)
+
 
 class JsonFileSink(MemorySink):
-    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json and audit.jsonl. The console reads these files when Cosmos DB is not configured."""
+    """Writes the desk of each match to `root/<match_id>/`: cards.json, insights.json, state.json, audit.jsonl and, at the final whistle, recap.json. The console reads these files when Cosmos DB is not configured."""
 
     def __init__(self, root: Path) -> None:
         super().__init__()
@@ -97,6 +103,11 @@ class JsonFileSink(MemorySink):
             return
         docs = [d for d in self.insights.values() if d["match_id"] == doc["match_id"] and d.get("type") != "storyline"]
         (self._dir(doc["match_id"]) / "insights.json").write_text(json.dumps(docs, indent=1, ensure_ascii=False), encoding="utf-8")
+
+    def recap(self, doc: dict) -> None:
+        """recap.json, as `python -m worker.recap` writes it."""
+        super().recap(doc)
+        (self._dir(doc["match_id"]) / "recap.json").write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
 
     def feedback(self, doc: dict) -> None:
         """A producer's judgement on one sentence: appended to feedback.jsonl, never into cards.json."""
@@ -249,6 +260,8 @@ class Pipeline:
     _history_view: object | None = None
     storyline_for: object | None = None  # callable(match_id, teams) -> storyline document, built once when the match information arrives
     storylines: dict[str, dict] = field(default_factory=dict)
+    recap: bool = True  # with a desk: the post-match recap at the final whistle, written again if the feed changes a card after it
+    recaps: dict[str, dict] = field(default_factory=dict)
     _tables: dict[str, list] = field(default_factory=dict)  # per match: (event id, table if the score holds) of each goal given a season context
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
@@ -299,7 +312,22 @@ class Pipeline:
             self._insights(match, spotter, m, teams)
             if hasattr(self.sink, "state") and (produced or m["type"] in ("period_end", "full_time", "correction") or len(timeline) % self.state_every == 0):
                 self.sink.state(match_state(match, spotter, timeline))
+            if self.recap and match.full_time_seq is not None and (m["type"] == "full_time" or produced):
+                self._recap(match, spotter, timeline)
         return out
+
+    def _recap(self, match: Match, spotter: Spotter, timeline: list[dict]) -> None:
+        """At the final whistle (and after a card action that comes later): the post-match recap, by the desk, from the cards with the producer's decisions read back from the store."""
+        write = getattr(self.desk, "write_recap", None)
+        if write is None:
+            return
+        cards = list(spotter.cards.values())
+        for card in cards:
+            self._refresh(card)
+        try:
+            self.recaps[match.match_id] = write(cards, match_state(match, spotter, timeline), self.storylines.get(match.match_id))
+        except Exception as error:  # the final whistle is processed even if its recap fails
+            log.warning("recap of %s failed: %s: %s", match.match_id, type(error).__name__, str(error)[:300])
 
     def _insights(self, match: Match, spotter: Spotter, m: dict, teams: dict[str, str]) -> None:
         """After the Spotter: the facts this message makes true, or no longer true, against the match and the history. Not returned by `handle`, which keeps returning cards and card actions."""
