@@ -278,8 +278,9 @@ def insight_title(d: dict, read_only: bool = False) -> str:
         return f"{f.get('scorer_name', '')}: {f['space_m']} m of space before the {f.get('goal_minute_label', '')} goal"
     if kind == "line_height":
         return f"{f.get('team_name', '')} defensive line {f.get('line_moved', 'moved')} by {f.get('change_m', '?')} m"
-    if kind == "pressing":
-        return f"{f.get('team_name', '')} pressed {f.get('pressed', '')} after the break"
+    if kind == "pressing":  # what its figure counts, "Opponents near the ball"
+        more = {"harder": "more", "less": "fewer"}.get(f.get("pressed"))
+        return f"{f.get('team_name', '')}: " + (f"{more} players near the opponent on the ball after the break" if more else "players near the opponent on the ball, first half against second")
     return (d.get("key") or d.get("id", "")).replace("-", " ")
 
 

@@ -251,6 +251,9 @@ def test_the_former_pressing_figure_is_named_for_what_it_counts(demo_feed):
     labels = {o["value"]: o["label"] for o in panels.graphic_items(demo_feed, "tactics")}
     assert labels["press"] == "Opponents near the ball over time"
     assert panels.graphic_figure(demo_feed, "tactics", "press").layout.title.text == fig.layout.title.text
+    team = matchfeed.team_names(demo_feed["info"])["home"]
+    titles = {way: panels.insight_title({"figure": {"kind": "pressing", "team": "home"}, "headline_facts": {"team_name": team, "pressed": way}}) for way in ("harder", "less")}
+    assert titles == {"harder": f"{team}: more players near the opponent on the ball after the break", "less": f"{team}: fewer players near the opponent on the ball after the break"}
 
 
 def test_the_line_height_figure_plots_means_and_says_so(demo_feed):
