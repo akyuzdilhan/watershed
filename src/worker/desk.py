@@ -2,7 +2,7 @@
 
 Statuses: `pending` (written and checked, waiting for a producer), `approved` (on air), `rejected`, `retracted` (the feed took the moment back; a card that was on air must come off). A rewrite (goal credited to another player) writes a new version, which waits for approval again. In auto-approve mode (announced to the judges), a verified card goes on air without a click; a card the Verifier failed and the template replaced is approved too, since the template only uses checked fields.
 
-Each card carries its commentary duo (`duo`), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres when the feed gives it) and what the duo says about it (`duo_ruling`).
+Each card carries its commentary duo (`duo`), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres from the card's `var_decision`) and what the duo says about it (`duo_ruling`).
 
 The producers can also judge every sentence (`feedback`: thumbs up or down, reasons, a note). The desk stores it, audits it, and reads the producer profile built from it (`worker.feedback`) before each draft: the Writer prompt gets the control room's preferences, the template writer picks the variants they turned down last.
 """
@@ -89,21 +89,6 @@ class Desk:
         self.calls[doc["match_id"]] = self.calls.get(doc["match_id"], 0) + d.attempts
         return self._stage(doc, d, getattr(self.sink, "insight", None) or self.sink.card)
 
-    def _offside_margin_cm(self, action: dict) -> int | None:
-        """The offside margin of a goal VAR voided: the feed sends it on the pass, in a correction tied to the same VAR decision as the void."""
-        events = getattr(self.sink, "events", None)
-        if not isinstance(events, list):
-            return None
-        void = next((e for e in reversed(events) if e.get("message_id") == action.get("message_id")), None)
-        related = (void or {}).get("related_message_id")
-        if not related:
-            return None
-        for e in reversed(events):
-            offside = (e.get("changes") or {}).get("offside") if e.get("type") == "correction" and e.get("related_message_id") == related else None
-            if isinstance(offside, dict) and isinstance(offside.get("margin_m"), (int, float)):
-                return round(100 * offside["margin_m"])
-        return None
-
     def on_action(self, card: dict, action: dict, teams: dict[str, str]) -> dict:
         if action["action"] == "retract":
             was_on_air = action.get("previous_status") == "approved"
@@ -111,7 +96,9 @@ class Desk:
             card["retracted_on_air"] = was_on_air
             cause = str(action.get("cause", ""))
             if card["moment"] == "goal" and cause.startswith("var_"):
-                card["ruled_out"] = {"reason": cause[4:], "cause": cause, "minute_label": action.get("minute_label"), "margin_cm": self._offside_margin_cm(action)}
+                margin_m = (card.get("var_decision") or {}).get("margin_m")
+                card["ruled_out"] = {"reason": cause[4:], "cause": cause, "minute_label": action.get("minute_label"),
+                                     "margin_cm": round(100 * margin_m) if isinstance(margin_m, (int, float)) else None}
                 card["duo_ruling"], _ = ruling_duo(card, teams, self.languages, self.memory(card["match_id"]))
             self._audit(card, "retracted", "feed", {"cause": action["cause"], "was_on_air": was_on_air})
         elif action["action"] == "rewrite":

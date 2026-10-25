@@ -6,6 +6,8 @@ Deterministic, so every card can be traced back to numbers. A moment's value is 
 - a red card: the move of a team going down to ten.
 
 Every goal and every red card gets a card; another chance needs a value of at least `threshold`. A VAR check puts the card under review; a void retracts it; a reassignment rewrites it.
+
+What the card keeps for the desk and the console: the win and draw percentages of `facts` stay between 1 and 99 (a moment is always before the final whistle, as `writer.shown` puts it on air); a red card says whether it was a straight red or a second yellow (`card_kind`); a rewrite that changes the player names the previous one (`previous_player`); a void records why (`var_decision`: the cause of the correction, and for offside the margin the feed sends on the pass, called tight or clear by `writer.offside_call`). Everything is on the card itself, so it survives a store that keeps only documents (Cosmos DB).
 """
 
 from dataclasses import dataclass, field
@@ -54,12 +56,30 @@ class Spotter:
                 action = self._action(card, "retract", m, m["cause"])
                 action["previous_status"] = card["status"]
                 card["status"] = "retracted"
+                card["var_decision"] = self._var_decision(m)
                 return [action]
             if "player" in m["changes"]:
-                card["player"] = m["changes"]["player"]
+                before, after = card["player"], m["changes"]["player"]
+                card["player"] = after
                 card["version"] += 1
+                same = before.get("id") == after.get("id") if before.get("id") and after.get("id") else before.get("name") == after.get("name")
+                if same:
+                    card.pop("previous_player", None)  # the previous version credited him too
+                else:
+                    card["previous_player"] = before.get("name")
                 return [self._action(card, "rewrite", m, m["cause"])]
         return []
+
+    def _var_decision(self, void: dict) -> dict:
+        """Why a correction voided a card: its cause, and for offside the margin in metres the feed sends on the pass, in a correction tied to the same VAR decision."""
+        from worker.writer import offside_call
+
+        related = void.get("related_message_id")
+        found = [c for c in self.match.messages.values() if related and c.get("type") == "correction" and c.get("related_message_id") == related
+                 and isinstance((c.get("changes") or {}).get("offside"), dict) and isinstance(c["changes"]["offside"].get("margin_m"), (int, float))]
+        margin = max(found, key=lambda c: c["seq"])["changes"]["offside"]["margin_m"] if found else None
+        return {"reason": void.get("cause"), "call": offside_call(round(100 * margin)) if margin is not None else None, "margin_m": margin}
+
 
     def _moment(self, a: dict) -> dict | None:
         match, model = self.match, self.model
@@ -84,7 +104,9 @@ class Spotter:
             return self._card(a, "chance", value, before, if_goal, "if_goal")
         if kind == "foul" and a.get("card") in ("red", "second_yellow"):
             before, after = model.predict(match.state(a)), model.predict(match.state(a, after=True))
-            return self._card(a, "red_card", swing(before, after), before, after, "after")
+            card = self._card(a, "red_card", swing(before, after), before, after, "after")
+            card["card_kind"] = a["card"]
+            return card
         return None
 
     def _card(self, a: dict, moment: str, value: float, before, other, other_name: str, shot: dict | None = None) -> dict:
