@@ -218,6 +218,8 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
 
 def test_a_scorer_correction_is_shown_in_the_console_and_on_the_overlay(desk):
     rewritten = next(c for c in desk.cards(MATCH) if c.get("version", 1) >= 2)
+    assert rewritten.get("previous_player")  # the desk records the scorer the feed first credited
+    rewritten = {k: v for k, v in rewritten.items() if k != "previous_player"}
     first = next(m for m in matchfeed.load(REPLAY_DIR / f"{MATCH}.jsonl.gz") if m["type"] == "action" and m["event_id"] == rewritten["event_id"])  # the goal as first credited
     previous, now = first["player"]["name"], rewritten["player"]["name"]
     assert previous != now
@@ -241,7 +243,7 @@ def test_a_var_decision_shows_its_reason_and_call_and_the_margin_only_to_a_produ
     assert "VAR decision: Offside, tight call" in seen_by_producer and "0.37 m" in seen_by_producer
     assert "VAR decision: Offside, tight call" in seen_by_visitor and "0.37" not in seen_by_visitor
     assert "VAR decision: Handball" in texts_in(console.detail(dict(ruled, var_decision={"reason": "var_handball", "call": None, "margin_m": None}), []))
-    assert "VAR decision" not in texts_in(console.detail({k: v for k, v in card_at(desk, "63'").items() if k != "ruled_out"}, []))
+    assert "VAR decision" not in texts_in(console.detail({k: v for k, v in card_at(desk, "63'").items() if k not in ("ruled_out", "var_decision")}, []))
     cards = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
     (desk.root / MATCH / "cards.json").write_text(json.dumps([dict(c, var_decision=decision) if c["id"] == ruled["id"] else c for c in cards]), encoding="utf-8")
     monkeypatch.setenv("PUBLIC_MODE", "1")
@@ -305,6 +307,19 @@ def test_overlay_shows_the_retraction_of_a_card_that_was_on_air(tmp_path, monkey
     assert "Goal ruled out (VAR, offside)" in text and "63'" in text and "withdrawn" not in text
     assert "But refusé (VAR, hors-jeu)" in texts_in(overlay.render("?lang=fr", store=s))
     assert "Gol anulado (VAR, fuera de juego)" in texts_in(overlay.render("?lang=es", store=s))
+
+
+def test_a_retraction_audited_by_the_feed_holds_from_the_minute_of_the_ruling():
+    goal = {"id": "card-g", "type": "card", "status": "retracted", "retracted_on_air": True, "moment": "goal", "minute_label": "63'", "clock_s": 3745.0, "team": "home",
+            "ruled_out": {"reason": "offside"}, "texts": [{"lang": "en", "headline": "Goal headline", "why": "Goal why."}]}
+    audit = [{"card_id": "card-g", "action": "written", "by": "template", "at": 100.0}, {"card_id": "card-g", "action": "approved", "by": "auto-approve", "at": 100.0},
+             {"card_id": "card-g", "action": "hold", "by": "feed", "at": 100.2, "minute_label": "63'"},
+             {"card_id": "card-g", "action": "retracted", "by": "feed", "at": 100.5, "minute_label": "64'", "was_on_air": True}]
+    assert overlay.from_feed(audit[-1]) and not overlay.from_feed(audit[1])
+    for entries in (audit, [{k: v for k, v in e.items() if not (k == "by" and v == "feed")} for e in audit]):  # the desk's trail, then an older one without `by`
+        held = overlay.on_air([goal], entries, 3800.0, 2)
+        assert held is not None and held["kind"] == "retraction"  # the ruling came in the 64th minute: the retraction holds from there
+        assert overlay.on_air([goal], entries, 3840.0 + overlay.RETRACTION_HOLD_S + 1, 2) is None
 
 
 def test_a_card_holds_the_overlay_while_its_facts_wait_on_the_detail_line():
@@ -891,8 +906,9 @@ def test_a_card_ruled_out_shows_the_var_reason_and_what_the_duo_says(desk):
     assert ruled["status"] == "retracted" and ruled["ruled_out"]["reason"] == "offside" and ruled.get("duo_ruling")
     teams = desk.state(MATCH)["teams"]
     producer, visitor = console.detail(ruled, desk.audit(MATCH), [], teams), console.detail(ruled, desk.audit(MATCH), [], teams, read_only=True)
-    call = console.VAR_CALLS[console.offside_call(ruled["ruled_out"]["margin_cm"])]
-    assert f"VAR decision: Offside, {call}" in texts_in(producer) and f"{ruled['ruled_out']['margin_cm'] / 100:.2f} m" in texts_in(producer)
+    assert ruled["ruled_out"]["margin_cm"] is None  # the margin and its call stay in var_decision, for the producer
+    call = console.VAR_CALLS[ruled["var_decision"]["call"]]
+    assert f"VAR decision: Offside, {call}" in texts_in(producer) and f"{ruled['var_decision']['margin_m']:.2f} m" in texts_in(producer)
     assert f"VAR decision: Offside, {call}" in texts_in(visitor) and " m, producer only" not in texts_in(visitor)
     for lang in ("en", "fr", "es"):
         view = texts_in(console.detail(ruled, [], [], teams, lang=lang))
