@@ -14,8 +14,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from worker.duo import (ALLOWED_NAMES, CARDINALS, EYE, HEART, LINES, NB, ORDINALS, PERSONAS, PhraseMemory, count_words, fill, fr_de, fr_typography, persona_brief,
-                        placeholders, rotated, stable)
+from worker.duo import (ALLOWED_NAMES, CARDINALS, CONDITIONS, EYE, HEART, LINES, NB, ORDINALS, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, count_words, fill, fr_de,
+                        fr_typography, persona_brief, placeholders, rotated, stable)
 from worker.feedback import skeleton
 
 LANGUAGES = ("en", "fr", "es")
@@ -73,7 +73,7 @@ EXAMPLE_DUO = [
 
 WRITER_INSTRUCTIONS += f"""
 
-Points. The word points (French points, Spanish puntos) means only a change in a team's chance of winning, from a field ending in _pts. Never write any other value as points.
+Points. The word points (French points, Spanish puntos) has one meaning: a gap between two chances, in percentage points, from a field ending in _pts. Never write any other value as points, and never with a verb of league points (take, prendre, gagner, ganar, sumar): "Rovers take 24 points" sounds like the league table.
 
 A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Lightfoot"), with no probability and no points.
 
@@ -86,6 +86,8 @@ Commentary duo. When the request has "duo": true, also write what two fictional 
 - 2 to 4 lines per requested language, alternating speakers, usually wren first: wren lives the moment and the story, joss brings one number or the detail nobody noticed, then they answer each other.
 - Spoken, not written: one or two short sentences per line, at most 25 words, no headline style, and not a copy of the headline or the why.
 - Same rules as the card for numbers, units, club names and each language's style: every number in a line is listed in that line's claims, and a line that gives a win probability names the team.
+- Only a goal by the home team (team_at_home true) makes the stadium roar or wake up; for an away goal, speak of the away fans or the bench.
+- The words match the size of the number: "small margins" only for a save worth less than {SMALL_MARGIN_PTS} points, "the whole match just tilted" only for a change of more than {TILT_PTS} points.
 - A tic is said at most once per match: "tics_used" in the request lists those already said.
 Then reply with a JSON object instead of the array: {{"texts": [the array of cards], "duo": [{{"speaker": "wren" or "joss", "lang": string, "line": string, "claims": [{{"value": number, "source_field": string}}]}}]}}
 Duo example for the moment above: {json.dumps(EXAMPLE_DUO, ensure_ascii=False)}
@@ -127,8 +129,9 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
     sb = card["score_before"]
     score = f"{teams['home']} {sb['home']}-{sb['away']} {teams['away']}"
     f = card["facts"]
-    facts: dict[str, Any] = {"minute": card["minute_label"], "score_before": score}
-    meanings = {"minute": "match minute of the moment", "score_before": "score just before the moment"}
+    facts: dict[str, Any] = {"minute": card["minute_label"], "score_before": score, "team_at_home": team == "home"}
+    meanings = {"minute": "match minute of the moment", "score_before": "score just before the moment",
+                "team_at_home": f"true if {name} play at home: only a home goal makes the stadium roar or wake up"}
     player = card["player"]["name"]
     if card["moment"] == "goal":
         after = dict(sb)
@@ -276,6 +279,7 @@ FR_ARTICLE = r"(?i:\b(?:l['’]\s?|d['’]\s?|(?:le|la|les|du|des|au|aux)\s+))"
 LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
     "en": [
         ("jargon", "warning", r"(?i)\bwin chances?\b"),
+        ("league_points_verb", "error", r"(?i)\b(?:take|takes|took|taken|taking|gain|gains|gained|gaining)\s+(?:\w+\s+)?\d+\s+points?\b"),  # "points" with a verb of league points
         ("league_rate", "error", r"(?i)\b(?:one|1|once)\s+(?:(?:match|game)\s+)?(?:in|out of)\s+(?:every\s+)?\d+(?!\d|\s+seasons?\b)"  # "not once in 50 seasons" is a landmark, not a rate
                                  r"|\b(?:\d+(?:[.,]\d+)?|once|twice|\w+\s+times)\s+(?:a|per|each|every)\s+season\b"),
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+times\s+(?:rarer|more\s+rare|less\s+likely)\b|\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+(?:matches|games)\b|\b\d{3,}\s+(?:matches|games)\b"),
@@ -287,6 +291,7 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("article_before_team", "error", FR_ARTICLE + r"{team}\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|turnover|win)\b"),
         ("percent_without_space", "warning", r"\d%"),
+        ("league_points_verb", "error", r"(?i)\b(?:prendre|prend|prennent|pris|prenait|gagner|gagne|gagnent|gagné|gagnés|gagnait)\s+(?:\w+\s+)?\d+\s+points?\b"),
         ("league_rate", "error", r"(?i)\b(?:un|1)\s+match\s+sur\s+\d|\bune\s+fois\s+sur\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+fois\s+)par\s+saison\b|\b\d+(?:[.,]\d+)?\s+fois\s+plus\s+rare"),
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+matchs\b|\b\d{3,}\s+matchs\b"),
     ],
@@ -296,6 +301,7 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("forbidden_word", "error", r"(?i)\bgame[- ]?changer\b"),
         ("clumsy_phrase", "warning", r"(?i)\ben puntos de diferencia\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|win)\b"),
+        ("league_points_verb", "error", r"(?i)\b(?:ganar|gana|ganan|ganó|ganado|ganaba|sumar|suma|suman|sumó|sumado)\s+(?:\w+\s+)?\d+\s+puntos?\b"),
         ("league_rate", "error", r"(?i)\b(?:un|1)\s+partido\s+de\s+cada\s+\d|\b(?:una\s+vez|uno)\s+(?:de\s+)?cada\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+(?:vez|veces)\s+)(?:por|cada|a\s+la)\s+temporada\b"
                                  r"|\b\d+(?:[.,]\d+)?\s+veces\s+más\s+rar[oa]"),
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+partidos\b|\b\d{3,}\s+partidos\b"),
@@ -671,8 +677,27 @@ def minute_number(label: str) -> int:
     return int(found.group(0)) if found else 0
 
 
+def conditions(card: dict, facts: dict) -> dict:
+    """The conditions of the duo lines (`duo.CONDITIONS`): "" when the line is true for this card, None to skip it."""
+    slug = card["team_name"].lower()
+    swing, value = facts.get("swing_pts"), facts.get("save_value_pts")
+    before = facts.get(f"{slug}_wp_before_pct", facts.get(f"{slug}_wp_after_save_pct"))
+    other = facts.get(f"{slug}_wp_if_goal_pct")
+    goals, team_goals = facts.get("scorer_match_goals"), facts.get("team_goals_after")
+    true = {
+        "if_home": card["team"] == "home",
+        "if_away": card["team"] == "away",
+        "if_new_scorer": goals == 1 and isinstance(team_goals, int) and team_goals >= 2,  # his first goal, not his team's: the previous one was someone else's
+        "if_tilt": isinstance(swing, int) and abs(swing) > TILT_PTS,
+        "if_small_margin": isinstance(value, int) and value < SMALL_MARGIN_PTS,
+        "if_big_margin": isinstance(value, int) and value >= SMALL_MARGIN_PTS,
+        "if_big_chance": isinstance(before, int) and isinstance(other, int) and abs(other - before) >= SMALL_MARGIN_PTS,
+    }
+    return {k: "" if true.get(k) else None for k in CONDITIONS}
+
+
 def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
-    """The placeholders of a card's templates, and the fact field behind each numeric one."""
+    """The placeholders of a card's templates, the conditions of its duo lines, and the fact field behind each numeric placeholder."""
     slug = card["team_name"].lower()
     teams = teams_in(facts)
     player = card["player"]["name"]
@@ -684,8 +709,11 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
         "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player),
     }
     team_n, scorer_n = count_words(lang, facts.get("team_goals_after")), count_words(lang, facts.get("scorer_match_goals"))
+    several = facts.get("scorer_match_goals", 0) >= 2
     values |= {"team_nth": team_n.get("nth"), "team_nth_adj": team_n.get("nth_adj"), "team_count": team_n.get("count"),
-               "team_count_cap": team_n.get("count", "").capitalize() or None, "scorer_nth": scorer_n.get("nth") if facts.get("scorer_match_goals", 0) >= 2 else None, "scorer_count": scorer_n.get("count")}
+               "team_count_cap": team_n.get("count", "").capitalize() or None, "scorer_nth": scorer_n.get("nth") if several else None,
+               "scorer_nth_adj": scorer_n.get("nth_adj") if several else None, "scorer_count": scorer_n.get("count")}
+    values |= conditions(card, facts)
     fields = {"before": before_field, "after": f"{slug}_wp_after_pct", "other": f"{slug}_wp_if_goal_pct", "swing": "swing_pts", "value": "save_value_pts",
               "xg": "shot_xg_pct", "minute": "minute"}
     return values, fields

@@ -228,6 +228,18 @@ def test_two_style_failures_fall_back_to_the_template():
 # --- on-air rules -------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("lang,why", [
+    ("en", "Rovers take 24 points with that goal, up to 54% to win."),
+    ("en", "Rovers gain 24 points: 54% to win now."),
+    ("fr", "En silence, Rovers vient de prendre 24 points : 54 % de chances de gagner."),
+    ("fr", "Rovers gagne 24 points et passe à 54 % de chances de gagner."),
+    ("es", "Sin hacer ruido, el Rovers acaba de ganar 24 puntos: 54% de opciones de ganar."),
+    ("es", "El Rovers suma 24 puntos y llega al 54% de opciones de ganar."),
+])
+def test_points_never_go_with_a_verb_of_league_points(lang, why):
+    assert "league_points_verb" in rules("Rovers", why, lang)[0], why
+
+
+@pytest.mark.parametrize("lang,why", [
     ("en", "Rovers scored 5 from chances worth 1.3 expected goals: about one match in 101 goes that way."),
     ("en", "A brace off the bench: this league sees about 3 a season."),
     ("en", "It ranks first, 228 times rarer than the next fact."),

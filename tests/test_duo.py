@@ -9,7 +9,7 @@ import pytest
 
 from generator import generate_match
 from worker.desk import Desk
-from worker.duo import EYE, HEART, LINES, PERSONAS, PhraseMemory, fill, persona_brief
+from worker.duo import CONDITIONS, EYE, HEART, LINES, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, fill, persona_brief
 from worker.pipeline import MemorySink, Pipeline
 from worker.writer import (EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, OFF_AIR_FIELDS, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter,
                            card_facts, draft, insight_facts, low_stake, ruling_facts, style_issues, template_values, verify, verify_duo, verify_reply, writer_request)
@@ -102,7 +102,7 @@ def test_every_duo_line_passes_the_verifier_with_its_numbers_claimed(kind, card,
     facts |= extra
     for lang in LANGS:
         values, fields = template_values(card, facts, lang)
-        values["subject"] = "Rovers"
+        values |= {"subject": "Rovers"} | {c: "" for c in CONDITIONS}  # every line, whatever its condition
         for template in all_strings(LINES[kind][lang]):
             filled = fill(template, values, fields)
             assert filled, (lang, template)
@@ -220,7 +220,7 @@ def test_the_scorer_story_is_counted_without_goals_ruled_out(demo):
     sink, _ = demo
     assert [at(sink, m).get("scorer_match_goals") for m in ("52'", "57'", "66'", "83'")] == [1, 2, 3, 4]
     en = [l["line"] for l in at(sink, "83'")["duo"] if l["lang"] == "en"]
-    assert any("fourth" in l or "goal number four" in l for l in en), en
+    assert any("fourth" in l for l in en) and not any("goal number" in l for l in en), en
 
 
 def test_var_ruling_is_recorded_with_its_reason_and_margin(demo):
@@ -530,3 +530,65 @@ def test_the_model_never_gets_league_wide_rates_ratios_or_bits():
     out = Desk(MemorySink(), writer, languages=("en",)).write_insight(stat, TEAMS)
     assert not set(writer.facts) & set(OFF_AIR_FIELDS) and {"history_seasons", "player", "goals", "top_fact"} <= set(writer.facts)
     assert out["writer"] == "template" and out["verification"]["verified"] and "bad_claims" in writer.calls[1]["note"]
+
+
+# --- the duo says what is true of the moment ---------------------------------------------------------------
+
+def filled(card, lang="en"):
+    """Every duo line the templates may give this card, conditions applied."""
+    facts, _ = card_facts(card, TEAMS)
+    values, fields = template_values(card, facts, lang)
+    kind = "goal_low" if facts.get("stake") == "low" else card["moment"]
+    return [f[0] for t in all_strings(LINES[kind][lang]) if (f := fill(t, values, fields))]
+
+
+ROAR = {"en": ("woken up", "enjoying the noise"), "fr": ("stade se réveille", "bruit du stade"), "es": ("estadio despierta", "rugido del estadio")}
+
+
+@pytest.mark.parametrize("side", ["home", "away"])
+def test_only_a_home_goal_wakes_the_stadium(side):
+    level = make_card("goal", side, score={"home": 0, "away": 1} if side == "home" else {"home": 1, "away": 0})
+    for lang in LANGS:
+        roars = [l for l in filled(level, lang) if any(w in l for w in ROAR[lang])]
+        assert bool(roars) == (side == "home"), (lang, roars)
+
+
+def test_the_man_this_time_needs_a_new_scorer():
+    lead = {"home": 1, "away": 0}
+    assert not [l for l in filled(make_card("goal", score=lead, scorer_match_goals=2)) if "the man this time" in l]  # he scored the first one too
+    assert [l for l in filled(make_card("goal", score=lead, scorer_match_goals=1)) if "the man this time" in l]
+
+
+@pytest.mark.parametrize("value", [10, 14, 15, 57])
+def test_small_margins_under_15_points_and_quietly_huge_above(value):
+    save = make_card("save", facts={"xg_pct": 20, "team_wp_before_pct": 80, "team_wp_if_goal_pct": 80 - value})
+    words = {"en": ("Small margins", "Quietly huge"), "fr": ("Petites marges", "L'air de rien"), "es": ("Pequeños márgenes", "Sin hacer ruido")}
+    for lang in LANGS:
+        lines = filled(save, lang)
+        small, huge = (any(l.startswith(w) for l in lines) for w in words[lang])
+        assert small == (value < SMALL_MARGIN_PTS) and huge == (value >= SMALL_MARGIN_PTS), (lang, value)
+
+
+@pytest.mark.parametrize("after", [54, 50, 38])
+def test_the_whole_match_tilts_only_beyond_20_points(after):
+    goal = make_card("goal", facts={"team_wp_before_pct": 30, "team_wp_after_pct": after})
+    tilt = {"en": "The whole match just tilted", "fr": "Tout le match vient de pencher", "es": "Todo el partido acaba de inclinarse"}
+    for lang in LANGS:
+        assert any(tilt[lang] in l for l in filled(goal, lang)) == (after - 30 > TILT_PTS), (lang, after)
+
+
+def test_quietly_huge_is_for_saves_and_chances_and_no_line_takes_points():
+    quiet = {"en": "Quietly huge", "fr": "L'air de rien", "es": "Sin hacer ruido"}
+    verb = re.compile(r"(?i)\b(?:take|takes|gain|gains|prendre|prend|gagne\w*|ganar|gana|ganan|suma\w*)\s+(?:\w+\s+)?\{\w+\}\s+(?:points?|puntos?)\b")
+    for kind, by_lang in LINES.items():
+        for lang, slots in by_lang.items():
+            for line in all_strings(slots):
+                assert not verb.search(line), (kind, lang, line)
+                assert quiet[lang] not in line or kind in ("save", "chance"), (kind, lang, line)
+
+
+def test_the_fourth_goal_is_his_fourth_goal_of_the_match():
+    words = {"en": "his fourth goal of the match", "fr": "son quatrième but du match", "es": "su cuarto gol del partido"}
+    for lang in LANGS:
+        lines = filled(make_card("goal", scorer_match_goals=4, minute="83'"), lang)
+        assert any(words[lang] in l for l in lines) and not any("goal number" in l for l in lines), lang
