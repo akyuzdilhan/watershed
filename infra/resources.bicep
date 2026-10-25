@@ -502,6 +502,9 @@ resource worker 'Microsoft.App/containerApps@2025-01-01' = {
       scale: {
         minReplicas: 0
         maxReplicas: 1
+        // KEDA stops the replica 15 minutes after it last saw a message waiting (5 by default). The worker settles messages
+        // within seconds, so a quiet stretch of a replay can look idle, and a replica stopped mid-match loses the match state.
+        cooldownPeriod: 900
         rules: [
           {
             name: 'match-events'
