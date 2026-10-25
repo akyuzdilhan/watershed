@@ -347,13 +347,22 @@ def recap_block(doc: dict | None, final: bool, lang: str | None = None) -> html.
     return html.Div([html.Div(meta, className="detail-meta"), *(blocks or [html.Div("No text in this recap.", className="muted")])])
 
 
+def same_match(recap: dict, state: dict) -> bool:
+    """Whether a recap was written from this match state: the score and the teams of its analysis are the state's (a recap without them is taken as it is)."""
+    analysis = recap.get("analysis") or {}
+    return all(analysis.get(k) is None or analysis[k] == state.get(k) for k in ("score", "teams"))
+
+
 def after_the_match(match_id: str | None, view: str | None, last_sig: str | None, store=None, lang: str | None = None):
-    """(After the match section, signature); no_update for both when the tab is hidden or nothing changed. The recap is read once the match state is final, so a recap left by an earlier run of the match never shows while it is played again."""
+    """(After the match section, signature); no_update for both when the tab is hidden or nothing changed. The recap is read once the match state is final, so a recap left by an earlier run of the match never shows while it is played again, and at full time one with another score or other teams is not shown (`same_match`)."""
     if view != "insights":
         return no_update, no_update
     store = store or get_store()
-    final = bool(match_id) and bool((store.state(match_id) or {}).get("final"))
+    state = (store.state(match_id) or {}) if match_id else {}
+    final = bool(state.get("final"))
     doc = store.recap(match_id) if final else None
+    if doc is not None and not same_match(doc, state):
+        doc = None  # left by an earlier run that ended otherwise, or written before a later goal: the worker's recap replaces it
     sig = _sig(match_id, final, doc, lang)
     if sig == last_sig:
         return no_update, no_update

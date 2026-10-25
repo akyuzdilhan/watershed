@@ -166,6 +166,21 @@ def test_before_the_final_whistle_the_section_says_when_the_recap_comes(desk, mo
     assert "no recap yet" in texts_in(panels.after_the_match(MATCH, "insights", None, desk)[0])
 
 
+def test_a_recap_of_another_score_or_other_teams_is_not_shown(desk, monkeypatch):
+    doc = write_recap(desk, monkeypatch)
+    en = next(t for t in doc["texts"] if t["lang"] == "en")
+    path = desk.root / MATCH / "state.json"
+    state = json.loads(path.read_text(encoding="utf-8"))
+    assert en["recap"] in texts_in(panels.after_the_match(MATCH, "insights", None, desk)[0])
+    teams = state["teams"]
+    for other in ({"score": dict(state["score"], away=state["score"]["away"] + 1)}, {"teams": {"home": teams["away"], "away": teams["home"]}}):
+        path.write_text(json.dumps(dict(state, **other)), encoding="utf-8")  # a run that ended otherwise, or with other names
+        assert texts_in(panels.after_the_match(MATCH, "insights", None, desk)[0]) == "Full time: no recap yet.", other
+    path.write_text(json.dumps(state), encoding="utf-8")
+    assert en["recap"] in texts_in(panels.after_the_match(MATCH, "insights", None, desk)[0])
+    assert panels.same_match({k: v for k, v in doc.items() if k != "analysis"}, dict(state, score={}))  # a recap without its analysis is taken as it is
+
+
 def test_the_section_sits_in_the_insights_pane_and_comes_with_its_refresh(desk, monkeypatch):
     pane = panels.insights_pane()
     assert "After the match" in texts_in(pane) and "The recap appears at full time." in texts_in(pane)
