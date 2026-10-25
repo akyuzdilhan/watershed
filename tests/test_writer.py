@@ -242,6 +242,9 @@ SAVE_CLAIMS = [{"value": 81, "source_field": "rovers_wp_after_save_pct"}, {"valu
     ("es", "La parada lleva al Rovers del 24% al 81% de opciones de ganar.", True),
     ("es", "El Rovers sigue en el 81% de opciones de ganar, frente al 24% si hubiera entrado.", False),
     ("es", "El Rovers sigue en el 81% de opciones de ganar en lugar del 24%.", False),
+    ("fr", "Rovers reste à 81 % de chances de gagner ; elles auraient été de 24 % si le tir était entré.", False),
+    ("es", "El Rovers sigue en el 81% de opciones de ganar; estuvo a un paso del 24%.", False),
+    ("en", "Rovers stay on 81% to win, a goal away from 24%.", False),
 ])
 def test_a_value_if_goal_is_never_a_starting_point(lang, why, starts):
     errors, _ = rules("Rovers", why, lang, SAVE_CLAIMS, SAVE_FACTS)
@@ -274,6 +277,13 @@ def test_the_em_dash_is_refused_in_a_text_and_normalised_in_a_reply():
     ("fr", "Rovers gagne 24 points et passe à 54 % de chances de gagner."),
     ("es", "Sin hacer ruido, el Rovers acaba de ganar 24 puntos: 54% de opciones de ganar."),
     ("es", "El Rovers suma 24 puntos y llega al 54% de opciones de ganar."),
+    ("en", "Rovers win 24 points with that goal, up to 54% to win."),
+    ("en", "Rovers pick up 24 points: 54% to win now."),
+    ("en", "Honours even, and Rovers take a point."),
+    ("fr", "Rovers empoche 24 points et passe à 54 % de chances de gagner."),
+    ("fr", "Match nul, et Rovers prend un point."),
+    ("es", "El Rovers consigue 24 puntos y llega al 54% de opciones de ganar."),
+    ("es", "Empate, y el Rovers saca un punto."),
 ])
 def test_points_never_go_with_a_verb_of_league_points(lang, why):
     assert "league_points_verb" in rules("Rovers", why, lang)[0], why

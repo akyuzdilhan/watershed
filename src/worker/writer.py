@@ -76,7 +76,7 @@ EXAMPLE_DUO = [
 
 WRITER_INSTRUCTIONS += f"""
 
-Points. The word points (French points, Spanish puntos) has one meaning: a gap between two chances, in percentage points, from a field ending in _pts. Never write any other value as points, and never with a verb of league points (take, prendre, gagner, ganar, sumar): "Rovers take 24 points" sounds like the league table.
+Points. The word points (French points, Spanish puntos) has one meaning: a gap between two chances, in percentage points, from a field ending in _pts. Never write any other value as points, and never with a verb of league points (take, prendre, gagner, ganar, sumar; nor win, earn, pick up, empocher, conseguir): "Rovers take 24 points" sounds like the league table. A draw is never "a point" (un point, un punto).
 
 A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Lightfoot"), with no probability and no points.
 
@@ -323,7 +323,8 @@ FR_ARTICLE = r"(?i:\b(?:l['’]\s?|d['’]\s?|(?:le|la|les|du|des|au|aux)\s+))"
 LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
     "en": [
         ("jargon", "warning", r"(?i)\bwin chances?\b"),
-        ("league_points_verb", "error", r"(?i)\b(?:take|takes|took|taken|taking|gain|gains|gained|gaining)\s+(?:\w+\s+)?\d+\s+points?\b"),  # "points" with a verb of league points
+        ("league_points_verb", "error", r"(?i)\b(?:take|takes|took|taken|taking|gain|gains|gained|gaining|win|wins|won|winning|earn|earns|earned|earning|collect|collects|collected"
+                                        r"|bank|banks|banked|(?:pick|picks|picked|picking)\s+up)\s+(?:\w+\s+)?(?:\d+|a|one|three)\s+points?\b"),  # "points" with a verb of league points, a draw as "a point"
         ("league_rate", "error", r"(?i)\b(?:one|1|once)\s+(?:(?:match|game)\s+)?(?:in|out of)\s+(?:every\s+)?\d+(?!\d|\s+seasons?\b)"  # "not once in 50 seasons" is a landmark, not a rate
                                  r"|\b(?:\d+(?:[.,]\d+)?|once|twice|\w+\s+times)\s+(?:a|per|each|every)\s+season\b"),
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+times\s+(?:rarer|more\s+rare|less\s+likely)\b|\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+(?:matches|games)\b|\b\d{3,}\s+(?:matches|games)\b"),
@@ -335,7 +336,8 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("article_before_team", "error", FR_ARTICLE + r"{team}\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|turnover|win)\b"),
         ("percent_without_space", "warning", r"\d%"),
-        ("league_points_verb", "error", r"(?i)\b(?:prendre|prend|prennent|pris|prenait|gagner|gagne|gagnent|gagné|gagnés|gagnait)\s+(?:\w+\s+)?\d+\s+points?\b"),
+        ("league_points_verb", "error", r"(?i)\b(?:prendre|prend|prennent|pris|prenait|gagner|gagne|gagnent|gagné|gagnés|gagnait|empocher|empoche|empochent|empoché|décrocher|décroche"
+                                        r"|décrochent|décroché|récolter|récolte|récoltent|récolté|ramener|ramène|ramènent|ramené)\s+(?:\w+\s+)?(?:\d+|un|le|trois)\s+points?\b"),
         ("league_rate", "error", r"(?i)\b(?:un|1)\s+match\s+sur\s+\d|\bune\s+fois\s+sur\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+fois\s+)par\s+saison\b|\b\d+(?:[.,]\d+)?\s+fois\s+plus\s+rare"),
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+matchs\b|\b\d{3,}\s+matchs\b"),
     ],
@@ -345,7 +347,8 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("forbidden_word", "error", r"(?i)\bgame[- ]?changer\b"),
         ("clumsy_phrase", "warning", r"(?i)\ben puntos de diferencia\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|win)\b"),
-        ("league_points_verb", "error", r"(?i)\b(?:ganar|gana|ganan|ganó|ganado|ganaba|sumar|suma|suman|sumó|sumado)\s+(?:\w+\s+)?\d+\s+puntos?\b"),
+        ("league_points_verb", "error", r"(?i)\b(?:ganar|gana|ganan|ganó|ganado|ganaba|sumar|suma|suman|sumó|sumado|conseguir|consigue|consiguen|consiguió|conseguido|lograr|logra"
+                                        r"|logran|logró|logrado|sacar|saca|sacan|sacó|sacado|rascar|rasca|rascó)\s+(?:\w+\s+)?(?:\d+|un|el|tres)\s+puntos?\b"),
         ("league_rate", "error", r"(?i)\b(?:un|1)\s+partido\s+de\s+cada\s+\d|\b(?:una\s+vez|uno)\s+(?:de\s+)?cada\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+(?:vez|veces)\s+)(?:por|cada|a\s+la)\s+temporada\b"
                                  r"|\b\d+(?:[.,]\d+)?\s+veces\s+más\s+rar[oa]"),
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+partidos\b|\b\d{3,}\s+partidos\b"),
@@ -361,7 +364,8 @@ CARD_KIND_WORDS = {
 }
 # A value "if goal" after one of these words reads as where the team started from: "from 9%", "de 9 %", "del 9%".
 IF_GOAL_START = re.compile(r"(?i)\b(?:from|de|del|d['’])\s*(?:(?:un|una|the|a)\s+)?$")
-NOT_A_START = re.compile(r"(?i)\b(?:au lieu|en lugar|en vez)\s*$")  # "au lieu de 24 %", "en lugar del 24%": instead of
+NOT_A_START = re.compile(r"(?i)\b(?:au lieu|en lugar|en vez"  # "au lieu de 24 %", "en lugar del 24%": instead of
+                         r"|été|plus|moins|près|loin|autour|sido|paso|lejos|cerca|más|menos|alrededor|away|far)\s*$")  # "auraient été de 70 %", "a un paso del 70%", "a goal away from 70%": the value itself
 
 # Words that speak of a win probability: a sentence that uses one must name a club.
 PROBABILITY_WORDS = {
