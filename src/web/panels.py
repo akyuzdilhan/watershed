@@ -17,6 +17,7 @@ from web.matchfeed import player_names, team_names
 from web.store import get_store
 from worker import feedback as FB
 from worker import tactics as T
+from worker.duo import PERSONAS
 
 PANEL_REFRESH_MS = 5000  # per IP: the desk ticks every 1.5 s (two callbacks, about 80 requests a minute), the visible panel adds 12 and an overlay open on the same machine 60 (it ticks every second): about 152 a minute, under a RATE_LIMIT_PER_MIN of 600
 # The desk tick sets the match picker again with the same value, and Dash runs every callback that takes it as an input each time: the panels take c-p-match instead,
@@ -95,8 +96,14 @@ def fb_stats(docs: list[dict]) -> html.Div:
                      html.Table([html.Tbody(rows)], className="facts")], className="fb-stats")
 
 
+def speaker(code: str | None) -> str:
+    """How a duo line is signed: its persona's short name, else the speaker as written."""
+    p = PERSONAS.get(code or "")
+    return p.short if p else (code or "?")
+
+
 def duo_block(doc: dict, lang: str | None = None, verdicts: dict | None = None, pane: str = "i") -> html.Div | None:
-    """The commentary duo lines of a card or insight (`duo: [{speaker, lang, line}]`), grouped by language, each with its feedback controls when `verdicts` is given."""
+    """The duo's suggested lines of a card or insight (`duo: [{speaker, lang, line}]`), grouped by language, each with its feedback controls when `verdicts` is given."""
     lines = [d for d in doc.get("duo") or [] if isinstance(d, dict) and (lang is None or d.get("lang") == lang)]
     if not lines:
         return None
@@ -104,9 +111,14 @@ def duo_block(doc: dict, lang: str | None = None, verdicts: dict | None = None, 
     for d in lines:
         by_lang.setdefault(d.get("lang", "en"), []).append(d)
     return html.Div([html.Div([html.Div(code.upper(), className="lang"),
-                               *[html.P([html.Span(f"{d.get('speaker', '?')}: ", className="duo-speaker"), d.get("line", ""),
+                               *[html.P([html.Span(f"{speaker(d.get('speaker'))}: ", className="duo-speaker"), d.get("line", ""),
                                          *fb_controls(pane, doc, "duo", code, i, d.get("line", ""), verdicts)], className="duo-line") for i, d in enumerate(items)]],
                               className="duo-lang") for code, items in by_lang.items()], className="duo")
+
+
+def suggested_lines(duo: html.Div) -> list:
+    """The duo's lines under their heading: text proposed to the commentary team, never voiced."""
+    return [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo]
 
 
 def facts_table(facts: dict, meanings: dict) -> html.Table:
@@ -298,7 +310,7 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts:
     parts += texts_block(d, fb)
     duo = duo_block(d, verdicts=fb)
     if duo is not None:
-        parts += [html.H3("Commentary"), duo]
+        parts += suggested_lines(duo)
     facts = d.get("headline_facts") or {}
     shown = shown_facts(facts, read_only)
     parts += [html.H3("Facts"), facts_table(shown, d.get("field_meanings") or {})]
@@ -319,7 +331,7 @@ def storyline_block(doc: dict | None, verdicts: dict | None = None, read_only: b
     parts += texts_block(doc, fb)
     duo = duo_block(doc, verdicts=fb)
     if duo is not None:
-        parts += [html.H3("Commentary"), duo]
+        parts += suggested_lines(duo)
     parts += [html.H3("Facts"), facts_table(shown_facts(doc.get("facts") or doc.get("headline_facts") or {}, read_only), doc.get("field_meanings") or {})]
     return html.Div(parts)
 

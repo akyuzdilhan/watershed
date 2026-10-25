@@ -14,6 +14,7 @@ from web import graphics, matchfeed, panels, security, store
 from web.app import app
 from worker import recap, tactics
 from worker.desk import Desk
+from worker.duo import PERSONAS
 from worker.pipeline import JsonFileSink, Pipeline
 from worker.writer import TemplateWriter
 
@@ -297,7 +298,8 @@ def write_docs(s: store.FileStore) -> list[dict]:
     (s.root / MATCH / "insights.json").write_text(json.dumps(docs), encoding="utf-8")
     (s.root / MATCH / "storyline.json").write_text(json.dumps({"id": f"storyline-{MATCH}", "type": "storyline", "match_id": MATCH, "status": "pending",
                                                                "facts": {"home_rank": 4}, "field_meanings": {"home_rank": "home table position"},
-                                                               "texts": [{"lang": "en", "headline": "Fourth against sixth", "why": "A top-four duel."}]}), encoding="utf-8")
+                                                               "texts": [{"lang": "en", "headline": "Fourth against sixth", "why": "A top-four duel."}],
+                                                               "duo": [{"speaker": "joss", "lang": "en", "line": "A top-four duel tonight.", "claims": []}]}), encoding="utf-8")
     return docs
 
 
@@ -364,6 +366,9 @@ def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypat
     assert panels.PRODUCER_ONLY_NOTE in words(seen["visitor", rare["key"]]["c-i-detail"]) and panels.PRODUCER_ONLY_NOTE not in words(seen["producer", rare["key"]]["c-i-detail"])
     assert "margin_m" in fact_keys(seen["producer", run["key"]]["c-i-detail"]) and "margin_m" not in fact_keys(seen["visitor", run["key"]]["c-i-detail"])
     assert margins_in(seen["producer", run["key"]]["c-i-figure"]["figure"]) and margins_in(seen["visitor", run["key"]]["c-i-figure"]["figure"]) == []
+    for shown in (words(seen["visitor", run["key"]]["c-i-detail"]), words(seen["visitor", run["key"]]["c-s-detail"])):  # the duo's lines: proposed text, signed by persona
+        assert "Suggested lines" in shown and "never voiced" in shown and "Commentary" not in shown, shown
+    assert f"{PERSONAS['wren'].short}: " in words(seen["visitor", run["key"]]["c-i-detail"]) and "wren: " not in words(seen["visitor", run["key"]]["c-i-detail"])
 
 
 def test_a_visitor_cannot_approve_or_reject_an_insight_or_the_storyline(public):
