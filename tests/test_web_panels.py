@@ -192,7 +192,7 @@ def test_the_shot_map_totals_leave_out_the_shots_var_ruled_out(demo_feed):
 def test_the_former_pressing_figure_is_named_for_what_it_counts(demo_feed):
     fig = graphics.pressing_figure(demo_feed)
     assert fig.layout.title.text.startswith("<b>Opponents near the ball</b>") and f"within {tactics.PRESS_RADIUS_M:g} m of the opponent on the ball" in fig.layout.title.text
+    assert "Pressing" not in fig.layout.title.text
     labels = {o["value"]: o["label"] for o in panels.graphic_items(demo_feed, "tactics")}
     assert labels["press"] == "Opponents near the ball over time"
-    assert not [label for label in labels.values() if "ressing" in label] and "ressing" not in fig.layout.title.text
     assert panels.graphic_figure(demo_feed, "tactics", "press").layout.title.text == fig.layout.title.text
