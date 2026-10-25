@@ -1,6 +1,6 @@
-"""The commentary duo: two fictional commentators, their voices in three languages, the lines the template writer can speak, and the per-match memory that keeps the desk from repeating itself.
+"""The commentary duo: suggested lines for the human commentary team, in two fictional voices and three languages, the lines the template writer can propose, and the per-match memory that keeps the desk from repeating itself.
 
-Wren Calder lives the moment and the story; Joss Ferrier sees the detail, the number, the pattern nobody noticed. Both are invented: no real commentator or pundit is named, quoted or imitated. The personas are data (`PERSONAS`), rendered into the Writer prompt by `persona_brief`; the deterministic lines (`LINES`) are the fallback when no model is used, and every number they say is claimed against the card facts like the card texts.
+Watershed works alongside human commentators: the duo's lines are text proposals for the commentary team, never a voice of their own. Wren Calder lives the moment and the story; Joss Ferrier sees the detail, the number, the pattern nobody noticed. Both are invented: no real commentator or pundit is named, quoted or imitated. The personas are data (`PERSONAS`), rendered into the Writer prompt by `persona_brief`; the deterministic lines (`LINES`) are the fallback when no model is used, and every number they say is claimed against the card facts like the card texts.
 
 A line can carry conditions (`CONDITIONS`, such as `{if_home}`): placeholders that `writer.conditions` fills with "" when the line is true for the card and None when it is not, so `fill` skips it. The stadium only roars for the home club, "the man this time" needs a new scorer, "small margins" a small one.
 
@@ -335,7 +335,7 @@ LINES: dict[str, dict[str, dict]] = {
         "en": {"heart": ["Oh, how has that not gone in?", "So close for {team}! {player} cannot believe it!", "That was the chance! {team} will be thinking about that one.",
                          "Oh, {player}! That had to be the one for {team}!"],
                "eye": ["That was a {xg}% chance, and a goal would have taken {team} from {before}% to {other}% to win.", "Big one: {team} stay on {before}% to win when it could have been {other}%.",
-                       "One finish from {other}% to win, and {team} stay on {before}% instead.", "On a {xg}% chance, {team} were close to going from {before}% to {other}% to win.",
+                       "One finish, and {team} would be on {other}% to win; they stay on {before}% instead.", "On a {xg}% chance, {team} were close to going from {before}% to {other}% to win.",
                        "Quietly huge, that one: a goal would have put {team} on {other}% to win, not {before}%.{if_big_chance}"],
                "heart_back": ["Those are the ones you remember at the final whistle.", "You have to take those, Joss, you just have to.", "Somewhere on that bench, someone has their head in their hands."],
                "eye_more": {"any": []}},

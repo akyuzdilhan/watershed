@@ -1,3 +1,4 @@
+import inspect
 import json
 import re
 import sys
@@ -8,8 +9,9 @@ from generator import generate_match
 from worker import recap as recap_cli
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, MemorySink, Pipeline
-from worker.recap import MAX_WORDS, RULED_OUT_WORDS, RecapTemplateWriter, analyse, build_recap, recap_facts, season_facts, verify_recap
-from worker.writer import TemplateWriter, sentences, word_count
+from worker.recap import (MAX_WORDS, RECAP_INSTRUCTIONS, RULED_OUT_WORDS, RecapTemplateWriter, RecapWriter, analyse, build_recap, recap_facts, season_facts,
+                          verify_recap)
+from worker.writer import EM_DASH, TemplateWriter, sentences, word_count
 
 
 def run_desk(seed: int, story: str = "random", sink=None, frames: bool = False):
@@ -249,3 +251,40 @@ def test_the_offside_call_survives_a_store_without_feed_events(demo, call, words
     assert recap["facts"]["disallowed_1_offside_call"] == call and not any("margin" in k for k in recap["facts"])
 
 
+# --- the instructions and the model's replies ------------------------------------------------------------
+
+def test_recap_instructions_follow_the_templates():
+    assert "25 cm" not in RECAP_INSTRUCTIONS and "the margin when given" not in RECAP_INSTRUCTIONS and "80 words" not in RECAP_INSTRUCTIONS
+    assert "offside by a whisker" in RECAP_INSTRUCTIONS and "clear offside" in RECAP_INSTRUCTIONS and "never give a margin" in RECAP_INSTRUCTIONS
+    assert all(f"at most {limit} words" in RECAP_INSTRUCTIONS for limit in MAX_WORDS.values()) and not re.search(r"<\w+_words>", RECAP_INSTRUCTIONS)
+    assert "provisionally 14th" in RECAP_INSTRUCTIONS and EM_DASH not in RECAP_INSTRUCTIONS
+    assert inspect.signature(RecapWriter).parameters["max_tokens"].default == 3000
+
+
+class ScriptedWriter:
+    """Replays crafted recap replies and keeps the notes of the retries: no model call."""
+
+    name = "scripted-model"
+
+    def __init__(self, replies) -> None:
+        self.replies, self.notes = list(replies), []
+
+    async def write_async(self, match_id, facts, languages, note=None):
+        self.notes.append(note)
+        return self.replies.pop(0)
+
+
+def test_model_replies_follow_the_on_air_rules(demo):
+    cards, state, _, recap = demo
+    facts, good = recap["facts"], [dict(t) for t in recap["texts"]]
+    swing, winner = facts["turning_point_swing_pts"], facts["winner"]
+    dashed = [dict(good[0], recap=good[0]["recap"].replace(": ", f" {EM_DASH} ", 1))] + good[1:]  # the dash becomes a comma
+    texts, report = verify_recap(json.dumps(dashed, ensure_ascii=False), ["en", "fr", "es"], facts, cards)
+    assert report["verified"] and EM_DASH not in texts[0]["recap"]
+    for text in (f"{winner} take {swing} points from that goal.", "VAR ruled out a goal at 63': offside by 25 cm.", "About one match in 101 goes that way."):
+        bad = [dict(good[0], recap=text)] + good[1:]
+        assert not verify_recap(json.dumps(bad, ensure_ascii=False), ["en", "fr", "es"], facts, cards)[1]["verified"], text
+    league = [dict(good[0], recap=f"{winner} take {swing} points from that goal.")] + good[1:]
+    writer = ScriptedWriter([json.dumps(league, ensure_ascii=False), json.dumps(good, ensure_ascii=False)])
+    out = build_recap(cards, state, writer)
+    assert out["writer"] == "scripted-model" and out["verification"]["attempts"] == 2 and "league_points_verb" in writer.notes[1]

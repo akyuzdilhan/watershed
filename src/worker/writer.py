@@ -1,8 +1,8 @@
 """The Writer and the Verifier: from a Spotter card (or an insight) to on-air text and a commentary duo in several languages, every number checked.
 
-The code computes every number and sends it under an explicit field name (`card_facts`, `insight_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. The Verifier checks those claims, rejects any number nobody claimed, a percentage taken from a field that is not one, and flags any name that is not in the facts. It also applies broadcast style rules per language (`LANGUAGE_RULES`, `STRUCTURAL_RULES`): an error fails the draft, a warning is only reported. The duo lines (`duo` field, personas in `worker.duo`) go through the same checks, line by line. Across a match, a `PhraseMemory` remembers what was already said: an identical headline fails, a reused opening, phrase or tic is a warning. A failed draft gets one retry, told what was rejected, then fixed templates take over (many variants, the least used one picked deterministically), so a card is never blocked by the model.
+The code computes every number and sends it under an explicit field name (`card_facts`, `insight_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. The Verifier checks those claims, rejects any number nobody claimed, a percentage taken from a field that is not one, and flags any name that is not in the facts. It also applies broadcast style rules per language (`LANGUAGE_RULES`, `STRUCTURAL_RULES`): an error fails the draft, a warning is only reported. The duo lines (`duo` field, personas in `worker.duo`) are suggested lines for the human commentary team and go through the same checks, line by line. Across a match, a `PhraseMemory` remembers what was already said: an identical headline or duo line fails, a reused opening, phrase or tic is a warning. A failed draft gets one retry, told what was rejected, then fixed templates take over (many variants, the least used one picked deterministically), so a card is never blocked by the model.
 
-"Points" has one meaning on screen: a change in a team's chance of winning. The card ranking value `value_pts` is never sent to the model nor written. A goal that hardly moves the result (under 2 points) is written as a milestone, with no probability (`low_stake`).
+On-air rules. "Points" has one meaning on screen: a gap between two chances, in percentage points (a field ending in `_pts`), never with a verb of league points (take, prendre, gagner, ganar). The card ranking value `value_pts` and league table points are never sent to the model nor written. A goal that hardly moves the result (under 2 points) is written as a milestone, with no probability (`low_stake`). A rarity is told in seasons for the team or the player: league-wide rates, match counts, ratios and bits stay with the producer (`on_air` keeps them out of the model's facts). An offside is tight or clear, never a margin. A value "if goal" is never a starting point after from, de or del. No em dash.
 
 The model runs on Microsoft Foundry through Agent Framework (`FoundryWriter`, a function tool `get_moment`); `TemplateWriter` needs no Azure and serves the tests and the fallback.
 """
@@ -29,12 +29,14 @@ Facts: call the get_moment tool with the card_id to get the facts and the meanin
 Numbers. Each number has a field name that says what it means: never use a number with another meaning. For example, a win probability "if goal" is a chance of winning, never a chance of scoring. Do not compute any new number. Write every number exactly as given: whole numbers, no sign (never +24), no decimals.
 - Fields ending in _pct are percentages: write them with a % sign (34%, never 0.34).
 - Fields ending in _pts are percentage points: always write the word points (French: points, Spanish: puntos) right after the number, never a % sign.
+- A field with _if_goal in its name is what the chance would have been had the shot gone in: never write it as a starting point after from, de or del ("from 9%", "de 9 %", "del 9%"); write "instead of 9%", "contre 9 %", "frente al 9%".
 
 Content. Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Every sentence that gives a win probability names the team it belongs to: rovers_wp_after_pct is the chance of Rovers. Never write "win chance", "the chances" or "les chances" without the team.
 - Headline: at most 8 words, names the player or the team. No minute and no number at the start: the graphic already shows the minute and the score.
 - Why: one sentence, at most 25 words.
 - A red card names the player in the headline or the why. Say second yellow only when card_kind is second_yellow, and straight red only when card_kind is straight_red.
 - Same meaning in every language, each written natively as a broadcaster of that country would say it, not translated word for word.
+- Punctuation: never the long dash (em dash); use a comma, a colon or a full stop.
 
 Language rules.
 - en: plain broadcast English. Say "Rovers go from 30% to 54% to win", "worth 13 points". No jargon: no "+24-point swing", no "win chance".
@@ -80,9 +82,11 @@ A goal with no stake. When the facts have "stake": "low", the goal hardly change
 
 Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact and who did it, the why says why it is remarkable, with numbers only from the facts. A rarity is told in seasons, for the team or the player ("Rovers' first comeback from two goals down since 2019/20"); never a count of matches, a league-wide rate ("one match in 101", "about 3 a season"), a ratio ("228 times rarer") or bits: those stay with the producer.
 
+On air. Name the feat and who did it. Never give an offside margin as a number: an offside is tight ("by a whisker") or clear.
+
 Variety. The request may list, per language, the headlines, openings, verbs and duo lines already used in this match ("avoid"). Never repeat a headline or a duo line; do not start a sentence or build a headline like those; vary the verbs. Each match has its story: tell it from the facts (goal_situation, score_after, scorer_match_goals), never with the same words twice.
 
-Commentary duo. When the request has "duo": true, also write what two fictional commentators say on air about the moment. Never name or imitate a real commentator or pundit; keep it broadcast-safe, never insulting.
+Commentary duo. When the request has "duo": true, also write suggested lines for the human commentary team, in two fictional voices. Never name or imitate a real commentator or pundit; keep it broadcast-safe, never insulting.
 {persona_brief(list(LANGUAGES))}
 - 2 to 4 lines per requested language, alternating speakers, usually wren first: wren lives the moment and the story, joss brings one number or the detail nobody noticed, then they answer each other.
 - Spoken, not written: one or two short sentences per line, at most 25 words, no headline style, and not a copy of the headline or the why.
@@ -180,9 +184,10 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
                      f"{slug}_wp_before_pct": f"{name}'s chance of winning the match, in %",
                      f"{slug}_wp_if_goal_pct": f"{name}'s chance of winning the match if the shot had gone in, in %"}
     season = card.get("season_context") or {}
-    if season.get("facts"):  # what the score means for the season (worker.storyline.live_context), prefixed so it never collides with the match facts
-        facts |= {f"season_{k}": v for k, v in season["facts"].items()}
-        meanings |= {f"season_{k}": v for k, v in season.get("meanings", {}).items()}
+    if season.get("facts"):  # what the score means for the season (worker.storyline.live_context), prefixed so it never collides with the match facts; no league table points
+        kept = {k: v for k, v in season["facts"].items() if not league_points_field(k)}
+        facts |= {f"season_{k}": v for k, v in kept.items()}
+        meanings |= {f"season_{k}": v for k, v in season.get("meanings", {}).items() if k in kept}
     return facts, meanings
 
 
@@ -276,6 +281,18 @@ def normalise(text: str) -> str:
     return text.replace("\xa0", " ").replace("\u202f", " ")
 
 
+EM_DASH = "\u2014"
+
+
+def no_em_dash(text: str) -> str:
+    """A model's text with each em dash replaced by a comma, or dropped after a punctuation mark: the long dash is not broadcast punctuation."""
+    if not isinstance(text, str) or EM_DASH not in text:
+        return text
+    text = re.sub(rf"([.!?:;,])\s*{EM_DASH}\s*", r"\1 ", text)
+    text = re.sub(rf"\s*{EM_DASH}\s*", ", ", text)
+    return re.sub(r"^[,\s]+|[,\s]+$", "", text)
+
+
 def word_count(text: str) -> int:
     """Words of a text, French typography aside: "44 %" or "Rovers :" count as one word."""
     return sum(1 for w in normalise(text).split() if re.search(r"[\w\u00c0-\u00ff]", w))
@@ -337,6 +354,7 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+partidos\b|\b\d{3,}\s+partidos\b"),
     ],
 }
+AIR_RULES = ("league_points_verb", "league_rate")  # the on-air rules that also hold for texts that are not cards (the post-match recap)
 # What a red card text may say only when the card_kind fact says it.
 CARD_KIND_WORDS = {
     "second_yellow": {"en": r"(?i)\bsecond (?:yellow|booking)|\bbooked (?:twice|again)\b|\btwo bookings\b",
@@ -344,6 +362,9 @@ CARD_KIND_WORDS = {
                       "es": r"(?i)\bsegunda (?:tarjeta )?amarilla|\bdoble amarilla|\bdos amarillas"},
     "straight_red": {"en": r"(?i)\bstraight red", "fr": r"(?i)\b(?:carton )?rouge direct", "es": r"(?i)\b(?:tarjeta )?roja directa"},
 }
+# A value "if goal" after one of these words reads as where the team started from: "from 9%", "de 9 %", "del 9%".
+IF_GOAL_START = re.compile(r"(?i)\b(?:from|de|del|d['’])\s*(?:(?:un|una|the|a)\s+)?$")
+NOT_A_START = re.compile(r"(?i)\b(?:au lieu|en lugar|en vez)\s*$")  # "au lieu de 24 %", "en lugar del 24%": instead of
 
 # Words that speak of a win probability: a sentence that uses one must name a club.
 PROBABILITY_WORDS = {
@@ -359,12 +380,14 @@ COUNT_WORDS["fr"].pop("neuf")  # also "new"
 STRUCTURAL_RULES = {
     "signed_number": ("error", r"(?<![\w])[+±]\s?\d+"),  # "+24": say the direction with a verb
     "decimal_percent": ("error", r"\d+[.,]\d+\s?%"),  # "34.5%": percentages are whole numbers
+    "em_dash": ("error", EM_DASH),  # the long dash: a comma, a colon or a full stop instead
     "headline_starts_with_number": ("error", r"^\W*\d"),  # "52' ...": the graphic already shows the minute
     "minute_in_headline": ("warning", r"(?i)\d+(?:\+\d+)?\s?['’′]|\bmin(?:ute|uto)?s?\b"),
     "probability_without_team": ("error", None),  # a probability word in a sentence that names no club
     "probability_number_without_team": ("error", None),  # a number from a <team>_wp_ field in a sentence without that team
     "points_unit_missing": ("error", None),  # a number from a _pts field not followed by the word for points
     "points_not_from_pts_field": ("error", None),  # "54 points" where 54 is a percentage
+    "if_goal_as_start": ("error", None),  # "from 9%" where 9% is what the chance would have been had the shot gone in
     "card_kind_unbacked": ("error", None),  # "second yellow" or "straight red" when the card_kind fact does not say so
     "player_not_named": ("error", None),  # a red card whose headline and why do not name the player (card texts only)
     "count_word_unbacked": ("warning", None),  # "fifth" when no whole-number fact is 5
@@ -407,7 +430,7 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
         for p in ([pattern.replace("{team}", re.escape(t)) for t in teams] if "{team}" in pattern else [pattern]):
             for m in re.finditer(p, body):
                 add(rule, m.group(0), severity)
-    for rule in ("signed_number", "decimal_percent"):
+    for rule in ("signed_number", "decimal_percent", "em_dash"):
         for m in re.finditer(STRUCTURAL_RULES[rule][1], body):
             add(rule, m.group(0))
     for rule in ("headline_starts_with_number", "minute_in_headline"):
@@ -456,10 +479,26 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
             near = [any(point.match(w) for w in re.findall(r"[\wÀ-ÿ]+", body[end:end + 40])[:3]) for end in ends]
             if ends and not any(near):
                 add("points_unit_missing", f"{value:g}")
+    goal_values = {float(c["value"]) for c in claims if "_if_goal" in str(c.get("source_field", ""))}
+    goal_values -= {float(c["value"]) for c in claims if "_if_goal" not in str(c.get("source_field", ""))}  # a value two fields share is not attributed
+    for value, start, _ in number_spans(body):
+        before = body[max(0, start - 40):start]
+        found = IF_GOAL_START.search(before) if value in goal_values else None
+        if found and not NOT_A_START.search(before[:found.start()]):
+            add("if_goal_as_start", (before[found.start():] + body[start:start + 4]).strip())
 
     errors = [{"rule": r, "text": t} for s, r, t in issues if s == "error"]
     warnings = [{"rule": r, "text": t} for s, r, t in issues if s == "warning"]
     return errors, warnings
+
+
+def air_issues(text: str, lang: str) -> list[dict]:
+    """The on-air rules that also hold for a text that is not a card (the post-match recap): `AIR_RULES` of the language, and no em dash."""
+    body = normalise(text)
+    found = [{"rule": rule, "text": m.group(0)} for rule, _, pattern in LANGUAGE_RULES.get(lang, []) if rule in AIR_RULES for m in re.finditer(pattern, body)]
+    if EM_DASH in body:
+        found.append({"rule": "em_dash", "text": EM_DASH})
+    return found
 
 
 def check_numbers(body: str, claims: list, facts: dict) -> dict:
@@ -559,8 +598,15 @@ def parse_reply(text: str) -> tuple[Any, Any, bool]:
             if isinstance(obj, (dict, list)):
                 break
     if isinstance(obj, dict) and "texts" in obj:
-        return obj.get("texts"), obj.get("duo"), valid
-    return (obj if isinstance(obj, list) else []), None, valid
+        return dashless(obj.get("texts"), ("headline", "why")), dashless(obj.get("duo"), ("line",)), valid
+    return dashless(obj if isinstance(obj, list) else [], ("headline", "why")), None, valid
+
+
+def dashless(items: Any, keys: tuple[str, ...]) -> Any:
+    """The texts or duo lines of a reply with their em dashes normalised (`no_em_dash`)."""
+    if not isinstance(items, list):
+        return items
+    return [{**d, **{k: no_em_dash(d[k]) for k in keys if isinstance(d.get(k), str)}} if isinstance(d, dict) else d for d in items]
 
 
 def verify_reply(text: str, languages: list[str], facts: dict, duo: bool = False, memory: PhraseMemory | None = None, doc_id: str = "") -> tuple[list[dict], list[dict], dict]:
@@ -698,13 +744,13 @@ TEMPLATES = {
     "chance": {
         "en": {"headlines": ["Big chance for {team}", "{player} so close for {team}", "{player} misses a big one", "{team} go close", "{player} cannot finish"],
                "whys": ["A goal would have taken {team} from {before}% to {other}% to win.", "{team} stay on {before}% to win; that one would have put them on {other}%.",
-                        "Had it gone in, {team} would be on {other}% to win instead of {before}%.", "{team} were one finish away from {other}% to win; they stay on {before}%."]},
+                        "Had it gone in, {team} would be on {other}% to win instead of {before}%.", "One finish more, and {team} would be on {other}% to win; they stay on {before}%."]},
         "fr": {"headlines": ["Grosse occasion pour {team}", "{player} tout près", "{player} n'en profite pas", "{team} passe tout près", "Occasion manquée pour {team}"],
                "whys": ["Un but aurait fait passer {team} de {before} % à {other} % de chances de gagner.", "{team} reste à {before} % de chances de gagner ; ce but l'aurait porté à {other} %.",
-                        "S'il était entré, {team} serait à {other} % de chances de gagner au lieu de {before} %.", "{team} est passé à un geste de {other} % de chances de gagner ; il reste à {before} %."]},
+                        "S'il était entré, {team} serait à {other} % de chances de gagner au lieu de {before} %.", "Il manquait un geste à {team} pour passer à {other} % de chances de gagner ; {team} reste à {before} %."]},
         "es": {"headlines": ["Ocasión clara del {team}", "{player} rozó el gol", "{player} no acierta", "El {team} perdona", "Oportunidad perdida del {team}"],
                "whys": ["Un gol habría llevado al {team} del {before}% al {other}% de opciones de ganar.", "El {team} sigue en el {before}% de opciones de ganar; ese gol lo habría puesto en el {other}%.",
-                        "Si entraba, el {team} estaría en el {other}% de opciones de ganar en lugar del {before}%.", "El {team} se quedó a un remate del {other}% de opciones de ganar; sigue en el {before}%."]},
+                        "Si entraba, el {team} estaría en el {other}% de opciones de ganar en lugar del {before}%.", "Al {team} le faltó un remate para llegar al {other}% de opciones de ganar; sigue en el {before}%."]},
     },
 }
 

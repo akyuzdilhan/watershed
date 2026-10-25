@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from worker.duo import fr_de, fr_typography
-from worker.writer import LANGUAGES, MACHINE_TRANSLATED, league_points_field, names_ok, offside_call, sentences, shown, var_ruling, verify, word_count
+from worker.writer import (LANGUAGES, MACHINE_TRANSLATED, air_issues, league_points_field, names_ok, no_em_dash, offside_call, sentences, shown, var_ruling, verify,
+                           word_count)
 
 MAX_WORDS = {"recap": 100, "fan": 50, "analyst": 60}
 HALF_TIME_GAP_S = 120  # the match clock goes back to 45:00 at the start of the second half
@@ -244,11 +245,12 @@ def parse_drafts(text: str) -> tuple[list[dict], bool]:
             drafts = []
     if not isinstance(drafts, list) or not all(isinstance(d, dict) for d in drafts):
         drafts = []
+    drafts = [{**d, **{k: no_em_dash(d[k]) for k in MAX_WORDS if isinstance(d.get(k), str)}} for d in drafts]  # no em dash on air
     return drafts, valid
 
 
 def verify_recap(text: str, languages: list[str], facts: dict, cards: list[dict]) -> tuple[list[dict], dict]:
-    """`writer.verify` on each text (numbers claimed, claims matching their field, percentages from % fields), then length, names, spelled-out numbers and retracted moments."""
+    """`writer.verify` on each text (numbers claimed, claims matching their field, percentages from % fields), then length, names, spelled-out numbers, retracted moments and the on-air rules (`writer.air_issues`: no league points verb, no league-wide rate, no em dash)."""
     drafts, valid = parse_drafts(text)
     allowed = " ".join(str(v) for v in facts.values())
     players = {c["player"]["name"] for c in cards}
@@ -269,9 +271,10 @@ def verify_recap(text: str, languages: list[str], facts: dict, cards: list[dict]
                 "unknown_players": sorted(p for p in players if any(n in body and n not in allowed for n in (p, p.split()[-1]))),
                 "spelled_numbers": [w for w in re.findall(r"[\wÀ-ÿ]+", body.lower()) if w in spelled],
                 "retracted_minutes": sorted({m for m in retracted_minutes for s in sentences(body) if m in s and not re.search(RULED_OUT_WORDS.get(str(d.get("lang")), "VAR"), s)}),
+                "air_errors": air_issues(body, str(d.get("lang"))),
             }
             entry["verified"] = (entry["verified"] and entry["length_ok"] and not entry["unknown_names"] and not entry["unknown_players"]
-                                 and not entry["spelled_numbers"] and not entry["retracted_minutes"])
+                                 and not entry["spelled_numbers"] and not entry["retracted_minutes"] and not entry["air_errors"])
             report["texts"].append(entry)
     report["verified"] = bool(drafts) and valid and report["languages_ok"] and all(e["verified"] for e in report["texts"])
     return drafts, report
@@ -449,25 +452,31 @@ RECAP_INSTRUCTIONS = """You write the post-match texts of a football broadcast.
 
 Facts: call the get_recap_facts tool with the match_id to get the facts and the meaning of each field. Use ONLY those facts. Never invent a statistic, name, minute or fact, and never mention a moment that is not in the facts.
 
-Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Lightfoot's goal at 63': offside by 25 cm"), in the same sentence as the words VAR or ruled out, with the reason and the margin when given. They never count as goals.
+Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Lightfoot's goal at 63': offside by a whisker"), in the same sentence as the words VAR or ruled out, with the reason. For an offside, disallowed_*_offside_call says whether it was tight ("offside by a whisker") or clear ("clear offside"): never give a margin. They never count as goals.
 
-Each number has a field name that says what it means: never use a number with another meaning. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are changes in a team's chance of winning, in percentage points: write them as points. The word points means nothing else. Do not compute any new number. Write every number in digits (4 goals, never "four goals"), and use no proper noun that is not in the facts.
+Each number has a field name that says what it means: never use a number with another meaning. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are gaps between two chances, in percentage points: write them as points. The word points means nothing else, and never goes with a verb of league points (take, gain; French prendre, gagner; Spanish ganar, sumar). Do not compute any new number. Write every number in digits (4 goals, never "four goals"), and use no proper noun that is not in the facts.
+
+The table: season_<club>_rank_after_matchday is the rank once the whole matchday is played. When only season_<club>_rank_after is given, it counts this result alone: say the rank is provisional ("provisionally 14th", "provisoirement 14e", "provisionalmente 14.º").
+
+On air: a rarity is told in seasons, for the team or the player, never as a count of matches, a league-wide rate or a ratio. Never use the long dash (em dash): a comma, a colon or a full stop instead.
 
 For each requested language write three texts:
-- recap: the match in at most 80 words, neutral, built around the turning point.
-- fan: at most 50 words, emotional, from the point of view of fan_team's supporters.
-- analyst: at most 60 words, numbers-led, following analyst_team's chance of winning (kick-off, half-time, low point, turning point, biggest moments).
-Write each language natively, with the same facts in every language.
+- recap: the match in at most <recap_words> words, neutral, built around the turning point.
+- fan: at most <fan_words> words, emotional, from the point of view of fan_team's supporters.
+- analyst: at most <analyst_words> words, numbers-led, following analyst_team's chance of winning (kick-off, half-time, low point, turning point, biggest moments).
+Write each language natively, with the same facts in every language: French without an article before a club name ("pour Rovers"), Spanish with it ("para el Rovers").
 
 Reply with valid JSON only, no other text: a JSON array with one object per requested language:
 {"lang": string, "recap": string, "fan": string, "analyst": string, "claims": [{"value": number, "source_field": string}]}
 claims lists every number written in any of the three texts, with the field it comes from (a number taken from a score or a minute claims that field)."""
+for _section, _limit in MAX_WORDS.items():  # the limits the Verifier applies
+    RECAP_INSTRUCTIONS = RECAP_INSTRUCTIONS.replace(f"<{_section}_words>", str(_limit))
 
 
 class RecapWriter:
     """The recap agent on Microsoft Foundry (Agent Framework, Responses API), with get_recap_facts as a function tool. Same set-up as `writer.FoundryWriter`."""
 
-    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int = 4000) -> None:
+    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int = 3000) -> None:
         from agent_framework import Agent, tool
         from agent_framework.foundry import FoundryChatClient
         from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
@@ -505,8 +514,9 @@ class RecapWriter:
 def failures(report: dict) -> str:
     """A short list of what the Verifier rejected, sent back to the model on the retry."""
     bad = [e for e in report.get("texts", []) if not e.get("verified")]
-    return "; ".join(f"{e['lang']} {e['section']}: " + ", ".join(k for k in ("bad_claims", "unclaimed_numbers", "wrong_unit", "unknown_names", "unknown_players", "spelled_numbers", "retracted_minutes")
-                                                                 if e.get(k)) + ("" if e.get("length_ok", True) else " too long") for e in bad)[:600] or "invalid JSON or missing languages"
+    keys = ("bad_claims", "unclaimed_numbers", "wrong_unit", "unknown_names", "unknown_players", "spelled_numbers", "retracted_minutes")
+    return "; ".join(f"{e['lang']} {e['section']}: " + ", ".join([k for k in keys if e.get(k)] + [f"{i['rule']} ({i['text']})" for i in e.get("air_errors", [])])
+                     + ("" if e.get("length_ok", True) else " too long") for e in bad)[:600] or "invalid JSON or missing languages"
 
 
 async def recap_async(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, calls_left: int = 2,
