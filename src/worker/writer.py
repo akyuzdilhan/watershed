@@ -77,7 +77,7 @@ Points. The word points (French points, Spanish puntos) means only a change in a
 
 A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Lightfoot"), with no probability and no points.
 
-Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact, the why says why it is remarkable, with numbers only from the facts (write them without thousands separators: 18620).
+Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact and who did it, the why says why it is remarkable, with numbers only from the facts. A rarity is told in seasons, for the team or the player ("Rovers' first comeback from two goals down since 2019/20"); never a count of matches, a league-wide rate ("one match in 101", "about 3 a season"), a ratio ("228 times rarer") or bits: those stay with the producer.
 
 Variety. The request may list, per language, the headlines, openings and verbs already used in this match ("avoid"). Never repeat a headline; do not start a sentence or build a headline like those; vary the verbs. Each match has its story: tell it from the facts (goal_situation, score_after, scorer_match_goals), never with the same words twice.
 
@@ -175,6 +175,21 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
     return facts, meanings
 
 
+def league_points_field(name: str) -> bool:
+    """A field of league table points ("rovers_points_if_win", "points_gap"): never sent to the model, since "points" on air is only a gap between two chances."""
+    return "points" in name.split("_")
+
+
+OFF_AIR_FIELDS = ("one_in", "surprisal_bits", "history_opportunities", "history_per_season", "times_rarer_than_runner_up", "runner_up_surprisal_bits",
+                  "top_value", "runner_up", "runner_up_value")  # rarity measures and desk ranking: the producer sees them in the console, the audience never
+
+
+def on_air(facts: dict, meanings: dict) -> tuple[dict, dict]:
+    """The facts the Writer may write from: an insight's facts without the league-wide rates, match counts, ratios, bits and desk values, and without league table points."""
+    kept = {k: v for k, v in facts.items() if k not in OFF_AIR_FIELDS and not league_points_field(k)}
+    return kept, {k: v for k, v in meanings.items() if k in kept}
+
+
 TIGHT_OFFSIDE_CM = 30  # a player at 7.5 m/s covers 30 cm between two frames at 25 Hz: below that, a number would be false precision
 
 
@@ -261,6 +276,9 @@ FR_ARTICLE = r"(?i:\b(?:l['’]\s?|d['’]\s?|(?:le|la|les|du|des|au|aux)\s+))"
 LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
     "en": [
         ("jargon", "warning", r"(?i)\bwin chances?\b"),
+        ("league_rate", "error", r"(?i)\b(?:one|1|once)\s+(?:(?:match|game)\s+)?(?:in|out of)\s+(?:every\s+)?\d+(?!\d|\s+seasons?\b)"  # "not once in 50 seasons" is a landmark, not a rate
+                                 r"|\b(?:\d+(?:[.,]\d+)?|once|twice|\w+\s+times)\s+(?:a|per|each|every)\s+season\b"),
+        ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+times\s+(?:rarer|more\s+rare|less\s+likely)\b|\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+(?:matches|games)\b|\b\d{3,}\s+(?:matches|games)\b"),
     ],
     "fr": [
         ("forbidden_word", "error", r"(?i)\bswing\w*"),
@@ -269,6 +287,8 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("article_before_team", "error", FR_ARTICLE + r"{team}\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|turnover|win)\b"),
         ("percent_without_space", "warning", r"\d%"),
+        ("league_rate", "error", r"(?i)\b(?:un|1)\s+match\s+sur\s+\d|\bune\s+fois\s+sur\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+fois\s+)par\s+saison\b|\b\d+(?:[.,]\d+)?\s+fois\s+plus\s+rare"),
+        ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+matchs\b|\b\d{3,}\s+matchs\b"),
     ],
     "es": [
         ("forbidden_word", "error", r"(?i)\bswing\w*"),
@@ -276,6 +296,9 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("forbidden_word", "error", r"(?i)\bgame[- ]?changer\b"),
         ("clumsy_phrase", "warning", r"(?i)\ben puntos de diferencia\b"),
         ("anglicism", "warning", r"(?i)\b(?:goal|save|clean sheet|win)\b"),
+        ("league_rate", "error", r"(?i)\b(?:un|1)\s+partido\s+de\s+cada\s+\d|\b(?:una\s+vez|uno)\s+(?:de\s+)?cada\s+\d|\b(?:\d+(?:[.,]\d+)?\s+|\w+\s+(?:vez|veces)\s+)(?:por|cada|a\s+la)\s+temporada\b"
+                                 r"|\b\d+(?:[.,]\d+)?\s+veces\s+más\s+rar[oa]"),
+        ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+partidos\b|\b\d{3,}\s+partidos\b"),
     ],
 }
 
@@ -833,12 +856,13 @@ class TemplateWriter:
         kind = doc.get("kind") or ("storyline" if doc.get("type") == "storyline" else "record")
         subject = next((str(facts[k]) for k in ("player", "player_name", "scorer", "subject", "team", "club", "team_name") if isinstance(facts.get(k), str)), None)
         own = {t.get("lang"): t for t in doc.get("texts") or [] if isinstance(t, dict)}
+        air, _ = on_air(facts, {})  # a text of the document's own is kept only if it says nothing off air
         texts, lines = [], []
         for lang in languages:
             pick = _Picker(memory, doc["id"], lang, facts, self.demoted)
             values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team")}
             mine = own.get(lang)
-            if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], facts)[1]["verified"] and memory_key_free(pick, mine):
+            if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], air)[1]["verified"] and memory_key_free(pick, mine):
                 texts.append(mine)
                 if duo and (own_lines := insight_fact_text(doc, facts, lang, pick, duo)):
                     lines += own_lines[1]  # the document's text, the family's duo lines
@@ -1090,9 +1114,10 @@ async def draft(card: dict, teams: dict[str, str], writer, languages: list[str] 
 
 async def draft_insight(doc: dict, teams: dict[str, str], writer, languages: list[str] = list(LANGUAGES), calls_left: int = 2, memory: PhraseMemory | None = None, duo: bool = False,
                         preferences: str | None = None, demoted=None) -> Draft:
-    """Writes and verifies an insight or the storyline, through the same path as a card."""
+    """Writes and verifies an insight or the storyline, through the same path as a card. The model and the Verifier get the on-air facts only (`on_air`); the templates read every fact to know which lines are true (a feat seen at least once a season is told without the rate)."""
     facts, meanings = insight_facts(doc, teams)
-    return await _draft(doc, facts, meanings, writer, languages, calls_left, memory, duo,
+    air, air_meanings = on_air(facts, meanings)
+    return await _draft(doc, air, air_meanings, writer, languages, calls_left, memory, duo,
                         lambda mem: TemplateWriter(demoted).write_insight(doc, facts, languages, memory=mem, duo=duo), preferences)
 
 

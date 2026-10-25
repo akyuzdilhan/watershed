@@ -2,7 +2,7 @@
 
 The generic lines of `writer.INSIGHT_TEMPLATES` stay for the kinds not covered here. Each number is a placeholder named after its fact field, so `duo.fill` claims it against that field and the Verifier checks it.
 
-What a viewer can picture: the feat named for who did it ("the first four-goal haul by a substitute in 50 seasons"), and a team's own landmark in seasons ("United's first away defeat after leading at half-time since 2020/21"). League-wide rates and match counts ("once in 83", "0 in 19,000") stay in the console, in `rarity.basis`.
+What a viewer can picture: the feat named for who did it ("the first four-goal haul by a substitute in 50 seasons"), and a team's own landmark in seasons ("United's first away defeat after leading at half-time since 2020/21"). League-wide rates, match counts, ratios and bits ("once in 83", "about 3 a season", "228 times rarer", "0 in 19,000") never go on air or into a duo line: they stay for the producer in the console, in `rarity.basis` and `why_first`, and `writer.on_air` keeps them out of what the model sees.
 """
 
 from worker.duo import fr_typography
@@ -61,33 +61,43 @@ VENUE = {  # where a team lost: "away defeat", "défaite à l'extérieur", "derr
     "es": {"home": "en casa", "away": "fuera de casa"},
 }
 
-# Markers: {never} needs a zero history count, {club_first} a team that had never done it; a template with a placeholder the facts lack is skipped.
+# Markers: {never} needs a zero history count, {club_first} a team that had never done it, {rare} a feat rarer than once a season,
+# {often} a feat the league sees at least once a season (told without the rate); a template with a placeholder the facts lack is skipped.
 T = {  # family -> lang -> part -> templates, or {stage: templates, "any": templates} when the stage changes what is true
     "scorer": {
         "en": {"headlines": ["{player}: a {feat} off the bench", "On at {came_on}, {player} has a {feat}", "A {feat} for {player}"],
                "whys": ["On at {came_on}, {player} scored at {goal_minutes}. The first {feat} by a substitute in {history_seasons} seasons of this league.{never}",
                         "On at {came_on}, {player} scored at {goal_minutes}. Only the {history_rank_ord} {feat} by a substitute in {history_seasons} seasons, the first since {last_player} in {last_season}.",
-                        "On at {came_on}, {player} scored at {goal_minutes}. A {feat} off the bench: this league sees about {history_per_season} a season."],
-               "heart": ["{player} again! Joss, has a substitute ever done this?", "A {feat} for {player}! And {player} only came on at {came_on}!"],
+                        "On at {came_on}, {player} scored at {goal_minutes}: a {feat} off the bench.{often}"],
+               "heart": ["{player} again! Joss, has a substitute ever done this?{rare}", "A {feat} for {player}! And he only came on at {came_on}!",
+                         "{player} again, and off the bench too!{often}"],
                "eye": ["Never, Wren. In {history_seasons} seasons, no player coming off the bench had scored {goals}.{never}",
                        "The {history_rank_ord} in {history_seasons} seasons, Wren. The last one was {last_player}, in {last_season}.",
-                       "About {history_per_season} a season from the bench in this league. This one will be remembered."]},
+                       "Not since {last_player}, in {last_season}, Wren.{rare}",
+                       "{goals} goals off the bench, Wren. Not a bad way to come on.{often}",
+                       "That is what a substitute is for, Wren: {goals} goals since coming on.{often}"]},
         "fr": {"headlines": ["{player}, un {feat} en sortie de banc", "Entré à la {came_on}, {player} signe un {feat}", "Un {feat} pour {player}"],
                "whys": ["Entré à la {came_on}, {player} a marqué : {goal_minutes}. Premier {feat} d'un joueur entré en cours de match en {history_seasons} saisons de championnat.{never}",
                         "Entré à la {came_on}, {player} a marqué : {goal_minutes}. Seulement le {history_rank_ord} {feat} d'un remplaçant en {history_seasons} saisons, le premier depuis {last_player} en {last_season}.",
-                        "Entré à la {came_on}, {player} a marqué : {goal_minutes}. Un {feat} en sortie de banc : le championnat en voit environ {history_per_season} par saison."],
-               "heart": ["Encore {player} ! Joss, un remplaçant a déjà fait ça ?", "Un {feat} pour {player} ! Et il n'est entré qu'à la {came_on} !"],
+                        "Entré à la {came_on}, {player} a marqué : {goal_minutes}. Un {feat} en sortie de banc.{often}"],
+               "heart": ["Encore {player} ! Joss, un remplaçant a déjà fait ça ?{rare}", "Un {feat} pour {player} ! Et il n'est entré qu'à la {came_on} !",
+                         "Encore {player}, et en sortie de banc !{often}"],
                "eye": ["Jamais, Wren. En {history_seasons} saisons, aucun joueur entré en cours de match n'avait marqué {goals} fois.{never}",
                        "Le {history_rank_ord} en {history_seasons} saisons, Wren. Le dernier : {last_player}, en {last_season}.",
-                       "Le championnat en voit environ {history_per_season} par saison en sortie de banc. Celui-là, on s'en souviendra."]},
+                       "Pas depuis {last_player}, en {last_season}, Wren.{rare}",
+                       "{goals} buts depuis son entrée en jeu, Wren. Pas mal pour un remplaçant.{often}",
+                       "Voilà à quoi sert un remplaçant, Wren : {goals} buts depuis son entrée.{often}"]},
         "es": {"headlines": ["{player}, un {feat} desde el banquillo", "Entró en el {came_on} y {player} firma un {feat}", "Un {feat} para {player}"],
                "whys": ["Entró en el {came_on} y {player} marcó: {goal_minutes}. Primer {feat} de un suplente en {history_seasons} temporadas de liga.{never}",
                         "Entró en el {came_on} y {player} marcó: {goal_minutes}. Solo el {history_rank_ord} {feat} de un suplente en {history_seasons} temporadas, el primero desde {last_player} en {last_season}.",
-                        "Entró en el {came_on} y {player} marcó: {goal_minutes}. Un {feat} desde el banquillo: la liga ve unos {history_per_season} por temporada."],
-               "heart": ["¡Otra vez {player}! Joss, ¿un suplente había hecho esto?", "¡Un {feat} de {player}! ¡Y entró en el {came_on}!"],
+                        "Entró en el {came_on} y {player} marcó: {goal_minutes}. Un {feat} desde el banquillo.{often}"],
+               "heart": ["¡Otra vez {player}! Joss, ¿un suplente había hecho esto?{rare}", "¡Un {feat} de {player}! ¡Y entró en el {came_on}!",
+                         "¡Otra vez {player}, y desde el banquillo!{often}"],
                "eye": ["Nunca, Wren. En {history_seasons} temporadas, ningún jugador salido del banquillo había marcado {goals}.{never}",
                        "El {history_rank_ord} en {history_seasons} temporadas, Wren. El último: {last_player}, en {last_season}.",
-                       "La liga ve unos {history_per_season} por temporada desde el banquillo. Este se recordará."]},
+                       "No pasaba desde {last_player}, en {last_season}, Wren.{rare}",
+                       "{goals} goles desde que salió del banquillo, Wren. No está mal para un suplente.{often}",
+                       "Para eso está un suplente, Wren: {goals} goles desde que entró.{often}"]},
     },
     "comeback": {
         "en": {"headlines": {"level": ["{team} draw level from {trailing_score} down", "{team} back on terms after {trailing_score}"],
@@ -161,25 +171,27 @@ T = {  # family -> lang -> part -> templates, or {stage: templates, "any": templ
                "eye": ["Si gana, el {home_club} sube al {home_rank_if_win_ord} puesto. Si pierde, cae al {home_rank_if_loss_ord}.",
                        "El {away_club} tiene un {away_relegation_chance_pct}% de opciones de descender. Si gana, baja al {away_relegation_chance_if_win_pct}%."]},
     },
-    "xg-ft": {
+    "xg-ft": {  # goals against expected goals: the fact, never how many matches go that way
         "en": {"headlines": ["{team}: {goals} goals from {xg} xG", "{team} beat their {xg} xG by a mile"],
-               "whys": ["{team} scored {goals} from chances worth {xg} expected goals: about one match in {one_in} goes that way."],
-               "heart": ["Everything {team} hit went in tonight!"], "eye": ["{goals} goals from {xg} xG. About one match in {one_in} turns out like that."]},
+               "whys": ["{team} scored {goals} from chances worth {xg} expected goals."],
+               "heart": ["Everything {team} hit went in tonight!", "{team} could not miss tonight!"],
+               "eye": ["{goals} goals from chances worth {xg} expected goals.", "Chances worth {xg} expected goals, and {goals} goals for {team}."]},
         "fr": {"headlines": ["{team} : {goals} buts pour {xg} xG", "{team} pulvérise ses {xg} xG"],
-               "whys": ["{team} a marqué {goals} buts sur des occasions qui en valaient {xg} : à peu près un match sur {one_in} tourne ainsi."],
-               "heart": ["Tout ce que {team} a tenté est rentré ce soir !"], "eye": ["{goals} buts pour {xg} xG. À peu près un match sur {one_in} finit comme ça."]},
+               "whys": ["{team} a marqué {goals} buts sur des occasions qui en valaient {xg}."],
+               "heart": ["Tout ce que {team} a tenté est rentré ce soir !", "{team} n'a rien raté ce soir !"],
+               "eye": ["{goals} buts sur des occasions qui en valaient {xg}.", "{goals} buts, pour des occasions qui n'en valaient que {xg}."]},
         "es": {"headlines": ["El {team}: {goals} goles con {xg} xG", "El {team} pulveriza sus {xg} xG"],
-               "whys": ["El {team} marcó {goals} con ocasiones que valían {xg} goles esperados: más o menos un partido de cada {one_in} acaba así."],
-               "heart": ["¡Todo lo que tiró el {team} entró esta noche!"], "eye": ["{goals} goles con {xg} xG. Más o menos un partido de cada {one_in} termina así."]},
+               "whys": ["El {team} marcó {goals} con ocasiones que valían {xg} goles esperados."],
+               "heart": ["¡Todo lo que tiró el {team} entró esta noche!", "¡El {team} no ha fallado nada esta noche!"],
+               "eye": ["{goals} goles con ocasiones que valían {xg} goles esperados.", "Ocasiones de {xg} goles esperados, y {goals} goles del {team}."]},
     },
 }
 
 BENCH_WORDS = ("{came_on}", "bench", "banc", "banquillo", "substitute", "remplaçant", "suplente", "cours de match")
-MARKERS = ("{never}", "{club_first}")
+MARKERS = ("{never}", "{club_first}", "{rare}", "{often}")
 
 STAT_PREFIX = {"en": "Stat of the match: ", "fr": "Stat du match : ", "es": "El dato del partido: "}
-STAT_WHY = {"en": " It ranks first, {times_rarer} times rarer than the next fact.", "fr": " Le fait le plus rare du match, {times_rarer} fois plus rare que le suivant.",
-            "es": " Es el dato más raro del partido, {times_rarer} veces más raro que el siguiente."}
+STAT_WHY = {"en": " The standout fact of the match.", "fr": " Le fait marquant du match.", "es": " El dato más destacado del partido."}  # it ranks first: why, in bits and against the runner-up, stays in why_first
 
 T = {family: {lang: fr_typography(v) if lang == "fr" else v for lang, v in by_lang.items()} for family, by_lang in T.items()}
 STAT_PREFIX["fr"], STAT_WHY["fr"] = fr_typography(STAT_PREFIX["fr"]), fr_typography(STAT_WHY["fr"])
@@ -239,10 +251,12 @@ def values(facts: dict, lang: str) -> tuple[dict, dict]:
         vals["venue_adv"] = {"home": "at home", "away": "away"}[facts["venue"]] if lang == "en" else vals["venue"]
     if isinstance(facts.get("club_seasons_since"), int) and facts["club_seasons_since"] < 2:
         vals.pop("club_seasons_since")  # "1 seasons ago": the template without it is used
-    if isinstance(facts.get("times_rarer_than_runner_up"), (int, float)):
-        vals["times_rarer"] = Dec(facts["times_rarer_than_runner_up"], lang)
-        fields["times_rarer"] = "times_rarer_than_runner_up"
     return vals, fields
+
+
+def often(facts: dict) -> bool:
+    """A feat the league sees at least once a season on average: told for who did it, never with the rate."""
+    return isinstance(facts.get("history_per_season"), (int, float)) and not isinstance(facts.get("history_per_season"), bool)
 
 
 def usable(template: str, facts: dict) -> bool:
@@ -252,6 +266,10 @@ def usable(template: str, facts: dict) -> bool:
     if "{never}" in template and facts.get("history_count") != 0:
         return False
     if "{club_first}" in template and facts.get("club_first_time") is not True:
+        return False
+    if "{often}" in template and not often(facts):
+        return False
+    if "{rare}" in template and (often(facts) or not isinstance(facts.get("history_count"), int)):
         return False
     return True
 

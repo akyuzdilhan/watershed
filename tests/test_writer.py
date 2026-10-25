@@ -4,7 +4,7 @@ import json
 import pytest
 
 from worker.writer import (EXAMPLE_FACTS, EXAMPLE_REPLY, LANGUAGE_RULES, STRUCTURAL_RULES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter, card_facts, draft,
-                           style_issues, verify)
+                           numbers_in, style_issues, verify)
 
 TEAMS = {"home": "Rovers", "away": "United"}
 MOMENT_FACTS = {
@@ -223,3 +223,37 @@ def test_two_style_failures_fall_back_to_the_template():
     bad = reply("en", "Ingleby scores", "Win chance jumped: a +24-point swing.", [SWING])
     d = asyncio.run(draft(make_card(), TEAMS, FakeWriter([bad, bad]), ["en"]))
     assert d.writer == "template" and d.attempts == 2 and d.report["verified"]
+
+
+# --- on-air rules -------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lang,why", [
+    ("en", "Rovers scored 5 from chances worth 1.3 expected goals: about one match in 101 goes that way."),
+    ("en", "A brace off the bench: this league sees about 3 a season."),
+    ("en", "It ranks first, 228 times rarer than the next fact."),
+    ("en", "That is 14.2 bits of surprise."),
+    ("en", "Not once in 19,000 matches."),
+    ("fr", "À peu près un match sur 101 tourne ainsi."),
+    ("fr", "Le championnat en voit environ 3 par saison."),
+    ("fr", "Le fait le plus rare du match, 228 fois plus rare que le suivant."),
+    ("fr", "Jamais en 19\u202f000 matchs."),
+    ("es", "Más o menos un partido de cada 101 acaba así."),
+    ("es", "La liga ve unos 3 por temporada."),
+    ("es", "Es el dato más raro del partido, 228 veces más raro que el siguiente."),
+    ("es", "Nunca en 19.000 partidos."),
+])
+def test_league_wide_rates_ratios_match_counts_and_bits_stay_off_air(lang, why):
+    assert "league_rate" in rules("Rovers", why, lang)[0], why
+
+
+def test_a_rarity_told_in_seasons_for_the_team_or_the_player_passes():
+    for lang, why in (("en", "Rovers had not won from 2 goals down since 2019/20, 7 seasons ago."), ("en", "Only the 6th hat-trick by a substitute in 50 seasons."),
+                      ("en", "Never, Wren. Not once in 50 seasons had Rovers won from 2 goals down."),
+                      ("fr", "Rovers n'avait plus gagné après avoir été mené de 2 buts depuis 2019/20, il y a 7 saisons."), ("es", "Primer póker de un suplente en 50 temporadas de liga.")):
+        assert "league_rate" not in rules("Rovers", why, lang)[0], why
+
+
+def test_thousands_are_read_as_one_number():
+    assert [v for v, _ in numbers_in("18,620, 18\u202f620, 18.620 and 1.3")] == [18620, 18620, 18620, 1.3]
+
+

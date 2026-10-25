@@ -1,6 +1,7 @@
 """The commentary duo, anti-repetition across a match, the product decisions on points and goals with no stake, and the insight path. No model call: crafted replies and templates only."""
 
 import asyncio
+import functools
 import json
 import re
 
@@ -10,11 +11,18 @@ from generator import generate_match
 from worker.desk import Desk
 from worker.duo import EYE, HEART, LINES, PERSONAS, PhraseMemory, fill, persona_brief
 from worker.pipeline import MemorySink, Pipeline
-from worker.writer import (EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter, card_facts, draft,
-                           insight_facts, low_stake, ruling_facts, style_issues, template_values, verify, verify_duo, verify_reply, writer_request)
+from worker.writer import (EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, OFF_AIR_FIELDS, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter,
+                           card_facts, draft, insight_facts, low_stake, ruling_facts, style_issues, template_values, verify, verify_duo, verify_reply, writer_request)
 
 LANGS = ["en", "fr", "es"]
 TEAMS = {"home": "Rovers", "away": "United"}
+
+
+@functools.lru_cache(maxsize=1)
+def replay_names() -> dict[str, list[str]]:
+    """Player names of the demo replay by side (starting eleven, then bench): read, never written in a test, since the generator may rename players."""
+    info = next(m for m in generate_match(7, "demo")[0] if m["type"] == "match_info")
+    return {side: [p["name"] for p in t["starting"] + t["bench"]] for side, t in info["teams"].items()}
 
 
 def make_card(moment="goal", side="home", facts=None, score=None, minute="52'", **extra):
@@ -389,16 +397,18 @@ def test_write_insight_with_templates_goes_through_the_desk():
     assert doc["status"] == "approved" and [e["action"] for e in sink.audit if e["card_id"] == doc["id"]][-1] == "approved"
 
 
-def test_write_insight_with_a_model_reply_and_thousands():
-    texts = [{"headline": "Lightfoot, a first in the league", "why": "Dorian Lightfoot scores 4 as a substitute: 0 times in 18,620 matches before.", "lang": "en",
-              "claims": [{"value": 4, "source_field": "goals_by_substitute"}, {"value": 0, "source_field": "times_before"}, {"value": 18620, "source_field": "past_matches"}]}]
+def test_a_model_insight_with_a_count_of_matches_is_retried():
+    """A count of matches is for the producer: the claimed number is right, the reply is still refused, and the retry is told why."""
+    player = INSIGHT["headline_facts"]["player"]
+    claims = [{"value": 4, "source_field": "goals_by_substitute"}, {"value": 0, "source_field": "times_before"}, {"value": 18620, "source_field": "past_matches"}]
+    counted = [{"headline": f"{player}, a first in the league", "why": f"{player} scores 4 as a substitute: 0 times in 18,620 matches before.", "lang": "en", "claims": claims}]
+    told = [{"headline": f"{player}, a first in the league", "why": f"{player} scores 4 as a substitute, a first in the league.", "lang": "en", "claims": claims[:1]}]
     lines = [{"speaker": "wren", "lang": "en", "line": "Four from the bench! Is that a first, Joss?", "claims": []},
-             {"speaker": "joss", "lang": "en", "line": "It is: 0 in 18,620 matches.", "claims": [{"value": 0, "source_field": "times_before"}, {"value": 18620, "source_field": "past_matches"}]}]
-    writer = FakeWriter([json.dumps({"texts": texts, "duo": lines})])
-    sink = MemorySink()
-    doc = Desk(sink, writer, auto_approve=True, languages=("en",)).write_insight(json.loads(json.dumps(INSIGHT)), TEAMS)
+             {"speaker": "joss", "lang": "en", "line": "It is, Wren: nobody had done it before.", "claims": []}]
+    writer = FakeWriter([json.dumps({"texts": counted, "duo": lines}), json.dumps({"texts": told, "duo": lines})])
+    doc = Desk(MemorySink(), writer, auto_approve=True, languages=("en",)).write_insight(json.loads(json.dumps(INSIGHT)), TEAMS)
     assert doc["writer"] == "fake" and doc["duo_writer"] == "fake" and doc["status"] == "approved" and doc["verification"]["verified"]
-    assert writer.calls[0]["request"]["document"] == "insight"
+    assert writer.calls[0]["request"]["document"] == "insight" and "league_rate" in writer.calls[1]["note"]
 
 
 def test_write_insight_falls_back_to_the_template_after_one_retry():
@@ -414,6 +424,15 @@ def test_write_insight_keeps_the_documents_own_verified_texts_as_template():
     doc["texts"] = [{"headline": "Four goals from the bench", "why": "Dorian Lightfoot scores 4 as a substitute.", "lang": "en", "claims": [{"value": 4, "source_field": "goals_by_substitute"}]}]
     out = Desk(MemorySink(), TemplateWriter(), languages=("en",)).write_insight(doc, TEAMS)
     assert out["texts"][0]["headline"] == "Four goals from the bench"
+
+
+def test_a_documents_own_text_is_kept_only_if_it_says_nothing_off_air():
+    doc = match_insights()[0]  # a brace off the bench
+    player, n = doc["headline_facts"]["player"], doc["headline_facts"]["history_opportunities"]
+    doc["texts"] = [{"headline": f"{player} again", "why": f"{player} scores twice off the bench, out of {n} chances.", "lang": "en",
+                     "claims": [{"value": n, "source_field": "history_opportunities"}]}]
+    out = Desk(MemorySink(), TemplateWriter(), languages=("en",)).write_insight(doc, TEAMS)
+    assert out["texts"][0]["headline"] != f"{player} again" and out["verification"]["verified"]
 
 
 def test_storyline_goes_through_the_same_path():
@@ -451,3 +470,63 @@ def test_a_starter_never_gets_the_bench_lines():
     out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(doc, TEAMS)
     text = json.dumps(out["texts"] + out["duo"], ensure_ascii=False).lower()
     assert not any(w in text for w in ("bench", "banc", "banquillo"))
+
+
+# --- off air: league-wide rates, ratios, match counts and bits ------------------------------------------------
+
+def match_insights() -> list[dict]:
+    """The insights of a match like the demo, in the order the engine writes them: a substitute's brace (seen every season), hat-trick (rare) and four (never), a comeback that
+    draws level, goes ahead and wins, a half-time lead lost, five goals from 1.3 xG, and the stat of the match with its ranking against the runner-up."""
+    four = ENGINE_FACTS["scorer-home-20-4"]
+    base = {k: four[k] for k in ("player", "team", "substitute", "came_on", "history_since", "history_seasons")}
+    last = replay_names()["away"][0]
+    scorer = {2: dict(base, goals=2, goal_minutes="52', 57'", history_count=150, history_opportunities=19000, history_rank=151, history_per_season=3, one_in=127,
+                      surprisal_bits=7.0, last_season="2025/26", last_player=last),
+              3: dict(base, goals=3, goal_minutes="52', 57', 66'", history_count=5, history_opportunities=19000, history_rank=6, one_in=3167, surprisal_bits=11.6,
+                      last_season="2021/22", last_player=last),
+              4: dict(four, history_rank=1, one_in=19001, surprisal_bits=14.2)}
+    comeback = {stage: dict(ENGINE_FACTS["comeback-home-2-3"], stage=stage, surprisal_bits=6.4) for stage in ("level", "ahead", "won")}
+    ht = {stage: {"team": "United", "half_time_score": "0-2", "stage": stage, "venue": "away", "club_last_season": "2020/21", "club_seasons_since": 6, "history_count": 42,
+                  "history_opportunities": 3432, "history_since": "1976/77", "history_seasons": 50, "one_in": 82, "surprisal_bits": 6.4} for stage in ("behind", "lost")}
+    stat = dict(scorer[4], top_fact="scorer-home-20-4", top_value=80, runner_up="comeback-home-2-3", runner_up_value=65, runner_up_surprisal_bits=6.4, times_rarer_than_runner_up=228)
+    docs = [("scorer-home-20-2", scorer[2]), ("comeback-home-2-1", comeback["level"]), ("scorer-home-20-3", scorer[3]), ("comeback-home-2-2", comeback["ahead"]),
+            ("ht-lead-lost-away-1", ht["behind"]), ("scorer-home-20-4", scorer[4]), ("comeback-home-2-3", comeback["won"]), ("ht-lead-lost-away-2", ht["lost"]),
+            ("xg-ft-home-5", {"team": "Rovers", "goals": 5, "xg": 1.3, "one_in": 101, "surprisal_bits": 6.7}), ("stat-of-the-match", stat)]
+    return [{"id": f"insight-m-{key}", "type": "insight", "match_id": "m", "key": key, "kind": "rarity", "headline_facts": facts, "field_meanings": {k: k for k in facts},
+             "rarity": {"basis": f"{facts.get('history_count', 0)} in {facts.get('history_opportunities', 0):,} since 1976/77"}, "value": 80, "status": "proposed"}
+            for key, facts in docs]
+
+
+OFF_AIR_VALUES = {127, 3167, 19001, 101, 228, 2.3, 14.2, 11.6, 6.4, 6.7, 19000, 9579, 3432, 82}  # rates, counts, ratios and bits of match_insights()
+
+
+def test_insight_texts_and_lines_keep_league_wide_rates_off_air():
+    from worker.writer import numbers_in
+
+    desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
+    for doc in match_insights():
+        basis = doc["rarity"]["basis"]
+        out = desk.write_insight(doc, TEAMS)
+        assert out["verification"]["verified"] and out["rarity"]["basis"] == basis, out["id"]  # the producer keeps the numbers
+        for lang in LANGS:
+            said = [t[k] for t in out["texts"] if t["lang"] == lang for k in ("headline", "why")] + [l["line"] for l in out["duo"] if l["lang"] == lang]
+            for text in said:
+                assert "league_rate" not in {e["rule"] for e in style_issues("", text, lang, [], {})[0]}, (out["id"], text)
+                assert not {v for v, _ in numbers_in(text)} & OFF_AIR_VALUES, (out["id"], text)
+
+
+class FactsSpy(FakeWriter):
+    """Keeps the facts the model is given."""
+
+    async def write_async(self, card, facts, languages, note=None, avoid=None, duo=False):
+        self.facts = facts[0]
+        return await super().write_async(card, facts, languages, note, avoid, duo)
+
+
+def test_the_model_never_gets_league_wide_rates_ratios_or_bits():
+    stat = match_insights()[-1]
+    rate = [{"headline": "Stat of the match", "why": "About one match in 19001 goes that way.", "lang": "en", "claims": [{"value": 19001, "source_field": "one_in"}]}]
+    writer = FactsSpy([json.dumps({"texts": rate, "duo": []})] * 2)
+    out = Desk(MemorySink(), writer, languages=("en",)).write_insight(stat, TEAMS)
+    assert not set(writer.facts) & set(OFF_AIR_FIELDS) and {"history_seasons", "player", "goals", "top_fact"} <= set(writer.facts)
+    assert out["writer"] == "template" and out["verification"]["verified"] and "bad_claims" in writer.calls[1]["note"]
