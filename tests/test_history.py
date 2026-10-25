@@ -49,7 +49,7 @@ def test_save_and_load(h, tmp_path):
     assert loaded.head_to_head("Rovers", "United") == h.head_to_head("Rovers", "United")
 
 
-def test_api_shapes(h):
+def test_api_shapes(h, demo_info):
     assert h.seasons() == ["2021/22", "2022/23", "2023/24", "2024/25", "2025/26"]
     club = h.club("Rovers")
     assert set(club) == {"name", "founded_season", "seasons_in_league", "titles", "best_finish"}
@@ -60,7 +60,8 @@ def test_api_shapes(h):
     assert {"id", "season", "matchday", "home", "away", "home_goals", "away_goals", "half_time", "goals", "substitutions", "cards", "lineups"} <= set(m)
     p = h.player(h.demo_ids["home-20"])
     assert set(p) == {"id", "name", "position", "born", "clubs", "goals", "appearances", "sub_appearances"}
-    assert p["name"] == "Dorian Lightfoot" and p["position"] == "ST" and p["clubs"][-1] == {"season": "2025/26", "club": "Rovers"}
+    sub = next(q["name"] for q in demo_info["teams"]["home"]["bench"] if q["id"] == "home-20")
+    assert p["name"] == sub and p["position"] == "ST" and p["clubs"][-1] == {"season": "2025/26", "club": "Rovers"}
     assert 0 <= p["sub_appearances"] <= p["appearances"]
     with pytest.raises(KeyError):
         h.player("P999999")

@@ -42,17 +42,17 @@ Before this lot, every goal card of the demo had the same headline pattern and t
 
 ## Product decisions
 
-- **(a) Goals ruled out in the recap.** `recap.analyse` reads `disallowed_goals` from the `ruled_out` record of retracted goal cards (or `build_recap(..., disallowed=[...])`), and `recap_facts` exposes `disallowed_<i>_minute/_team/_player/_reason/_margin_cm`. Templates: "VAR ruled out Dorian Lightfoot's goal at 63' (offside by 25 cm) and Vito Valtonen's goal at 69' (handball)." and in the analyst text "VAR: 63' (offside by 25 cm), 69' (handball)." The margin is in centimetres because the Verifier treats any number below 1 as a misused probability. `verify_recap` still fails a retracted minute in a sentence that does not say VAR or ruled out. The recap limit went from 60 to 80 words to make room.
+- **(a) Goals ruled out in the recap.** `recap.analyse` reads `disallowed_goals` from the `ruled_out` record of retracted goal cards (or `build_recap(..., disallowed=[...])`), and `recap_facts` exposes `disallowed_<i>_minute/_team/_player/_reason/_margin_cm`. Templates: "VAR ruled out Marijn Scarpetta's goal at 63' (offside by 25 cm) and Jakub Méndez's goal at 69' (handball)." and in the analyst text "VAR: 63' (offside by 25 cm), 69' (handball)." The margin is in centimetres because the Verifier treats any number below 1 as a misused probability. `verify_recap` still fails a retracted minute in a sentence that does not say VAR or ruled out. The recap limit went from 60 to 80 words to make room.
 - **(b) One meaning for "points".** `value_pts` (the ranking key) is no longer a recap fact, and "(51 pts)" left the analyst template ("Top moments: 66', 57', 14'."). Cards never had it. The prompts say "points" means only a change in a team's chance of winning.
-- **(c) A goal with no stake.** `low_stake(card)`: a goal moving its team's chance of winning by less than 2 points. `card_facts` then drops every probability field and adds `stake: low`, `team_goals_after`, `scorer_match_goals`, so a probability cannot even be claimed; the templates write a milestone ("Wendell Moravec adds the fifth", "it is goal number five for Rovers today"). The desk sets `on_air_priority: low` (88' in the demo, 99% to 99%).
+- **(c) A goal with no stake.** `low_stake(card)`: a goal moving its team's chance of winning by less than 2 points. `card_facts` then drops every probability field and adds `stake: low`, `team_goals_after`, `scorer_match_goals`, so a probability cannot even be claimed; the templates write a milestone ("Joaquim Kosznik adds the fifth", "it is goal number five for Rovers today"). The desk sets `on_air_priority: low` (88' in the demo, 99% to 99%).
 
 ## Sample exchanges (template writer, demo match, as the desk writes them today)
 
-**63', Lightfoot's goal, then ruled out at 64' (offside, 25 cm).**
+**63', Scarpetta's goal, then ruled out at 64' (offside, 25 cm).**
 
 | | en | fr | es |
 |---|---|---|---|
-| Wren (goal) | Hold on to your seats! In front! Dorian Lightfoot puts Rovers ahead and the bench is on its feet! | Notez-le quelque part ! Dorian Lightfoot trouve l'ouverture, et Rovers prend les commandes ! | ¡Apúntenlo! ¡Por delante! ¡Dorian Lightfoot adelanta al Rovers! |
+| Wren (goal) | Hold on to your seats! In front! Marijn Scarpetta puts Rovers ahead and the bench is on its feet! | Notez-le quelque part ! Marijn Scarpetta trouve l'ouverture, et Rovers prend les commandes ! | ¡Apúntenlo! ¡Por delante! ¡Marijn Scarpetta adelanta al Rovers! |
 | Joss | Put a number on it: Rovers go from 29% to 78% to win. | Ce but vaut 49 points pour Rovers, qui passe de 29 % à 78 % de chances de gagner. | Pongámosle número: el Rovers pasa del 29% al 78% de opciones de ganar. |
 | Wren (VAR) | And it's off. VAR rules it out, and Rovers cannot believe it. | Et c'est refusé. La VAR annule, et Rovers n'en revient pas. | Y se anula. El VAR lo invalida, y el Rovers no se lo cree. |
 | Joss | Look at the line. Offside by 25 centimetres, measured at the moment of the pass. | Regardez la ligne. Hors-jeu de 25 centimètres, mesuré au moment de la passe. | Miren la línea. Fuera de juego por 25 centímetros, medido en el momento del pase. |
@@ -63,22 +63,22 @@ Before this lot, every goal card of the demo had the same headline pattern and t
 | | en | fr | es |
 |---|---|---|---|
 | Joss | Speaking as an old goalkeeper: that one deserves its own replay. | En tant qu'ancien gardien, je le dis : celui-là mérite son propre ralenti. | Como exportero, lo digo: esa merece su propia repetición. |
-| Wren | Oh, the drama of it! Umberto Valtonen gets something on it! I don't believe it! | Accrochez vos ceintures ! Quel arrêt ! Umberto Valtonen, tu viens de garder Rovers en vie ! | ¡Agárrense fuerte! ¡Qué parada! ¡Umberto Valtonen, acabas de mantener vivo al Rovers! |
-| Joss | Had it gone in, Rovers would be down to 24% to win; Umberto Valtonen kept them on 81%. | Si ça rentrait, Rovers tombait à 24 % de chances de gagner ; Umberto Valtonen garde Rovers à 81 %. | Pequeños márgenes: 57 puntos salvados para el Rovers, que sigue en el 81% de opciones de ganar. |
+| Wren | Oh, the drama of it! Valdemar McGrory gets something on it! I don't believe it! | Accrochez vos ceintures ! Quel arrêt ! Valdemar McGrory, tu viens de garder Rovers en vie ! | ¡Agárrense fuerte! ¡Qué parada! ¡Valdemar McGrory, acabas de mantener vivo al Rovers! |
+| Joss | Had it gone in, Rovers would be down to 24% to win; Valdemar McGrory kept them on 81%. | Si ça rentrait, Rovers tombait à 24 % de chances de gagner ; Valdemar McGrory garde Rovers à 81 %. | Pequeños márgenes: 57 puntos salvados para el Rovers, que sigue en el 81% de opciones de ganar. |
 | Wren | | Voilà pourquoi on paie un gardien ! | Joss, estás sonriendo. ¡Nunca te había visto sonreír por un número! |
 
-**The substitute's four goals (Lightfoot, on at half-time).**
+**The substitute's four goals (Scarpetta, on at half-time).**
 
 | | en | fr | es |
 |---|---|---|---|
-| 52' Wren | Dorian Lightfoot gives Rovers a lifeline! | Une lueur pour Rovers, et elle vient de Dorian Lightfoot ! | ¿Hay partido? ¡Dorian Lightfoot recorta para el Rovers! |
-| 57' Wren | They said Rovers were gone. Dorian Lightfoot disagrees! | Égalisation ! Dorian Lightfoot remet Rovers dans le match ! | Decían que el Rovers estaba muerto. ¡Dorian Lightfoot no opina lo mismo! |
-| 57' Joss | | Deux pour Dorian Lightfoot déjà. Retenez ce nom. | |
-| 66' Wren | Write it down! Dorian Lightfoot finds the gap, and Rovers have their noses in front! | Quel scénario ! Et voilà ! Dorian Lightfoot met Rovers en tête ! | ¡Qué guion! ¡Dorian Lightfoot encuentra el hueco y el Rovers manda! |
-| 66' Joss | Three for Dorian Lightfoot. Remember where you were for this one. | Trois pour Dorian Lightfoot. Souvenez-vous où vous étiez. | Tres de Dorian Lightfoot: el balón del partido ya tiene dueño. |
-| 83' Joss | Dorian Lightfoot, goal number four of the match. Write that one in pen. | Dorian Lightfoot, quatrième but du match. Ça s'écrit à l'encre. | Sin hacer ruido, el Rovers acaba de ganar 8 puntos: 99% de opciones de ganar. |
+| 52' Wren | Marijn Scarpetta gives Rovers a lifeline! | Une lueur pour Rovers, et elle vient de Marijn Scarpetta ! | ¿Hay partido? ¡Marijn Scarpetta recorta para el Rovers! |
+| 57' Wren | They said Rovers were gone. Marijn Scarpetta disagrees! | Égalisation ! Marijn Scarpetta remet Rovers dans le match ! | Decían que el Rovers estaba muerto. ¡Marijn Scarpetta no opina lo mismo! |
+| 57' Joss | | Deux pour Marijn Scarpetta déjà. Retenez ce nom. | |
+| 66' Wren | Write it down! Marijn Scarpetta finds the gap, and Rovers have their noses in front! | Quel scénario ! Et voilà ! Marijn Scarpetta met Rovers en tête ! | ¡Qué guion! ¡Marijn Scarpetta encuentra el hueco y el Rovers manda! |
+| 66' Joss | Three for Marijn Scarpetta. Remember where you were for this one. | Trois pour Marijn Scarpetta. Souvenez-vous où vous étiez. | Tres de Marijn Scarpetta: el balón del partido ya tiene dueño. |
+| 83' Joss | Marijn Scarpetta, goal number four of the match. Write that one in pen. | Marijn Scarpetta, quatrième but du match. Ça s'écrit à l'encre. | Sin hacer ruido, el Rovers acaba de ganar 8 puntos: 99% de opciones de ganar. |
 
-The 88' goal (5-2, no stake): "The result was settled a while ago, but nobody told Wendell Moravec!" / "Nothing changes in the result, but it is goal number five for Rovers today."
+The 88' goal (5-2, no stake): "The result was settled a while ago, but nobody told Joaquim Kosznik!" / "Nothing changes in the result, but it is goal number five for Rovers today."
 
 ## What a native speaker should review
 
@@ -90,7 +90,7 @@ The 88' goal (5-2, no stake): "The result was settled a while ago, but nobody to
 ## What is imperfect
 
 - **Inconsistency across languages.** Each language picks its own variants, so en, fr and es can tell the same card with different sentences (all true, all verified). A producer comparing languages will notice.
-- **"The substitute" is not known to the desk.** Cards do not say a player came off the bench, so the templates say "a fourth for Lightfoot", not "a fourth for the substitute". The insight engine, which reads the substitutions, is where that story belongs; the console still shows `value_pts` as "pts" (`src/web/console.py`, not in this lot), which contradicts decision (b) on the producer screen.
+- **"The substitute" is not known to the desk.** Cards do not say a player came off the bench, so the templates say "a fourth for Scarpetta", not "a fourth for the substitute". The insight engine, which reads the substitutions, is where that story belongs; the console still shows `value_pts` as "pts" (`src/web/console.py`, not in this lot), which contradicts decision (b) on the producer screen.
 - **Offside margin lookup.** The desk finds the margin in the events the sink keeps in memory (`MemorySink.events`). With Cosmos DB as the sink, `events` is a container, so `margin_cm` is null and the recap says "offside" without the margin. A clean fix is for the pipeline to pass the related correction to the desk.
 - **Memory is in process.** A restarted worker forgets what the match already said.
 - **Insight templates carry no number.** The history facts are free-form, so the fallback headline and why of an insight are true for their kind ("sets a record") but generic; the document's own verified `texts`, when the insight engine provides them, are preferred. The model path has the numbers.

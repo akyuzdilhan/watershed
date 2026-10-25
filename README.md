@@ -64,7 +64,7 @@ Every number a viewer sees is anchored to something they can picture. The desk c
 | When | What airs (French texts and duo, from the template writer) |
 |---|---|
 | Before kick-off | "Rovers - United, duel pour le maintien": United are on 34% to go down, 16% with a win, 43% with a defeat. Wren: "Rovers 17e, United 18e. Ce soir, on joue le maintien, Joss." |
-| 66' | "Seulement le 6e triplé d'un remplaçant en 50 saisons, le premier depuis Silas Thackeray en 2021/22." |
+| 66' | "Seulement le 6e triplé d'un remplaçant en 50 saisons, le premier depuis Tino Höglund en 2021/22." |
 | 83' | "Premier quadruplé d'un joueur entré en cours de match en 50 saisons de championnat." Joss: "Jamais, Wren. En 50 saisons, aucun joueur entré en cours de match n'avait marqué 4 fois." |
 | Full time | "Première défaite de United à l'extérieur après avoir mené à la pause depuis 2020/21, il y a 6 saisons." Stat of the match: the substitute's four goals, ranked first by rarity. |
 | Recap | Names both goals VAR ruled out and why ("hors-jeu d'un rien", "main"), and what the result changed: "Rovers passe de la 17e à la 14e place, et son risque de descente de 11 % à 4 %." |

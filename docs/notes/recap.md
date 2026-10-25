@@ -11,7 +11,7 @@
 - **Writers.** `RecapWriter`: Agent Framework agent on Foundry, same set-up as `FoundryWriter`, with a `get_recap_facts(match_id)` function tool. `RecapTemplateWriter`: fixed sentences, each used only when every field it names is in the facts; trailing sentences are dropped if a text goes over its limit. Flow: model, one retry (with the list of failures as a note), then the template.
 - **Verifier** (`verify_recap`). Runs `writer.verify` on each text (every number claimed, claims match their field, % from `_pct` fields, no decimal probability), then adds: length per section, `names_ok` must be empty (in `writer.verify` it is reported but not blocking), no player of the match whose name is not in the facts, no spelled-out numbers (two/deux/dos...), no minute of a retracted card.
 
-On the demo, the turning point is Lightfoot's 66' goal (Rovers 28% to 79%, 51 points), the biggest moments are 66', 57' and 14', and the texts are verified in the three languages.
+On the demo, the turning point is Scarpetta's 66' goal (Rovers 28% to 79%, 51 points), the biggest moments are 66', 57' and 14', and the texts are verified in the three languages.
 
 ## How to run
 

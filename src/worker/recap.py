@@ -390,7 +390,7 @@ class RecapTemplateWriter:
         for lang in languages:
             phrase = TP_PHRASE.get(r["tp_moment"] or "", {}).get(lang, "")
             if lang == "fr" and str(facts.get("turning_point_player", " "))[0] in "AEIOUYÉÈH":
-                phrase = phrase.replace("de {", "d'{")  # le but d'Ivo Ellery
+                phrase = phrase.replace("de {", "d'{")  # le but d'Otto Meyer
             final, ht, low, tp, scorer = (s.replace("{tp}", phrase) for s in TEMPLATES["recap"][lang])
             recap = [final, ht]
             if r["W"] and facts.get(f"{r['W']}_lowest_wp_pct", 100) < 50:  # only when the winner was ever behind in the odds
@@ -433,7 +433,7 @@ RECAP_INSTRUCTIONS = """You write the post-match texts of a football broadcast.
 
 Facts: call the get_recap_facts tool with the match_id to get the facts and the meaning of each field. Use ONLY those facts. Never invent a statistic, name, minute or fact, and never mention a moment that is not in the facts.
 
-Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Lightfoot's goal at 63': offside by 25 cm"), in the same sentence as the words VAR or ruled out, with the reason and the margin when given. They never count as goals.
+Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Scarpetta's goal at 63': offside by 25 cm"), in the same sentence as the words VAR or ruled out, with the reason and the margin when given. They never count as goals.
 
 Each number has a field name that says what it means: never use a number with another meaning. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are changes in a team's chance of winning, in percentage points: write them as points. The word points means nothing else. Do not compute any new number. Write every number in digits (4 goals, never "four goals"), and use no proper noun that is not in the facts.
 

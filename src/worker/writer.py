@@ -75,7 +75,7 @@ WRITER_INSTRUCTIONS += f"""
 
 Points. The word points (French points, Spanish puntos) means only a change in a team's chance of winning, from a field ending in _pts. Never write any other value as points.
 
-A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Lightfoot"), with no probability and no points.
+A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Scarpetta"), with no probability and no points.
 
 Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact, the why says why it is remarkable, with numbers only from the facts (write them without thousands separators: 18620).
 
@@ -247,7 +247,7 @@ def names_ok(text: str, facts: dict, extra: set[str] | frozenset = frozenset()) 
     """Capitalised words that are neither in the facts nor at the start of a sentence: possible invented names."""
     allowed = " ".join(str(v) for v in facts.values())
     words = re.findall(r"(?<![.!?:]\s)(?<![¡¿])(?<!^)\b([A-ZÀ-Ý][\wÀ-ÿ'-]+)", text)
-    words = [re.sub(r"['’]s?$", "", w) for w in words]  # Lightfoot's
+    words = [re.sub(r"['’]s?$", "", w) for w in words]  # Scarpetta's
     return sorted({w for w in words if w not in allowed and w not in extra and w != "VAR"})
 
 

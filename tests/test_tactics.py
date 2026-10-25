@@ -19,6 +19,11 @@ def by_id(feed, event_id):
     return next(a for a in feed["actions"] if a["event_id"] == event_id)
 
 
+def name_of(feed, pid):
+    side = pid.split("-")[0]
+    return next(p["name"] for p in feed["info"]["teams"][side]["starting"] + feed["info"]["teams"][side]["bench"] if p["id"] == pid)
+
+
 def player(pid, x, y, teammate, actor=False, keeper=False):
     return {"player_id": pid, "teammate": teammate, "actor": actor, "keeper": keeper, "location": [x, y]}
 
@@ -126,7 +131,7 @@ def test_demo_candidates_name_the_63rd_minute_run_and_the_line_break_before_a_go
     assert [d["value"] for d in docs] == sorted((d["value"] for d in docs), reverse=True)
     run = next(d for d in docs if d["key"] == "run-demo-0007-v2-a01178")
     f = run["headline_facts"]
-    assert f["margin_m"] == 0.25 and f["runner_beyond_line"] is True and f["goal_stood"] is False and f["runner_name"] == "#20 Dorian Lightfoot"
+    assert f["margin_m"] == 0.25 and f["runner_beyond_line"] is True and f["goal_stood"] is False and f["runner_name"] == f"#20 {name_of(demo, 'home-20')}"
     assert "official VAR figure" in run["field_meanings"]["margin_m"]
     lb = next(d for d in docs if d["figure"]["kind"] == "line_break")
     pass_action = by_id(demo, lb["figure"]["event_id"])

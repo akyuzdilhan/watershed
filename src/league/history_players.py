@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from generator.teams import FIRST_NAMES, SURNAMES
+from generator.names import FIRST_NAMES, SURNAMES
 
 GROUPS = ("GK", "DEF", "MID", "FWD")
 TARGET = {"GK": 3, "DEF": 8, "MID": 8, "FWD": 6}  # squad of 25
@@ -22,6 +22,9 @@ IDEAL = {"GK": 3, "CB": 4, "RB": 2, "LB": 2, "DM": 2, "CM": 4, "AM": 2, "ST": 2,
 PEAK_MEAN, PEAK_SD = 66.0, 6.5
 RETIRE_AGES = (33, 37)
 MAX_PLAYERS = 100_000
+# Each player of the history is drawn as a key on this grid, then named from his own stream. The grid is the size of the name pools the histories were
+# first built with (48 first names, 72 surnames): a seed keeps its careers, scores and cards, and the demo its story, whatever the name pools.
+KEY_GRID = (48, 72)
 
 
 def rating_at(peak: float, age: int, form: float) -> float:
@@ -40,6 +43,7 @@ class People:
 
     first: list[int] = field(default_factory=list)
     last: list[int] = field(default_factory=list)
+    key: list[tuple[int, int]] = field(default_factory=list)  # draw on KEY_GRID
     role: list[str] = field(default_factory=list)
     born: list[int] = field(default_factory=list)
     peak: list[float] = field(default_factory=list)
@@ -70,35 +74,41 @@ class DemoCareer:
 class Careers:
     """Squads season by season. `window(s)` runs the summer before season s and returns the squads of season s."""
 
-    def __init__(self, rng: random.Random, years: list[int], q: np.ndarray, demo: list[DemoCareer]) -> None:
-        self.rng, self.years, self.q = rng, years, q
+    def __init__(self, rng: random.Random, years: list[int], q: np.ndarray, demo: list[DemoCareer], names: random.Random, demo_keys: dict[str, tuple[int, int]]) -> None:
+        """`names` draws the names, apart from `rng`; `demo_keys` gives each demo player (by demo id) his key on KEY_GRID."""
+        self.rng, self.years, self.q, self.names = rng, years, q, names
         self.n_clubs = q.shape[1]
         self.people = People()
         self.squads: list[list[int]] = [[] for _ in range(self.n_clubs)]
         self.free: dict[int, int] = {}  # free agent -> seasons without a club
+        self.active_keys: set[tuple[int, int]] = set()  # keys and names of the players in a squad or free: never two at a time
         self.active_names: set[tuple[int, int]] = set()
-        self.reserved: set[tuple[int, int]] = set()
+        self.reserved_keys: set[tuple[int, int]] = set()  # those of the demo players, kept for them
+        self.demo_surnames: set[int] = set()  # no other player of the history shares a surname with a demo player
         self.pinned: dict[int, dict[int, int]] = {}
         self.demo_ids: dict[str, int] = {}
-        name_index = {(f, s): (i, j) for i, f in enumerate(FIRST_NAMES) for j, s in enumerate(SURNAMES)}
+        first_index, last_index = {f: i for i, f in enumerate(FIRST_NAMES)}, {s: j for j, s in enumerate(SURNAMES)}
+        named = []
         for d in demo:
             first, last = d.name.split(" ", 1)
-            self.reserved.add(name_index[(first, last)])
-        for d in demo:  # demo players get the first ids
-            first, last = d.name.split(" ", 1)
-            p = self._add(name_index[(first, last)], d.role, d.born, d.peak, 37)
+            named.append((first_index[first], last_index[last]))
+            self.demo_surnames.add(named[-1][1])
+            self.reserved_keys.add(demo_keys[d.key])
+        for d, name in zip(demo, named):  # demo players get the first ids
+            p = self._add(name, demo_keys[d.key], d.role, d.born, d.peak, 37)
             self.pinned[p] = d.path
             self.demo_ids[d.key] = p
         self.ratings: dict[int, float] = {}
 
     # --- people ---------------------------------------------------------------------------------
 
-    def _add(self, name: tuple[int, int], role: str, born: int, peak: float, retire_age: int) -> int:
+    def _add(self, name: tuple[int, int], key: tuple[int, int], role: str, born: int, peak: float, retire_age: int) -> int:
         pp, r = self.people, self.rng
         if len(pp) >= MAX_PLAYERS:
             raise RuntimeError("player ids exhausted")
         pp.first.append(name[0])
         pp.last.append(name[1])
+        pp.key.append(key)
         pp.role.append(role)
         pp.born.append(born)
         pp.peak.append(peak)
@@ -111,16 +121,25 @@ class Careers:
     def _new(self, year: int, age: int, group: str, peak: float) -> int:
         r = self.rng
         while True:
-            name = (r.randrange(len(FIRST_NAMES)), r.randrange(len(SURNAMES)))
-            if name not in self.active_names and name not in self.reserved:
+            key = (r.randrange(KEY_GRID[0]), r.randrange(KEY_GRID[1]))
+            if key not in self.active_keys and key not in self.reserved_keys:
+                break
+        while True:
+            name = (self.names.randrange(len(FIRST_NAMES)), self.names.randrange(len(SURNAMES)))
+            if name not in self.active_names and name[1] not in self.demo_surnames:
                 break
         roles, weights = zip(*ROLE_MIX[group])
         role = r.choices(roles, weights)[0]
-        p = self._add(name, role, year - age, peak, r.randint(*RETIRE_AGES))
-        self.active_names.add(name)
+        p = self._add(name, key, role, year - age, peak, r.randint(*RETIRE_AGES))
+        self._activate(p)
         return p
 
+    def _activate(self, p: int) -> None:
+        self.active_keys.add(self.people.key[p])
+        self.active_names.add((self.people.first[p], self.people.last[p]))
+
     def _leave(self, p: int) -> None:
+        self.active_keys.discard(self.people.key[p])
         self.active_names.discard((self.people.first[p], self.people.last[p]))
         self.free.pop(p, None)
 
@@ -188,7 +207,7 @@ class Careers:
                 if current is not None:
                     self.squads[current].remove(p)
                 self.squads[target].append(p)
-                self.active_names.add((pp.first[p], pp.last[p]))
+                self._activate(p)
         for c in range(self.n_clubs):
             pool += self._trim(c, year)
         # academy: two players per club, a little better at stronger clubs
@@ -278,7 +297,7 @@ class Careers:
             if year in path:
                 self.ratings[p] = rating_at(self.people.peak[p], year - self.people.born[p], 0.0)
                 self.squads[path[year]].append(p)
-                self.active_names.add((self.people.first[p], self.people.last[p]))
+                self._activate(p)
         self._draft(pool, self.q[0], year)
         for p in pool:
             if not any(p in sq for sq in self.squads):

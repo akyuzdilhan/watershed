@@ -22,6 +22,11 @@ def run_desk(seed: int, story: str = "random", sink=None, frames: bool = False):
     return list(sink.cards.values()), next(iter(sink.states.values())), truth
 
 
+def player_of(truth: dict, key: str) -> str:
+    """The name of the player of a demo moment ("goal-63"), read from the ground truth."""
+    return next(m["player"]["name"] for m in truth["moments"] if m["key"] == key)
+
+
 @pytest.fixture(scope="module")
 def demo():
     cards, state, truth = run_desk(7, "demo")
@@ -42,8 +47,9 @@ def test_turning_point_is_a_second_half_rovers_goal(demo):
     cards, _, truth, recap = demo
     tp = recap["analysis"]["turning_point"]
     rovers_second_half = {f"card-{g['event_id']}" for g in truth["goals"] if g["counts"] and g["team"] == "home" and g["period"] == 2}
-    assert tp["card_id"] in rovers_second_half and tp["player"] == "Dorian Lightfoot" and tp["swing_pts"] > 30
-    assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": "Dorian Lightfoot", "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
+    sub = player_of(truth, "sub-46")
+    assert tp["card_id"] in rovers_second_half and tp["player"] == sub and tp["swing_pts"] > 30
+    assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": sub, "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
 
 
 def test_no_retracted_card_is_cited(demo):
@@ -65,11 +71,12 @@ def test_no_retracted_card_is_cited(demo):
 
 
 def test_recap_tells_the_goals_ruled_out_and_why(demo):
-    _, _, _, recap = demo
+    _, _, truth, recap = demo
+    home, away = player_of(truth, "goal-63"), player_of(truth, "goal-69")
     assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
-        ("63'", "Dorian Lightfoot", "offside", 25), ("69'", "Vito Valtonen", "handball", None)]
+        ("63'", home, "offside", 25), ("69'", away, "handball", None)]
     texts = {t["lang"]: t for t in recap["texts"]}
-    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside by a whisker) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
+    assert f"VAR ruled out {home}'s goal at 63' (offside by a whisker) and {away}'s goal at 69' (handball)." in texts["en"]["recap"]
     assert "hors-jeu d'un rien" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
     assert "fuera de juego por muy poco" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]
@@ -78,10 +85,10 @@ def test_recap_tells_the_goals_ruled_out_and_why(demo):
 
 
 def test_disallowed_goals_can_be_passed_explicitly(demo):
-    cards, state, _, _ = demo
+    cards, state, truth, _ = demo
     plain = [{k: v for k, v in c.items() if k != "ruled_out"} for c in cards]  # a desk written before the ruled_out record
     assert build_recap(plain, state)["analysis"]["disallowed_goals"] == []
-    given = [{"minute_label": "63'", "team": "home", "player": "Dorian Lightfoot", "reason": "offside", "margin_cm": 25}]
+    given = [{"minute_label": "63'", "team": "home", "player": player_of(truth, "goal-63"), "reason": "offside", "margin_cm": 25}]
     recap = build_recap(plain, state, disallowed=given)
     en = next(t for t in recap["texts"] if t["lang"] == "en")
     assert "offside by a whisker" in en["recap"] and recap["verification"]["verified"]
@@ -116,15 +123,16 @@ def test_fan_text_for_the_losing_side(demo):
 
 
 def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
-    cards, state, _, recap = demo
+    cards, state, truth, recap = demo
     facts = recap["facts"]
+    sub = player_of(truth, "sub-46")
     good = [dict(t) for t in recap["texts"]]
     assert verify_recap(json.dumps(good), ["en", "fr", "es"], facts, cards)[1]["verified"]
     cases = {
         "invented number": "Rovers won with 61% possession.",
-        "retracted goal": "Dorian Lightfoot scored at 63' too.",
-        "unknown player": "Rovers won, Umberto Valtonen starred.",
-        "spelled number": "Dorian Lightfoot scored four goals.",
+        "retracted goal": f"{sub} scored at 63' too.",
+        "unknown player": "Rovers won, Umberto Valtonen starred.",  # not a player of the match
+        "spelled number": f"{sub} scored four goals.",
         "too long": " ".join(["Rovers"] * (MAX_WORDS["recap"] + 1)),
     }
     for case, text in cases.items():

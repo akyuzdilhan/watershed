@@ -114,7 +114,7 @@ def count_words(lang: str, n: int | None) -> dict:
 
 
 def fr_de(name: str) -> str:
-    """French "de" before a name: "d'Ivo Ellery", "de Dorian Lightfoot"."""
+    """French "de" before a name: "d'Otto Meyer", "de Marijn Scarpetta"."""
     return f"d'{name}" if name[:1].upper() in "AEIOUYÉÈÂÎH" else f"de {name}"
 
 

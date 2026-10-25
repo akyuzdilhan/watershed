@@ -106,15 +106,15 @@ def test_every_duo_line_passes_the_verifier_with_its_numbers_claimed(kind, card,
 
 
 def test_insight_lines_and_texts_pass_the_verifier():
-    doc = {"id": "insight-m-sub4", "type": "insight", "match_id": "m", "kind": "record", "headline_facts": {"player": "Dorian Lightfoot", "goals": 4}, "field_meanings": {}}
+    doc = {"id": "insight-m-sub4", "type": "insight", "match_id": "m", "kind": "record", "headline_facts": {"player": "Marijn Scarpetta", "goals": 4}, "field_meanings": {}}
     facts, _ = insight_facts(doc, TEAMS)
     for lang in LANGS:
         for template in all_strings(LINES["insight"][lang]) :
-            filled = fill(template, {"subject": "Dorian Lightfoot"}, {})
+            filled = fill(template, {"subject": "Marijn Scarpetta"}, {})
             assert verify_duo([{"speaker": HEART, "lang": lang, "line": filled[0], "claims": []}, {"speaker": EYE, "lang": lang, "line": "Yes.", "claims": []}], [lang], facts)["verified"], filled
         for kind, pairs in INSIGHT_TEMPLATES[lang].items():
             for headline, why in pairs:
-                values = {"subject": "Dorian Lightfoot", "home_team": "Rovers", "away_team": "United"}
+                values = {"subject": "Marijn Scarpetta", "home_team": "Rovers", "away_team": "United"}
                 text = {"headline": fill(headline, values, {})[0], "why": fill(why, values, {})[0], "lang": lang, "claims": []}
                 _, report = verify(json.dumps([text], ensure_ascii=False), [lang], facts)
                 assert report["verified"] and not report["cards"][0]["style_warnings"], (lang, kind, text, report)
@@ -370,7 +370,7 @@ def test_template_headlines_never_repeat_even_for_the_same_scorer():
 # --- insights and storyline through the desk -------------------------------------------------------------
 
 INSIGHT = {"id": "insight-m-sub4", "type": "insight", "match_id": "m", "key": "sub4", "kind": "record", "minute_label": "83'", "clock_s": 5000.0, "event_id": "e1",
-           "headline_facts": {"player": "Dorian Lightfoot", "goals_by_substitute": 4, "past_matches": 18620, "times_before": 0},
+           "headline_facts": {"player": "Marijn Scarpetta", "goals_by_substitute": 4, "past_matches": 18620, "times_before": 0},
            "field_meanings": {"goals_by_substitute": "goals by the substitute in this match", "past_matches": "matches in the league history", "times_before": "substitutes who scored 4 before"},
            "rarity": {"p": 0.0, "surprisal_bits": 14.2, "basis": "4 goals by a substitute: 0 in 18,620 matches since 1976/77"}, "value": 90, "status": "proposed"}
 
@@ -390,7 +390,7 @@ def test_write_insight_with_templates_goes_through_the_desk():
 
 
 def test_write_insight_with_a_model_reply_and_thousands():
-    texts = [{"headline": "Lightfoot, a first in the league", "why": "Dorian Lightfoot scores 4 as a substitute: 0 times in 18,620 matches before.", "lang": "en",
+    texts = [{"headline": "Scarpetta, a first in the league", "why": "Marijn Scarpetta scores 4 as a substitute: 0 times in 18,620 matches before.", "lang": "en",
               "claims": [{"value": 4, "source_field": "goals_by_substitute"}, {"value": 0, "source_field": "times_before"}, {"value": 18620, "source_field": "past_matches"}]}]
     lines = [{"speaker": "wren", "lang": "en", "line": "Four from the bench! Is that a first, Joss?", "claims": []},
              {"speaker": "joss", "lang": "en", "line": "It is: 0 in 18,620 matches.", "claims": [{"value": 0, "source_field": "times_before"}, {"value": 18620, "source_field": "past_matches"}]}]
@@ -402,7 +402,7 @@ def test_write_insight_with_a_model_reply_and_thousands():
 
 
 def test_write_insight_falls_back_to_the_template_after_one_retry():
-    invented = json.dumps({"texts": [{"headline": "Lightfoot record", "why": "Lightfoot scores 4, a first in 19,000 matches.", "lang": "en", "claims": []}], "duo": []})
+    invented = json.dumps({"texts": [{"headline": "Scarpetta record", "why": "Scarpetta scores 4, a first in 19,000 matches.", "lang": "en", "claims": []}], "duo": []})
     writer = FakeWriter([invented, invented])
     doc = Desk(MemorySink(), writer, languages=("en",)).write_insight(json.loads(json.dumps(INSIGHT)), TEAMS)
     assert doc["writer"] == "template" and doc["verification"] == {"verified": True, "attempts": 2} | ({"repetition_warnings": doc["verification"]["repetition_warnings"]} if "repetition_warnings" in doc["verification"] else {})
@@ -411,7 +411,7 @@ def test_write_insight_falls_back_to_the_template_after_one_retry():
 
 def test_write_insight_keeps_the_documents_own_verified_texts_as_template():
     doc = json.loads(json.dumps(INSIGHT))
-    doc["texts"] = [{"headline": "Four goals from the bench", "why": "Dorian Lightfoot scores 4 as a substitute.", "lang": "en", "claims": [{"value": 4, "source_field": "goals_by_substitute"}]}]
+    doc["texts"] = [{"headline": "Four goals from the bench", "why": "Marijn Scarpetta scores 4 as a substitute.", "lang": "en", "claims": [{"value": 4, "source_field": "goals_by_substitute"}]}]
     out = Desk(MemorySink(), TemplateWriter(), languages=("en",)).write_insight(doc, TEAMS)
     assert out["texts"][0]["headline"] == "Four goals from the bench"
 
@@ -423,7 +423,7 @@ def test_storyline_goes_through_the_same_path():
 
 
 ENGINE_FACTS = {  # the headline facts the insight engine gives a substitute's four goals and a comeback
-    "scorer-home-20-4": {"player": "Dorian Lightfoot", "team": "Rovers", "goals": 4, "goal_minutes": "52', 57', 66', 83'", "substitute": True, "came_on": "46'",
+    "scorer-home-20-4": {"player": "Marijn Scarpetta", "team": "Rovers", "goals": 4, "goal_minutes": "52', 57', 66', 83'", "substitute": True, "came_on": "46'",
                          "history_count": 0, "history_opportunities": 19000, "history_since": "1976/77", "history_seasons": 50},
     "comeback-home-2-3": {"team": "Rovers", "opponent": "United", "deficit_goals": 2, "trailing_score": "0-2", "stage": "won", "score": "5-2", "club_last_season": "2019/20", "club_seasons_since": 7,
                           "history_count": 114, "history_opportunities": 9579, "history_since": "1976/77", "history_seasons": 50, "history_per_season": 2.3, "one_in": 83,
