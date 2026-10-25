@@ -1,10 +1,12 @@
 import asyncio
 import json
+import re
 
 import pytest
 
-from worker.writer import (EXAMPLE_FACTS, EXAMPLE_REPLY, LANGUAGE_RULES, STRUCTURAL_RULES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter, card_facts, draft,
-                           numbers_in, style_issues, verify)
+from worker.duo import fill
+from worker.writer import (CARD_KIND_WORDS, EXAMPLE_FACTS, EXAMPLE_REPLY, LANGUAGE_RULES, STRUCTURAL_RULES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter,
+                           card_facts, draft, numbers_in, style_issues, template_values, verify)
 
 TEAMS = {"home": "Rovers", "away": "United"}
 MOMENT_FACTS = {
@@ -269,3 +271,43 @@ def test_thousands_are_read_as_one_number():
     assert [v for v, _ in numbers_in("18,620, 18\u202f620, 18.620 and 1.3")] == [18620, 18620, 18620, 1.3]
 
 
+# --- red cards ------------------------------------------------------------------------------------------
+
+RED_CLAIMS = [{"value": 55, "source_field": "united_wp_before_pct"}, {"value": 40, "source_field": "united_wp_after_pct"}]
+
+
+@pytest.mark.parametrize("kind,fact", [("second_yellow", "second_yellow"), ("red", "straight_red"), (None, None)])
+def test_a_red_card_names_the_player_and_says_how_he_was_sent_off(kind, fact):
+    card = dict(make_card("red_card", "away"), **({"card_kind": kind} if kind else {}))
+    facts, meanings = card_facts(card, TEAMS)
+    assert facts.get("card_kind") == fact and (fact is None or fact in meanings["card_kind"])
+    for lang, t in TEMPLATES["red_card"].items():
+        values, fields = template_values(card, facts, lang)
+        heads = t["kinds"][fact]["headlines"] if fact else t["headlines"]
+        whys = (t["kinds"][fact]["whys"] if fact else []) + t["whys"]
+        for headline in heads:
+            assert "{player}" in headline, headline
+            for why in whys:
+                h, w = fill(headline, values, fields), fill(why, values, fields)
+                text = {"headline": h[0], "why": w[0], "lang": lang, "claims": h[1] + w[1]}
+                _, report = verify(json.dumps([text], ensure_ascii=False), [lang], facts)
+                e = report["cards"][0]
+                assert report["verified"] and not e["style_warnings"] and not e["unknown_names"], (lang, text, e)
+        written = json.loads(TemplateWriter().write(card, facts, [lang]))[0]
+        if fact:
+            assert re.search(CARD_KIND_WORDS[fact][lang], written["headline"] + " " + written["why"]), written
+    if fact == "second_yellow":
+        assert any(w.startswith("Second yellow for {player}: {team} are down to ten") for w in TEMPLATES["red_card"]["en"]["kinds"]["second_yellow"]["whys"])
+
+
+def test_the_verifier_refuses_an_unnamed_player_and_a_card_kind_the_feed_did_not_give():
+    card = make_card("red_card", "away")
+    player = card["player"]["name"]
+    facts, _ = card_facts(card, TEAMS)
+    unnamed = verify(reply("en", "United down to ten", "The red card costs United: from 55% to 40% to win.", RED_CLAIMS), ["en"], facts)[1]
+    assert not unnamed["verified"] and "player_not_named" in {e["rule"] for e in unnamed["cards"][0]["style_errors"]}
+    second = reply("en", f"Second yellow for {player}", "United go from 55% to 40% to win.", RED_CLAIMS)
+    for kind, ok in ((None, False), ("red", False), ("second_yellow", True)):
+        facts, _ = card_facts(dict(card, **({"card_kind": kind} if kind else {})), TEAMS)
+        report = verify(second, ["en"], facts)[1]
+        assert report["verified"] == ok and (ok or "card_kind_unbacked" in {e["rule"] for e in report["cards"][0]["style_errors"]}), (kind, report)

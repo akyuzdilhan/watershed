@@ -122,8 +122,9 @@ def fr_de(name: str) -> str:
 
 # --- duo lines --------------------------------------------------------------------------------------
 # Slots: "heart" (Wren reacts, no number), "eye" (Joss brings the number or the detail), "heart_back" (Wren answers), "eye_more" (a detail
-# keyed by the story: brace, hat_trick, four_plus, late, any). A goal's heart line is keyed by its situation. Placeholders are filled from
-# the card facts by `writer.TemplateWriter`; numeric ones are claimed. French lines use a no-break space before % : ; ? !
+# keyed by the story: brace, hat_trick, four_plus, late, any). A goal's heart line is keyed by its situation, a red card's by how the player
+# was sent off; "again" is Wren's line for a goal at a score VAR took away before. Placeholders are filled from the card facts by
+# `writer.TemplateWriter`; numeric ones are claimed. French lines use a no-break space before % : ; ? !
 
 CONDITIONS = {  # filled by writer.conditions: "" when the line is true for the card, None to skip it
     "if_home": "the team of the moment plays at home: only a home goal makes the stadium roar or wake up",
@@ -309,16 +310,22 @@ LINES: dict[str, dict[str, dict]] = {
             "eye_more": {"any": []},
         },
     },
-    "red_card": {
-        "en": {"heart": ["Red card! {player} is off, and {team} must change everything now.", "And that's that for {player}. {team} will have to find another way."],
+    "red_card": {  # "heart" keyed by the card_kind fact: second_yellow, straight_red, or "any" when the feed does not say
+        "en": {"heart": {"second_yellow": ["Second yellow for {player}, and that is red! {team} are down to ten.", "{player} is booked again, and off he goes. {team} down to ten."],
+                         "straight_red": ["Straight red for {player}! {team} are down to ten.", "No second thoughts from the referee: straight red for {player}."],
+                         "any": ["Red card! {player} is off, and {team} must change everything now.", "And that's that for {player}. {team} will have to find another way."]},
                "eye": ["Ten men change the sums: {team} go from {before}% to {after}% to win.", "With ten, {team} slip from {before}% to {after}% to win.",
                        "{team} were on {before}% to win; with a man less it is {after}%."],
                "heart_back": ["Long, lonely walk, that.", "The noise in here has changed completely.", "You can feel the mood change in the stands."], "eye_more": {"any": []}},
-        "fr": {"heart": ["Carton rouge ! {player} doit sortir, et {team} doit tout repenser.", "Et c'est fini pour {player}. {team} va devoir trouver une autre solution."],
+        "fr": {"heart": {"second_yellow": ["Second jaune pour {player}, et c'est le rouge ! {team} est réduit à dix.", "{player} est averti une deuxième fois, et il doit sortir. {team} à dix."],
+                         "straight_red": ["Rouge direct pour {player} ! {team} est réduit à dix.", "L'arbitre n'hésite pas : rouge direct pour {player}."],
+                         "any": ["Carton rouge ! {player} doit sortir, et {team} doit tout repenser.", "Et c'est fini pour {player}. {team} va devoir trouver une autre solution."]},
                "eye": ["À dix, les calculs changent : {team} passe de {before} % à {after} % de chances de gagner.", "Réduit à dix, {team} glisse de {before} % à {after} % de chances de gagner.",
                        "{team} était à {before} % de chances de gagner ; avec un homme de moins, {team} est à {after} %."],
                "heart_back": ["Longue marche solitaire vers le vestiaire.", "Le bruit dans le stade a complètement changé.", "On sent l'ambiance basculer en tribunes."], "eye_more": {"any": []}},
-        "es": {"heart": ["¡Roja! {player} se va, y el {team} tiene que cambiarlo todo.", "Y se acabó para {player}. El {team} tendrá que buscar otro camino."],
+        "es": {"heart": {"second_yellow": ["¡Segunda amarilla para {player}, y es roja! El {team} se queda con diez.", "{player} ve la segunda amarilla y se va a la calle. El {team}, con diez."],
+                         "straight_red": ["¡Roja directa para {player}! El {team} se queda con diez.", "El árbitro no duda: roja directa para {player}."],
+                         "any": ["¡Roja! {player} se va, y el {team} tiene que cambiarlo todo.", "Y se acabó para {player}. El {team} tendrá que buscar otro camino."]},
                "eye": ["Con diez cambian las cuentas: el {team} pasa del {before}% al {after}% de opciones de ganar.", "Con uno menos, el {team} baja del {before}% al {after}% de opciones de ganar.",
                        "El {team} estaba en el {before}% de opciones de ganar; con un hombre menos, en el {after}%."],
                "heart_back": ["Larga y solitaria caminata hacia el vestuario.", "El ruido del estadio ha cambiado por completo.", "Se nota cómo cambia el ambiente en la grada."], "eye_more": {"any": []}},

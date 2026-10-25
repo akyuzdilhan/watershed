@@ -33,6 +33,7 @@ Numbers. Each number has a field name that says what it means: never use a numbe
 Content. Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Every sentence that gives a win probability names the team it belongs to: rovers_wp_after_pct is the chance of Rovers. Never write "win chance", "the chances" or "les chances" without the team.
 - Headline: at most 8 words, names the player or the team. No minute and no number at the start: the graphic already shows the minute and the score.
 - Why: one sentence, at most 25 words.
+- A red card names the player in the headline or the why. Say second yellow only when card_kind is second_yellow, and straight red only when card_kind is straight_red.
 - Same meaning in every language, each written natively as a broadcaster of that country would say it, not translated word for word.
 
 Language rules.
@@ -163,8 +164,11 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
     elif card["moment"] == "red_card":
         facts |= {"event": f"{name} player sent off", "player_sent_off": player,
                   f"{slug}_wp_before_pct": shown(f["team_wp_before_pct"]), f"{slug}_wp_after_pct": shown(f["team_wp_after_pct"])}
-        meanings |= {"player_sent_off": "player shown the red card", f"{slug}_wp_before_pct": f"{name}'s chance of winning the match before the red card, in %",
+        meanings |= {"player_sent_off": "player shown the red card, to be named in the headline or the why", f"{slug}_wp_before_pct": f"{name}'s chance of winning the match before the red card, in %",
                      f"{slug}_wp_after_pct": f"{name}'s chance of winning the match with ten men, in %"}
+        if card.get("card_kind") in CARD_KINDS:
+            facts["card_kind"] = CARD_KINDS[card["card_kind"]]
+            meanings["card_kind"] = "how the player was sent off: " + "; ".join(f"{k}: {v}" for k, v in CARD_KIND_MEANINGS.items())
     else:  # a chance that did not go in
         facts |= {"event": f"{name} chance missed", "shooter": player, "shot_xg_pct": f["xg_pct"],
                   f"{slug}_wp_before_pct": shown(f["team_wp_before_pct"]), f"{slug}_wp_if_goal_pct": shown(f["team_wp_if_goal_pct"])}
@@ -176,6 +180,10 @@ def card_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
         facts |= {f"season_{k}": v for k, v in season["facts"].items()}
         meanings |= {f"season_{k}": v for k, v in season.get("meanings", {}).items()}
     return facts, meanings
+
+
+CARD_KINDS = {"second_yellow": "second_yellow", "red": "straight_red"}  # card["card_kind"], set by the worker -> the card_kind fact
+CARD_KIND_MEANINGS = {"second_yellow": "a second booking in the match, so a red card", "straight_red": "a straight red card"}
 
 
 def league_points_field(name: str) -> bool:
@@ -307,6 +315,13 @@ LANGUAGE_RULES: dict[str, list[tuple[str, str, str]]] = {
         ("league_rate", "error", r"(?i)\b\d+(?:[.,]\d+)?\s+bits?\b|\b\d{1,3}(?:[ ,.]\d{3})+\s+partidos\b|\b\d{3,}\s+partidos\b"),
     ],
 }
+# What a red card text may say only when the card_kind fact says it.
+CARD_KIND_WORDS = {
+    "second_yellow": {"en": r"(?i)\bsecond (?:yellow|booking)|\bbooked (?:twice|again)\b|\btwo bookings\b",
+                      "fr": r"(?i)\b(?:second|deuxième) (?:carton jaune|jaune|avertissement)|\baverti (?:deux fois|une deuxième fois)|\bdouble avertissement",
+                      "es": r"(?i)\bsegunda (?:tarjeta )?amarilla|\bdoble amarilla|\bdos amarillas"},
+    "straight_red": {"en": r"(?i)\bstraight red", "fr": r"(?i)\b(?:carton )?rouge direct", "es": r"(?i)\b(?:tarjeta )?roja directa"},
+}
 
 # Words that speak of a win probability: a sentence that uses one must name a club.
 PROBABILITY_WORDS = {
@@ -328,6 +343,8 @@ STRUCTURAL_RULES = {
     "probability_number_without_team": ("error", None),  # a number from a <team>_wp_ field in a sentence without that team
     "points_unit_missing": ("error", None),  # a number from a _pts field not followed by the word for points
     "points_not_from_pts_field": ("error", None),  # "54 points" where 54 is a percentage
+    "card_kind_unbacked": ("error", None),  # "second yellow" or "straight red" when the card_kind fact does not say so
+    "player_not_named": ("error", None),  # a red card whose headline and why do not name the player (card texts only)
     "count_word_unbacked": ("warning", None),  # "fifth" when no whole-number fact is 5
     "too_long": ("warning", None),  # headline over 8 words or why over 25
 }
@@ -381,6 +398,11 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
     for w in re.findall(r"[\wÀ-ÿ]+", body.lower()):
         if w in COUNT_WORDS.get(lang, {}) and COUNT_WORDS[lang][w] not in counts:
             add("count_word_unbacked", w)
+    if "player_sent_off" in facts:
+        for kind, words in CARD_KIND_WORDS.items():
+            found = re.search(words[lang], body) if lang in words else None
+            if found and facts.get("card_kind") != kind:
+                add("card_kind_unbacked", found.group(0))
 
     wp_teams = {}  # value -> clubs whose win probability has that value
     pts_values = set()
@@ -452,6 +474,9 @@ def verify(text: str, languages: list[str], facts: dict, style: bool = True) -> 
         claims = d.get("claims") if isinstance(d.get("claims"), list) else []
         nums = check_numbers(body, claims, facts)
         errors, warnings = style_issues(str(d.get("headline", "")), str(d.get("why", "")), str(d.get("lang")), nums["good"], facts) if style else ([], [])
+        sent_off = str(facts.get("player_sent_off") or "")
+        if style and sent_off and not any(n in body for n in (sent_off, sent_off.split()[-1])):
+            errors.append({"rule": "player_not_named", "text": sent_off})
         entry = {
             "lang": d.get("lang"),
             "keys_ok": all(isinstance(d.get(k), str) for k in ("headline", "why", "lang")),
@@ -614,14 +639,37 @@ TEMPLATES = {
                         "Una parada de {value} puntos para el {team}: {before}% de opciones de ganar en vez del {other}%.",
                         "El {team} se aferra a su {before}% de opciones de ganar; un gol lo habría dejado en el {other}%."]},
     },
-    "red_card": {
-        "en": {"headlines": ["{player} sent off", "Red card for {player}", "{player} is shown red", "{player} has to go", "{team} down to ten"],
+    "red_card": {  # every headline names the player; "kinds" by the card_kind fact, the generic lines when the feed does not say
+        "en": {"headlines": ["{player} sent off", "Red card for {player}", "{player} is shown red", "{player} has to go"],
+               "kinds": {"second_yellow": {"headlines": ["Second yellow for {player}", "{player} off after a second yellow", "{player}: second yellow, {team} down to ten",
+                                                         "Two bookings, and {player} is off"],
+                                           "whys": ["Second yellow for {player}: {team} are down to ten and go from {before}% to {after}% to win.",
+                                                    "{team} down to ten after a second yellow: from {before}% to {after}% to win.",
+                                                    "Booked twice, {player} leaves {team} with ten, from {before}% to {after}% to win."]},
+                         "straight_red": {"headlines": ["Straight red for {player}", "{player} sees a straight red", "A straight red, and {player} is off"],
+                                          "whys": ["Straight red for {player}: {team} are down to ten and go from {before}% to {after}% to win.",
+                                                   "A straight red leaves {team} with ten: from {before}% to {after}% to win."]}},
                "whys": ["Down to ten men, {team} go from {before}% to {after}% to win.", "{team} drop from {before}% to {after}% to win with ten men.",
                         "With a man less, {team} are down to {after}% to win, from {before}%.", "The red card costs {team}: from {before}% to {after}% to win."]},
-        "fr": {"headlines": ["{player} expulsé", "Carton rouge pour {player}", "{player} doit sortir", "{team} réduit à dix", "Rouge pour {player}"],
+        "fr": {"headlines": ["{player} expulsé", "Carton rouge pour {player}", "{player} doit sortir", "Rouge pour {player}"],
+               "kinds": {"second_yellow": {"headlines": ["Second jaune pour {player}", "{player} exclu sur un second jaune", "Deuxième avertissement pour {player}",
+                                                         "{player} averti deux fois et exclu"],
+                                           "whys": ["Second jaune pour {player} : {team}, réduit à dix, passe de {before} % à {after} % de chances de gagner.",
+                                                    "{team} réduit à dix après un second jaune : de {before} % à {after} % de chances de gagner.",
+                                                    "Averti deux fois, {player} laisse {team} à dix, qui passe de {before} % à {after} % de chances de gagner."]},
+                         "straight_red": {"headlines": ["Rouge direct pour {player}", "{player} exclu sur un rouge direct", "Carton rouge direct pour {player}"],
+                                          "whys": ["Rouge direct pour {player} : {team}, réduit à dix, passe de {before} % à {after} % de chances de gagner.",
+                                                   "Un rouge direct laisse {team} à dix : de {before} % à {after} % de chances de gagner."]}},
                "whys": ["Réduit à dix, {team} passe de {before} % à {after} % de chances de gagner.", "{team} tombe de {before} % à {after} % de chances de gagner à dix contre onze.",
                         "Avec un homme de moins, {team} n'a plus que {after} % de chances de gagner, contre {before} %.", "Le carton rouge coûte cher à {team} : de {before} % à {after} % de chances de gagner."]},
-        "es": {"headlines": ["{player}, expulsado", "Roja para {player}", "{player} se va a la calle", "El {team}, con diez", "Tarjeta roja para {player}"],
+        "es": {"headlines": ["{player}, expulsado", "Roja para {player}", "{player} se va a la calle", "Tarjeta roja para {player}"],
+               "kinds": {"second_yellow": {"headlines": ["Segunda amarilla para {player}", "{player}, expulsado por doble amarilla", "Doble amarilla para {player}"],
+                                           "whys": ["Segunda amarilla para {player}: el {team}, con diez, pasa del {before}% al {after}% de opciones de ganar.",
+                                                    "El {team}, con diez tras una segunda amarilla: del {before}% al {after}% de opciones de ganar.",
+                                                    "Con dos amarillas, {player} deja al {team} con diez, que pasa del {before}% al {after}% de opciones de ganar."]},
+                         "straight_red": {"headlines": ["Roja directa para {player}", "{player}, expulsado con roja directa"],
+                                          "whys": ["Roja directa para {player}: el {team}, con diez, pasa del {before}% al {after}% de opciones de ganar.",
+                                                   "Una roja directa deja al {team} con diez: del {before}% al {after}% de opciones de ganar."]}},
                "whys": ["Con diez, el {team} pasa del {before}% al {after}% de opciones de ganar.", "El {team} cae del {before}% al {after}% de opciones de ganar con uno menos.",
                         "Con un hombre menos, al {team} le queda un {after}% de opciones de ganar, frente al {before}%.", "La roja le cuesta caro al {team}: del {before}% al {after}% de opciones de ganar."]},
     },
@@ -845,13 +893,17 @@ class TemplateWriter:
             pick = _Picker(memory, card["id"], lang, facts, self.demoted)
             if facts.get("stake") == "low":
                 t = LOW_STAKE_TEMPLATES[lang]
-                pools = [t["headlines"]]
+                pools, whys = [t["headlines"]], t["whys"]
             else:
                 t = TEMPLATES[card["moment"]][lang]
-                pools = [t.get("situations", {}).get(facts.get("goal_situation"), []), t["headlines"]]
+                kind = t.get("kinds", {}).get(facts.get("card_kind"))
+                if kind:  # how the player was sent off is told: the headlines of that kind only, its whys first
+                    pools, whys = [kind["headlines"]], kind["whys"] + t["whys"]
+                else:
+                    pools, whys = [t.get("situations", {}).get(facts.get("goal_situation"), []), t["headlines"]], t["whys"]
             headline, h_claims = pick.headline([p for p in pools if p], values, fields, "headline")
             pick.openings.append(pick.memory.opening(headline))  # neither the why nor the duo starts like the headline
-            why, w_claims = pick.line(t["whys"], values, fields, "why")
+            why, w_claims = pick.line(whys, values, fields, "why")
             claims = [dict(c) for c in {tuple(sorted(c.items())): c for c in h_claims + w_claims}.values()]
             texts.append({"headline": headline, "why": why, "lang": lang, "claims": claims})
             if duo:
@@ -869,7 +921,9 @@ class TemplateWriter:
         if kind == "goal_low":
             n = min(n, 3)
         more = slots.get("eye_more", {}).get(story_key(facts) if kind.startswith("goal") else "any", []) or slots.get("eye_more", {}).get("any", [])
-        heart = slots["heart"].get(facts.get("goal_situation"), []) if isinstance(slots["heart"], dict) else slots["heart"]
+        heart = slots["heart"]
+        if isinstance(heart, dict):  # a goal by its situation, a red card by how the player was sent off
+            heart = heart.get(facts.get("goal_situation") or facts.get("card_kind")) or heart.get("any", [])
         if kind.startswith("goal") and facts.get("score_after") in pick.memory.ruled_out:
             heart = LINES["goal"][lang]["again"]  # VAR took a goal at this score away earlier: this one counts
         fresh = [FRESH[lang]["goal" if kind.startswith("goal") else "other"]]

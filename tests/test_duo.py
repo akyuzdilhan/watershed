@@ -12,8 +12,9 @@ from worker import insight_texts
 from worker.desk import Desk
 from worker.duo import CONDITIONS, EYE, HEART, LINES, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, fill, persona_brief
 from worker.pipeline import MemorySink, Pipeline
-from worker.writer import (EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, OFF_AIR_FIELDS, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter,
-                           card_facts, draft, insight_facts, low_stake, ruling_facts, style_issues, template_values, verify, verify_duo, verify_reply, writer_request)
+from worker.writer import (CARD_KIND_WORDS, EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, OFF_AIR_FIELDS, TEMPLATES, WRITER_INSTRUCTIONS,
+                           TemplateWriter, card_facts, draft, insight_facts, low_stake, ruling_facts, style_issues, template_values, verify, verify_duo, verify_reply,
+                           writer_request)
 
 LANGS = ["en", "fr", "es"]
 TEAMS = {"home": "Rovers", "away": "United"}
@@ -91,20 +92,30 @@ CASES = [  # (line kind, card, extra facts)
     ("goal", make_card("goal", scorer_match_goals=4, minute="83'"), {}),
     ("goal_low", make_card("goal", facts={"team_wp_before_pct": 99, "team_wp_after_pct": 99}, score={"home": 4, "away": 2}, minute="88'", scorer_match_goals=4), {}),
     ("save", make_card("save"), {}),
+    ("red_card", make_card("red_card", "away", card_kind="second_yellow"), {}),
+    ("red_card", make_card("red_card", "home", card_kind="red"), {}),
     ("red_card", make_card("red_card", "away"), {}),
     ("chance", make_card("chance", "away"), {}),
     ("ruling", make_card("goal", ruled_out={"reason": "offside", "margin_cm": 25}), {}),
 ]
 
 
-@pytest.mark.parametrize("kind,card,extra", CASES, ids=[c[0] for c in CASES])
+def lines_for(kind, lang, facts):
+    """Every line of a kind, a red card's heart lines for its own card kind only (a second yellow is never told as a straight red)."""
+    lines = LINES[kind][lang]
+    if kind == "red_card":
+        lines = dict(lines, heart=[lines["heart"].get(facts.get("card_kind"), []), lines["heart"]["any"]])
+    return all_strings(lines)
+
+
+@pytest.mark.parametrize("kind,card,extra", CASES, ids=[f"{c[0]}-{c[1].get('card_kind', '')}" for c in CASES])
 def test_every_duo_line_passes_the_verifier_with_its_numbers_claimed(kind, card, extra):
     facts, _ = ruling_facts(card, TEAMS) if kind == "ruling" else card_facts(card, TEAMS)
     facts |= extra
     for lang in LANGS:
         values, fields = template_values(card, facts, lang)
         values |= {"subject": "Rovers"} | {c: "" for c in CONDITIONS}  # every line, whatever its condition
-        for template in all_strings(LINES[kind][lang]):
+        for template in lines_for(kind, lang, facts):
             filled = fill(template, values, fields)
             assert filled, (lang, template)
             line = {"speaker": HEART, "lang": lang, "line": filled[0], "claims": filled[1]}
@@ -715,3 +726,25 @@ def test_after_a_goal_ruled_out_the_next_one_at_that_score_counts(demo):
     for lang in LANGS:
         first = next(l["line"] for l in again["duo"] if l["lang"] == lang)
         assert words[lang] in first.lower().replace("\xa0", " "), (lang, first)
+
+
+# --- a goal credited to another player, a red card --------------------------------------------------------
+
+
+
+@pytest.mark.parametrize("kind", ["second_yellow", "red", None])
+def test_the_duo_says_how_the_player_was_sent_off(demo, kind):
+    sink, _ = demo
+    card = json.loads(json.dumps(next(c for c in sink.cards.values() if c["moment"] == "red_card")))  # a second yellow in the demo
+    card.pop("card_kind", None)
+    if kind:
+        card["card_kind"] = kind
+    facts, _ = card_facts(card, TEAMS)
+    out = json.loads(TemplateWriter().write(card, facts, LANGS, memory=PhraseMemory(), duo=True))
+    assert verify(json.dumps(out["texts"], ensure_ascii=False), LANGS, facts)[1]["verified"] and verify_duo(out["duo"], LANGS, facts)["verified"]
+    for lang in LANGS:
+        text = next(t for t in out["texts"] if t["lang"] == lang)
+        assert card["player"]["name"] in text["headline"] + " " + text["why"], text
+        heart = next(l["line"] for l in out["duo"] if l["lang"] == lang and l["speaker"] == HEART)
+        for k, words in CARD_KIND_WORDS.items():
+            assert bool(re.search(words[lang], heart)) == (k == facts.get("card_kind")), (lang, k, heart)
