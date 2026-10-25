@@ -85,18 +85,24 @@ def replay(messages: list[dict], send, speed: float, **pacing) -> None:
         send(m)
 
 
-def service_bus_settings() -> tuple[str, str]:
-    """Reads the Service Bus settings from the environment, the .env file, or the default azd environment."""
+def load_environment(needed: str) -> None:
+    """Loads the .env file and, when `needed` is still unset, the default azd environment (.azure/<env>/.env). A variable already set is kept."""
     from dotenv import dotenv_values, load_dotenv
 
     load_dotenv()
-    if not os.environ.get("SERVICE_BUS_FQDN"):
-        config = Path(".azure/config.json")
-        name = json.loads(config.read_text(encoding="utf-8")).get("defaultEnvironment") if config.exists() else None
-        azd_env = Path(".azure") / name / ".env" if name else None
-        if azd_env and azd_env.exists():
-            for key, value in dotenv_values(azd_env).items():
-                os.environ.setdefault(key, value or "")
+    if os.environ.get(needed):
+        return
+    config = Path(".azure/config.json")
+    name = json.loads(config.read_text(encoding="utf-8")).get("defaultEnvironment") if config.exists() else None
+    azd_env = Path(".azure") / name / ".env" if name else None
+    if azd_env and azd_env.exists():
+        for key, value in dotenv_values(azd_env).items():
+            os.environ.setdefault(key, value or "")
+
+
+def service_bus_settings() -> tuple[str, str]:
+    """Reads the Service Bus settings from the environment, the .env file, or the default azd environment."""
+    load_environment("SERVICE_BUS_FQDN")
     fqdn, topic = os.environ.get("SERVICE_BUS_FQDN"), os.environ.get("SERVICE_BUS_TOPIC", "match-events")
     if not fqdn:
         sys.exit("SERVICE_BUS_FQDN is not set: run `azd provision`, or copy it from `azd env get-values` into .env")
