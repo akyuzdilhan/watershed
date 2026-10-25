@@ -1,5 +1,6 @@
 import json
 import math
+import statistics
 import sys
 from pathlib import Path
 
@@ -196,3 +197,14 @@ def test_the_former_pressing_figure_is_named_for_what_it_counts(demo_feed):
     labels = {o["value"]: o["label"] for o in panels.graphic_items(demo_feed, "tactics")}
     assert labels["press"] == "Opponents near the ball over time"
     assert panels.graphic_figure(demo_feed, "tactics", "press").layout.title.text == fig.layout.title.text
+
+
+def test_the_line_height_figure_plots_means_and_says_so(demo_feed):
+    fig = graphics.line_height_figure(demo_feed)
+    assert "mean distance" in fig.layout.title.text and "median" not in fig.layout.title.text
+    by_slice: dict = {}
+    for r in tactics.line_heights(demo_feed["actions"]):
+        if r["in_possession"] != "home":
+            by_slice.setdefault(tactics.bucket(r), []).append(r["home"])
+    home = next(t for t in fig.data if t.name == matchfeed.team_names(demo_feed["info"])["home"])
+    assert list(home.y) == [round(statistics.fmean(v), 2) for _, v in sorted(by_slice.items())]

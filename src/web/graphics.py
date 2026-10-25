@@ -431,7 +431,7 @@ def _team_lines(feed: dict, rows: list[dict], value, title: str, sub: str, ytitl
 def line_height_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
     rows = T.line_heights(feed["actions"])
     return _team_lines(feed, rows, lambda r, s: r[s] if r["in_possession"] != s else None, "Defensive line height",
-                       f"median distance from a team's own goal line to its deepest outfield player when the opponent has the ball, per {minutes} minutes", "metres", theme, minutes, width)
+                       f"mean distance from a team's own goal line to its deepest outfield player when the opponent has the ball, per {minutes} minutes", "metres", theme, minutes, width)
 
 
 def pressing_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
