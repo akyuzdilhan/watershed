@@ -253,13 +253,26 @@ def lost_leads_hold(pipeline) -> bool:
     return True
 
 
+def comebacks_hold(pipeline) -> bool:
+    """Every active comeback insight is true at the score as it stands: level when it says level, ahead when it says ahead or won."""
+    for match_id, engine in pipeline.engines.items():
+        score = pipeline.matches[match_id].score()
+        for d in engine.active():
+            if d["group"].startswith("comeback-"):
+                side = d["group"].rsplit("-", 1)[1]
+                diff, stage = score[side] - score["away" if side == "home" else "home"], d["headline_facts"]["stage"]
+                if (stage == "level" and diff != 0) or (stage in ("ahead", "won") and diff <= 0):
+                    return False
+    return True
+
+
 @pytest.mark.parametrize("seed", range(1, 21))
 def test_unscripted_matches(seed, history):
     stream, _ = generate_match(seed, frames=False)
     pipeline = Pipeline(sink=MemorySink(), history=history)
     for m in stream:
         pipeline.handle(m)
-        assert lost_leads_hold(pipeline), m["seq"]
+        assert lost_leads_hold(pipeline) and comebacks_hold(pipeline), m["seq"]
     pipeline.flush()
     docs = pipeline.insights(f"synthetic-{seed:04d}")
     live = [d for d in docs if d["status"] != "superseded"]
@@ -283,6 +296,22 @@ def test_a_lost_half_time_lead_is_told_only_while_the_team_trails(demo, history)
     assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United's equaliser, then lost at full time
     equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
     assert equaliser not in doc["evidence"] and doc["superseded_by"] == "insight-demo-0007-ht-lead-lost-away-2"
+
+
+def test_a_comeback_is_told_at_the_current_score(demo, history):
+    """Rovers come back from 0-2 down and lead. "Now ahead" is withdrawn when the 63' goal is ruled out and while United are level (their goal, until VAR rules it out), told again each time Rovers lead, and replaced by the win at full time."""
+    stream, truth = demo
+    pipeline = Pipeline(sink=MemorySink(), history=history)
+    for m in stream:
+        pipeline.handle(m)
+        assert comebacks_hold(pipeline), m["seq"]
+    pipeline.flush()
+    doc = pipeline.engines["demo-0007"].docs["comeback-home-2-2"]
+    assert [h["action"] for h in doc["history"]] == ["proposed", "superseded", "revived", "superseded", "revived", "superseded"]
+    causes = [e["cause"] for e in pipeline.sink.audit if e["card_id"] == doc["id"] and e["action"] == "superseded"]
+    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United level, then won at full time
+    equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
+    assert equaliser not in doc["evidence"] and doc["headline_facts"]["score"] == "3-2" and doc["superseded_by"] == "insight-demo-0007-comeback-home-2-3"
 
 
 def craft(template: dict, seq: int, emitted_at_s: float, minute: int, **changes) -> dict:

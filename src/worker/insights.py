@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from worker.insight_history import LATE_MINUTE, Features, HistoryView, comeback_stage
+from worker.insight_history import LATE_MINUTE, Features, HistoryView
 from worker.insight_rarity import binom_sf, bits, fmt, laplace, normal_sf, one_in, poisson_sf, value
 from worker.feedback import adjust_value
 from worker.feedback import source as profile_source
@@ -482,25 +482,27 @@ def fastest_hat_trick(e: InsightEngine, ctx: dict) -> list[Fact]:
 
 
 def comebacks(e: InsightEngine, ctx: dict) -> list[Fact]:
-    """A team that trailed by two or more and came back level, ahead, or to win: against every team that trailed by as much."""
+    """A team that trailed by two or more and is level or ahead now (or won, at full time): against every team that trailed by as much.
+
+    The stage is the one of the current score, reached by the team's own goal: behind again, or pegged back to level after leading, the team no longer stands where the fact says ("now lead" would be false) and the fact is withdrawn; it comes back when the team goes ahead again or the goal against it is ruled out. Its `score` is the score of the goal that last brought the team to that stage."""
     out = []
     goals = ctx["goals"]
     order = [g.side for g in goals]
     for side in ("home", "away"):
-        worst, stage = comeback_stage(order, side, final=e.final)
-        if worst < 2 or stage == 0:
-            continue
-        diff, worst_at, stage_goal = 0, -1, None
+        path, worst, worst_at = [], 0, -1  # the team's goal difference after each goal, its lowest point and the goal that first reached it
         for i, s in enumerate(order):
-            diff += 1 if s == side else -1
-            if -diff == worst and worst_at < 0:
-                worst_at = i
-        diff = sum(1 if s == side else -1 for s in order[:worst_at + 1])
-        for g in goals[worst_at + 1:]:
-            diff += 1 if g.side == side else -1
-            if (stage >= 2 and diff > 0) or (stage == 1 and diff >= 0):
-                stage_goal = g
-                break
+            path.append((path[-1] if path else 0) + (1 if s == side else -1))
+            if -path[-1] > worst:
+                worst, worst_at = -path[-1], i
+        if worst < 2 or path[-1] < 0:
+            continue
+        j = len(path) - 1  # the goal that brought the team to where it stands: it has stood there since
+        while path[j] > 0 and path[j - 1] > 0:
+            j -= 1
+        if order[j] != side:
+            continue  # level again, but pegged back from ahead: no comeback to tell
+        stage = 3 if e.final and path[-1] > 0 else 2 if path[-1] > 0 else 1
+        stage_goal = goals[j]
         trail = {"home": sum(1 for s in order[:worst_at + 1] if s == "home"), "away": sum(1 for s in order[:worst_at + 1] if s == "away")}
 
         def fn(f, worst=worst, stage=stage):
@@ -515,13 +517,13 @@ def comebacks(e: InsightEngine, ctx: dict) -> list[Fact]:
         what = {1: f"teams {worst} or more goals down that drew level", 2: f"teams {worst} or more goals down that went ahead", 3: f"teams {worst} or more goals down that won"}[stage]
         q = Query(f"comeback-{worst}-{stage}", fn, what, f"teams that trailed by {worst} or more", pred=lambda f, worst=worst, stage=stage: fn(f, worst, stage)[0] > 0)
         club = ctx["teams"][side]
-        at = goals.index(stage_goal) + 1 if stage < 3 and stage_goal else len(goals)
+        at = j + 1 if stage < 3 else len(goals)
         reached = {s: sum(1 for g in goals[:at] if g.side == s) for s in ("home", "away")}
         facts = {"team": club, "opponent": ctx["teams"][other(side)], "deficit_goals": worst, "trailing_score": f"{trail['home']}-{trail['away']}",
                  "stage": STAGES[stage], "score": f"{reached['home']}-{reached['away']}"}
         meanings = {"team": "team that came back", "opponent": "the other team", "deficit_goals": "largest number of goals the team trailed by",
-                    "trailing_score": "score (home-away) when the team trailed by the most", "stage": "how far the comeback went: level, ahead, or won at full time",
-                    "score": "score (home-away) when the comeback reached that stage; the final score once won"}
+                    "trailing_score": "score (home-away) when the team trailed by the most", "stage": "where the comeback stands now: level, ahead, or won at full time",
+                    "score": "score (home-away) when the team last reached that stage, and has held it since; the final score once won"}
         if club in e.view.clubs:
             hit = e.last(f"club-comeback-{club}-{worst}-{stage}", lambda f, club=club, worst=worst, stage=stage: any(
                 f.club(s) == club and f.comeback(s)[0] >= worst and f.comeback(s)[1] >= stage for s in ("home", "away")))
@@ -531,9 +533,8 @@ def comebacks(e: InsightEngine, ctx: dict) -> list[Fact]:
             else:
                 facts |= {"club_last_season": hit.season, "club_seasons_since": e.view.current_idx - hit.season_idx}
                 meanings |= {"club_last_season": f"last season {club} did it", "club_seasons_since": f"seasons since {club} last did it"}
-        rel = 1.0 if stage == 3 else e.card_value(stage_goal.event_id if stage_goal else None)
-        moment = stage_goal or (goals[-1] if goals else None)
-        tied = moment if stage < 3 else None  # a win is a full-time fact
+        rel = 1.0 if stage == 3 else e.card_value(stage_goal.event_id)
+        tied = stage_goal if stage < 3 else None  # a win is a full-time fact
         out.append(Fact(f"comeback-{side}", f"{worst}-{stage}", "rarity", facts, meanings, rel, tied.event_id if tied else None,
                         tied.minute_label if tied else None, tied.clock_s if tied else None, [g.event_id for g in goals[:at]], q))
     return out
