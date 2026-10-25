@@ -453,7 +453,8 @@ var workerEnv = [
     value: foundryReasoningEffort
   }
   {
-    name: 'WORKER_ARGS'
+    // Appended to the worker command by src/worker/Dockerfile
+    name: 'WORKER_EXTRA_ARGS'
     value: workerExtraArgs
   }
 ]
