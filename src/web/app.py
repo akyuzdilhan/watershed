@@ -1,4 +1,4 @@
-"""Watershed web app: the producer console at `/`, the public overlay at `/overlay`.
+"""Watershed web app: the console at `/` (read only for a visitor in public mode, every control for a signed-in producer), the public overlay at `/overlay`.
 
 Run locally: `DESK_DIR=data/desk PUBLIC_MODE=0 python -m web.app` (from `src/`, or with `src` on the path). In the container, gunicorn serves `web.app:server`.
 """
@@ -21,8 +21,7 @@ def route(pathname: str | None):
     if path == "/overlay":
         return overlay.layout()
     if path == "/":
-        user = security.producer()
-        return console.layout(user) if user else console.sign_in()
+        return console.layout(security.producer())
     return html.Div([html.H1("Not found"), html.A("Overlay", href="/overlay")], className="sign-in")
 
 

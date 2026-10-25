@@ -93,6 +93,23 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 
 .sign-in { max-width: 520px; margin: 80px auto; padding: 0 16px; }
 
+/* card detail: claims, Verifier checks, corrections from the feed */
+.claims { border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.claims td { padding: 1px 10px 1px 0; vertical-align: top; }
+.claim-value { color: var(--ink); font-weight: 600; text-align: right; font-size: 12px; }
+.claim-bad { color: var(--bad); }
+.checks { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; }
+.check { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+.check-fail { color: var(--bad); border-color: var(--bad); }
+.check-warn { color: var(--warn); border-color: var(--warn); }
+.correction { margin-top: 6px; color: var(--ink-2); }
+
+/* read-only view (a visitor in public mode): no decision or feedback control, whatever a panel draws */
+.read-only .actions, .read-only .edit-panel, .read-only .fb, .read-only .fb-reasons { display: none !important; }
+.read-note { display: flex; gap: 10px; align-items: center; }
+.sign-in-link { color: var(--ink-2); font-size: 12px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; }
+.sign-in-link:hover { color: var(--ink); border-color: var(--ink-2); }
+
 /* overlay: transparent page, lower-third at the bottom */
 .ov-page { position: fixed; inset: 0; background: transparent; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 body:has(.ov-page) { background: #0b0b0b; }
@@ -118,4 +135,7 @@ body:has(.ov-page) { background: #0b0b0b; }
 .ov-retraction { border-left-color: var(--bad); }
 .ov-retraction .ov-headline { color: var(--bad); }
 .ov-struck { text-decoration: line-through; color: var(--muted); }
-@media (max-width: 600px) { .ov-headline { font-size: 18px; } .ov-why { font-size: 14px; } .ov-lower { left: 16px; right: 16px; } .ov-bug { left: 16px; } }
+.ov-corrected { color: var(--warn); border-color: var(--warn); }
+.ov-second { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.ov-second-text { font-size: 16px; color: var(--ink-2); }
+@media (max-width: 600px) { .ov-headline { font-size: 18px; } .ov-why { font-size: 14px; } .ov-second-text { font-size: 13px; } .ov-lower { left: 16px; right: 16px; } .ov-bug { left: 16px; } }
