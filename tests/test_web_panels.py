@@ -8,7 +8,7 @@ import pytest
 from dash import no_update
 
 from generator import generate_match
-from web import graphics, matchfeed, panels, store
+from web import graphics, matchfeed, panels, security, store
 from web.app import app
 from worker import recap, tactics
 from worker.desk import Desk
@@ -17,6 +17,9 @@ from worker.writer import TemplateWriter
 
 MATCH = "demo-0007"
 REPLAY = Path(__file__).resolve().parents[1] / "data" / "replay" / f"{MATCH}.jsonl.gz"
+ON_INSIGHTS = {"c-match.value": MATCH, "c-view.value": "insights", "c-i-rev.data": 0}  # callback values, by "id.property"
+ON_GRAPHICS = {"c-match.value": MATCH, "c-view.value": "graphics"}
+PRODUCER = {security.PRINCIPAL_HEADER: "producer@example.com"}  # with EASY_AUTH_ENABLED: a signed-in producer; without the header, a visitor
 
 
 def texts_in(component) -> str:
@@ -80,6 +83,49 @@ def block_lang(block) -> tuple[str, bool]:
     return row[0].children, any(getattr(c, "className", "") == "badge st-mt" for c in row[1:])
 
 
+def dash_post(output: str, values: dict, changed: str, headers: dict | None = None) -> dict:
+    """POSTs to the callback with `output` ("id.property") among its outputs, as the browser does, and returns the outputs it set. `values` by "id.property", None for the others."""
+    key = next(k for k in app.callback_map if output in k.strip(".").split("..."))
+    spec = app.callback_map[key]
+    arg = lambda d: {"id": d["id"], "property": d["property"], "value": values.get(f"{d['id']}.{d['property']}")}  # noqa: E731
+    body = {"output": key, "outputs": [{"id": p.split(".")[0], "property": p.split(".", 1)[1]} for p in key.strip(".").split("...")],
+            "inputs": [arg(d) for d in spec["inputs"]], "state": [arg(d) for d in spec["state"]], "changedPropIds": [changed]}
+    response = app.server.test_client().post("/_dash-update-component", json=body, headers=headers or {})
+    assert response.status_code in (200, 204), response.get_data(as_text=True)[:400]
+    return response.get_json()["response"] if response.status_code == 200 else {}
+
+
+def components(node):
+    """Every component of a callback answer (Dash JSON), radio labels included."""
+    if isinstance(node, list):
+        for n in node:
+            yield from components(n)
+    elif isinstance(node, dict):
+        if "props" in node and "type" in node:
+            yield node
+            yield from components(node["props"].get("children"))
+        else:
+            for v in node.values():
+                yield from components(v)
+
+
+def words(node) -> str:
+    """Every string shown by a callback answer."""
+    out = []
+    for c in components(node):
+        kids = c["props"].get("children")
+        out += [str(k) for k in (kids if isinstance(kids, list) else [kids]) if isinstance(k, (str, int, float)) and not isinstance(k, bool)]
+    return " ".join(out)
+
+
+def feedback_ids(node) -> list:
+    return [c["props"]["id"] for c in components(node) if isinstance(c["props"].get("id"), dict) and c["props"]["id"].get("type") in ("fb", "fb-r", "fb-n")]
+
+
+def fact_keys(node) -> set:
+    return {c["props"]["children"] for c in components(node) if c["props"].get("className") == "fact-key"}
+
+
 # --- after the match --------------------------------------------------------------------------------
 
 def test_the_store_reads_the_recap_the_cli_writes(desk, monkeypatch):
@@ -124,16 +170,7 @@ def test_the_section_sits_in_the_insights_pane_and_comes_with_its_refresh(desk, 
     doc = write_recap(desk, monkeypatch)
     key = next(k for k in app.callback_map if "c-r-detail.children" in k)
     assert "c-i-detail.children" in key  # the insights refresh carries it: no extra request per tick
-    outputs = [{"id": part.split(".")[0], "property": part.split(".", 1)[1]} for part in key.strip(".").split("...")]
-    body = {"output": key, "outputs": outputs,
-            "inputs": [{"id": "c-i-tick", "property": "n_intervals", "value": 1}, {"id": "c-i-rev", "property": "data", "value": 0},
-                       {"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-i-list", "property": "value", "value": None},
-                       {"id": "c-view", "property": "value", "value": "insights"}],
-            "state": [{"id": "c-i-sig", "property": "data", "value": None}, {"id": "c-r-sig", "property": "data", "value": None}],
-            "changedPropIds": ["c-i-tick.n_intervals"]}
-    response = app.server.test_client().post("/_dash-update-component", json=body)
-    assert response.status_code == 200
-    answer = response.get_json()["response"]
+    answer = dash_post("c-r-detail.children", {**ON_INSIGHTS, "c-i-tick.n_intervals": 1}, "c-i-tick.n_intervals")
     en = next(t for t in doc["texts"] if t["lang"] == "en")
     assert en["recap"] in json.dumps(answer["c-r-detail"]["children"], ensure_ascii=False) and answer["c-r-sig"]["data"]
 
@@ -208,3 +245,116 @@ def test_the_line_height_figure_plots_means_and_says_so(demo_feed):
             by_slice.setdefault(tactics.bucket(r), []).append(r["home"])
     home = next(t for t in fig.data if t.name == matchfeed.team_names(demo_feed["info"])["home"])
     assert list(home.y) == [round(statistics.fmean(v), 2) for _, v in sorted(by_slice.items())]
+
+
+# --- read-only view (public mode) -------------------------------------------------------------------
+
+@pytest.fixture
+def public(desk, monkeypatch):
+    """The demo desk with its feed, in public mode with Easy Auth: a request without the sign-in header is a visitor's."""
+    desk.replay_dir = REPLAY.parent
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    monkeypatch.setenv("EASY_AUTH_ENABLED", "true")
+    return desk
+
+
+def write_docs(s: store.FileStore) -> list[dict]:
+    """The feed's tactical candidates and a league-history fact as insights on the desk, with texts and duo lines, and a storyline."""
+    feed = s.feed(MATCH)
+    teams = s.state(MATCH)["teams"]
+    rare = {"id": f"insight-{MATCH}-rare", "type": "insight", "match_id": MATCH, "key": "rare", "kind": "record", "value": 95, "minute_label": "90'",
+            "headline_facts": {"team": teams["home"], "one_in": 101, "surprisal_bits": 6.7, "history_count": 94, "history_opportunities": 9579, "history_per_season": 1.9,
+                               "history_seasons": 50, "last_season": "2019/20"},
+            "field_meanings": {"team": "the team", "one_in": "about once in this many matches", "surprisal_bits": "rarity in bits", "history_count": "times in the history",
+                               "history_opportunities": "matches in the history", "history_per_season": "times a season", "history_seasons": "seasons of history",
+                               "last_season": "last time"},
+            "rarity": {"p": 0.0099, "surprisal_bits": 6.66, "basis": "wins from two down: 94 in 9,579 matches since 1976/77"}}
+    docs = tactics.insight_candidates(feed["actions"], feed["info"], MATCH) + [rare]
+    for d in docs:
+        d["status"] = "pending"
+        d["texts"] = [{"lang": "en", "headline": f"Detail {d['key']}", "why": "Checked against the frames.", "claims": []}]
+        d["duo"] = [{"speaker": "wren", "lang": "en", "line": "Look at that!", "claims": []}, {"speaker": "joss", "lang": "en", "line": "Measured on the frame.", "claims": []}]
+    (s.root / MATCH / "insights.json").write_text(json.dumps(docs), encoding="utf-8")
+    (s.root / MATCH / "storyline.json").write_text(json.dumps({"id": f"storyline-{MATCH}", "type": "storyline", "match_id": MATCH, "status": "pending",
+                                                               "facts": {"home_rank": 4}, "field_meanings": {"home_rank": "home table position"},
+                                                               "texts": [{"lang": "en", "headline": "Fourth against sixth", "why": "A top-four duel."}]}), encoding="utf-8")
+    return docs
+
+
+def official_run(feed: dict) -> tuple[str, float]:
+    """(graphics item, official margin) of the run VAR measured on the demo."""
+    run = next(r for r in tactics.runs_behind(feed["actions"]) if r["official"])
+    return f"run:{run['event_id']}:{run['runner_id']}", run["margin_m"]
+
+
+def margins_in(fig: dict) -> list[str]:
+    """What a run figure says about the margin: the annotation named margin, the meta's margin fields, a title with metres before beyond or behind."""
+    layout = fig["layout"]
+    meta = (layout.get("meta") or {}).get("offside") or {}
+    title = layout["title"]["text"]
+    return ([a.get("text", "") for a in layout.get("annotations") or [] if a.get("name") == "margin"] + [k for k in ("margin_m", "frame_margin_m", "annotated_m") if k in meta]
+            + ([title] if " m beyond" in title or " m behind" in title else []))
+
+
+def test_a_visitor_sees_the_graphics_without_the_offside_margins(public):
+    feed = public.feed(MATCH)
+    item, margin = official_run(feed)
+    values = {**ON_GRAPHICS, "c-g-kind.value": "tactics", "c-g-item.value": item}
+    seen = {who: dash_post("c-g-figure.figure", values, "c-g-item.value", headers) for who, headers in (("visitor", {}), ("producer", PRODUCER))}
+    labels = {who: {o["value"]: o["label"] for o in out["c-g-item"]["options"]} for who, out in seen.items()}
+    runs = [v for v in labels["producer"] if v.startswith("run:")]
+    assert runs and labels["visitor"].keys() == labels["producer"].keys()  # the same items, every run listed
+    assert f"{abs(margin):.2f} m beyond the line" in labels["producer"][item]
+    for v in runs:
+        assert " m beyond" not in labels["visitor"][v] and " m inside" not in labels["visitor"][v] and labels["visitor"][v].endswith(" the line")
+    assert margins_in(seen["producer"]["c-g-figure"]["figure"]) and margins_in(seen["visitor"]["c-g-figure"]["figure"]) == []
+    visitor = seen["visitor"]["c-g-figure"]["figure"]
+    assert visitor["layout"]["meta"]["offside"]["line_x"] and "beyond the second-last defender" in visitor["layout"]["title"]["text"]  # the line and the call stay
+    shots = dash_post("c-g-figure.figure", {**ON_GRAPHICS, "c-g-kind.value": "shots"}, "c-g-kind.value")
+    assert shots["c-g-figure"]["figure"]["data"]  # every other graphic as the producer sees it
+
+
+def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypatch):
+    feed = public.feed(MATCH)
+    candidates = tactics.insight_candidates(feed["actions"], feed["info"], MATCH)
+    run_margins = [f"{d['headline_facts']['margin_m']} m" for d in candidates if d["figure"]["kind"] == "run"]
+    listed = dash_post("c-r-detail.children", {**ON_INSIGHTS, "c-i-tick.n_intervals": 1}, "c-i-tick.n_intervals")  # no insight on the desk: the feed's candidates
+    assert sum(len(props) for props in listed.values()) == 12  # every output of the callback, sent to a visitor
+    assert run_margins and not any(m in words(listed["c-i-list"]["options"]) for m in run_margins)
+    doc = write_recap(public, monkeypatch)
+    docs = write_docs(public)
+    run = next(d for d in docs if d["figure"].get("kind") == "run" and d["headline_facts"].get("margin_m"))
+    rare = docs[-1]
+    seen = {}
+    for who, headers in (("visitor", {}), ("producer", PRODUCER)):
+        for d in (run, rare):
+            seen[who, d["key"]] = dash_post("c-r-detail.children", {**ON_INSIGHTS, "c-i-list.value": d["id"]}, "c-i-list.value", headers)
+    en = next(t for t in doc["texts"] if t["lang"] == "en")
+    for key in (run["key"], rare["key"]):
+        visitor, producer = seen["visitor", key], seen["producer", key]
+        assert [visitor[b]["disabled"] for b in ("c-i-approve", "c-i-reject", "c-s-approve", "c-s-reject")] == [True] * 4
+        assert [producer[b]["disabled"] for b in ("c-i-approve", "c-i-reject", "c-s-approve", "c-s-reject")] == [False] * 4
+        assert not feedback_ids([visitor["c-i-detail"], visitor["c-s-detail"]]) and feedback_ids(producer["c-i-detail"]) and feedback_ids(producer["c-s-detail"])
+        assert "Fourth against sixth" in words(visitor["c-s-detail"]) and "Measured on the frame." in words(visitor["c-i-detail"])
+        assert "Rarity:" in words(producer["c-i-detail"]) and "Rarity:" not in words(visitor["c-i-detail"])
+        assert en["recap"] in words(visitor["c-r-detail"])  # After the match, for every visitor
+    hidden = set(rare["headline_facts"]) & panels.PRODUCER_ONLY_FACTS
+    assert hidden and fact_keys(seen["producer", rare["key"]]["c-i-detail"]) == set(rare["headline_facts"])
+    assert fact_keys(seen["visitor", rare["key"]]["c-i-detail"]) == set(rare["headline_facts"]) - hidden
+    assert panels.PRODUCER_ONLY_NOTE in words(seen["visitor", rare["key"]]["c-i-detail"]) and panels.PRODUCER_ONLY_NOTE not in words(seen["producer", rare["key"]]["c-i-detail"])
+    assert "margin_m" in fact_keys(seen["producer", run["key"]]["c-i-detail"]) and "margin_m" not in fact_keys(seen["visitor", run["key"]]["c-i-detail"])
+    assert margins_in(seen["producer", run["key"]]["c-i-figure"]["figure"]) and margins_in(seen["visitor", run["key"]]["c-i-figure"]["figure"]) == []
+
+
+def test_a_visitor_cannot_approve_or_reject_an_insight_or_the_storyline(public):
+    docs = write_docs(public)
+    folder = public.root / MATCH
+    before = {name: (folder / name).read_bytes() for name in ("insights.json", "storyline.json", "audit.jsonl")}
+    values = {"c-match.value": MATCH, "c-i-list.value": docs[0]["id"], "c-i-rev.data": 0}
+    for button in ("c-i-approve", "c-i-reject", "c-s-approve", "c-s-reject"):
+        out = dash_post("c-i-message.children", {**values, f"{button}.n_clicks": 1}, f"{button}.n_clicks")
+        assert "Sign in to approve or reject" in words(out["c-i-message"]) and "c-i-rev" not in out
+    assert {name: (folder / name).read_bytes() for name in before} == before  # nothing written
+    out = dash_post("c-i-message.children", {**values, "c-i-approve.n_clicks": 1}, "c-i-approve.n_clicks", PRODUCER)
+    assert f"On air, by {PRODUCER[security.PRINCIPAL_HEADER]}" in words(out["c-i-message"]) and out["c-i-rev"]["data"] == 1
+    assert {d["id"]: d for d in public.insights(MATCH)}[docs[0]["id"]]["status"] == "approved"

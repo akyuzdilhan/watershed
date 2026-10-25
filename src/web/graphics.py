@@ -383,9 +383,11 @@ def line_break_figure(feed: dict, event_id: str, theme="dark", width: int | None
     return fig
 
 
-def run_figure(feed: dict, event_id: str, runner_id: str | None = None, theme="dark", zoom: float | None = None, width: int | None = 900) -> go.Figure:
+def run_figure(feed: dict, event_id: str, runner_id: str | None = None, theme="dark", zoom: float | None = None, width: int | None = 900, show_margin: bool = True) -> go.Figure:
+    """`pitch.offside_figure` of the pass with the runner; `show_margin=False` leaves the margin out (anyone but the producer)."""
     teams = team_names(feed.get("info"))
-    return pitch.offside_figure(_action(feed, event_id), True, teams["home"], teams["away"], theme, runner_id=runner_id, zoom=zoom, names=player_names(feed.get("info")), width=width)
+    return pitch.offside_figure(_action(feed, event_id), True, teams["home"], teams["away"], theme, runner_id=runner_id, zoom=zoom, names=player_names(feed.get("info")), width=width,
+                                show_margin=show_margin)
 
 
 def space_figure(feed: dict, event_id: str, theme="dark", width: int | None = 900) -> go.Figure:
@@ -441,15 +443,15 @@ def pressing_figure(feed: dict, theme="dark", minutes: int = 5, width: int | Non
                        f"mean number of a team's players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, open play, per {minutes} minutes", "players", theme, minutes, width)
 
 
-def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 900) -> go.Figure | None:
-    """The figure an insight document names in `figure` (`kind` line_break, run, space, line_height, pressing, buildup); None when it names none or the feed lacks the action."""
+def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 900, show_margin: bool = True) -> go.Figure | None:
+    """The figure an insight document names in `figure` (`kind` line_break, run, space, line_height, pressing, buildup); None when it names none or the feed lacks the action. `show_margin=False` draws a run without its offside margin."""
     ref = insight.get("figure") or {}
     kind = ref.get("kind")
     try:
         if kind == "line_break":
             return line_break_figure(feed, ref["event_id"], theme, width)
         if kind == "run":
-            return run_figure(feed, ref["event_id"], ref.get("runner_id"), theme, width=width)
+            return run_figure(feed, ref["event_id"], ref.get("runner_id"), theme, width=width, show_margin=show_margin)
         if kind == "space":
             return space_figure(feed, ref["event_id"], theme, width)
         if kind == "line_height":

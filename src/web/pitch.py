@@ -4,7 +4,7 @@ Every action of the feed carries a 360-style freeze frame: the players on the pi
 
 - `pitch_figure`: an empty pitch, dark or light, with a fixed 1:1 aspect ratio.
 - `frame_figure`: the players of one action, the ball at the start of the action and an arrow to its end.
-- `offside_figure`: the frame of a pass with the offside line at the second-last defender (goalkeeper included) and the runner's margin.
+- `offside_figure`: the frame of a pass with the offside line at the second-last defender (goalkeeper included) and the runner's margin (left out with `show_margin=False`: the margin is for the producer, never on air or for a visitor).
 - `sequence_frames` and `sequence_figure`: the build-up of a moment as plotly animation frames.
 
 This module only depends on plotly, so it runs in the web container, which does not ship the generator.
@@ -231,11 +231,14 @@ def offside_geometry(pass_action: dict, runner_id: str | None = None) -> dict:
     }
 
 
+MARGIN_KEYS = ("margin_m", "frame_margin_m")  # what `show_margin=False` leaves out of the figure's meta
+
+
 def offside_figure(pass_action: dict, defending_line: bool = True, home_name: str = "Home", away_name: str = "Away", theme: str | dict = "dark",
-                   runner_id: str | None = None, zoom: float | None = None, names: dict | None = None, width: int | None = 900) -> go.Figure:
+                   runner_id: str | None = None, zoom: float | None = None, names: dict | None = None, width: int | None = 900, show_margin: bool = True) -> go.Figure:
     """The frame of a pass, drawn in the passing team's frame, with the runner's margin over the offside line annotated in metres.
 
-    `defending_line` draws the offside line across the pitch through the second-last defender, who is ringed. `zoom` is the half-length in metres of a window centred on the runner and the second-last defender (None: the whole pitch).
+    `defending_line` draws the offside line across the pitch through the second-last defender, who is ringed. `zoom` is the half-length in metres of a window centred on the runner and the second-last defender (None: the whole pitch). `show_margin=False` draws no margin (no bracket, no metres in the annotation, the title or the meta), for anyone but the producer: the line, the runner and the defender stay.
     """
     t = _theme(theme)
     g = offside_geometry(pass_action, runner_id)
@@ -260,24 +263,27 @@ def offside_figure(pass_action: dict, defending_line: bool = True, home_name: st
         if g["defender_id"]:
             fig.add_trace(go.Scatter(x=[g["line_x"]], y=[g["defender_y"]], name="second-last defender", mode="markers", hoverinfo="skip",
                                      marker={"size": 30 * scale, "color": "rgba(0,0,0,0)", "line": {"color": t["offside"], "width": 2, "dash": "dot"}}))
-    # the margin: a bracket from the line to the runner, beside him on the side away from the pass
-    sx, sy, ex, ey = (pass_action[k] for k in ("start_x", "start_y", "end_x", "end_y"))
-    path_y = sy + (ey - sy) * (g["runner_x"] - sx) / (ex - sx) if abs(ex - sx) > 0.5 else sy
-    toward = 1 if g["runner_y"] >= path_y else -1
-    by = min(max(g["runner_y"] + toward * 1.4, -PAD + 1), WIDTH + PAD - 1)
-    tick = 0.6
-    for x0, y0, x1, y1 in ((g["line_x"], by, g["runner_x"], by), (g["line_x"], by - tick, g["line_x"], by + tick), (g["runner_x"], by - tick, g["runner_x"], by + tick)):
-        fig.add_shape(type="line", x0=x0, y0=y0, x1=x1, y1=y1, line={"color": t["offside"], "width": 2})
-    margin_text = f"{g['margin_m']:.2f} m"
-    fig.add_annotation(x=max(g["line_x"], g["runner_x"]), y=by, text=f"<b>{margin_text}</b>", showarrow=True, arrowhead=0, arrowcolor=t["offside"],
-                       ax=34, ay=-30 * toward, font={"color": t["offside"], "size": 16}, name="margin")
+    meta = {k: v for k, v in g.items() if k not in MARGIN_KEYS}
+    if show_margin:
+        # the margin: a bracket from the line to the runner, beside him on the side away from the pass
+        sx, sy, ex, ey = (pass_action[k] for k in ("start_x", "start_y", "end_x", "end_y"))
+        path_y = sy + (ey - sy) * (g["runner_x"] - sx) / (ex - sx) if abs(ex - sx) > 0.5 else sy
+        toward = 1 if g["runner_y"] >= path_y else -1
+        by = min(max(g["runner_y"] + toward * 1.4, -PAD + 1), WIDTH + PAD - 1)
+        tick = 0.6
+        for x0, y0, x1, y1 in ((g["line_x"], by, g["runner_x"], by), (g["line_x"], by - tick, g["line_x"], by + tick), (g["runner_x"], by - tick, g["runner_x"], by + tick)):
+            fig.add_shape(type="line", x0=x0, y0=y0, x1=x1, y1=y1, line={"color": t["offside"], "width": 2})
+        margin_text = f"{g['margin_m']:.2f} m"
+        fig.add_annotation(x=max(g["line_x"], g["runner_x"]), y=by, text=f"<b>{margin_text}</b>", showarrow=True, arrowhead=0, arrowcolor=t["offside"],
+                           ax=34, ay=-30 * toward, font={"color": t["offside"], "size": 16}, name="margin")
+        meta = {**g, "annotated_m": float(margin_text.split()[0])}
     defender = f" ({team_name[other]} #{shirt(g['defender_id'])})" if g["defender_id"] else ""
     beyond = "beyond" if g["margin_m"] > 0 else "behind"
-    sub = f"{team_name[side]} #{shirt(g['runner_id'])} {abs(g['margin_m']):.2f} m {beyond} the second-last defender{defender}"
+    sub = f"{team_name[side]} #{shirt(g['runner_id'])} " + (f"{abs(g['margin_m']):.2f} m " if show_margin else "") + f"{beyond} the second-last defender{defender}"
     s = pass_action.get("score", {"home": 0, "away": 0})
     fig.update_layout(
         title_text=f"<b>{pass_action.get('minute_label', '')}  {home_name} {s['home']}-{s['away']} {away_name}</b><br><span style='font-size:13px'>{sub}</span>",
-        meta={"offside": {**g, "annotated_m": float(margin_text.split()[0])}},
+        meta={"offside": meta},
     )
     return fig
 
