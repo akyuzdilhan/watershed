@@ -16,7 +16,7 @@ from web.store import get_store
 from worker import feedback as FB
 from worker import tactics as T
 
-PANEL_REFRESH_MS = 5000  # the desk ticks every 1.5 s (about 80 requests a minute); the visible panel adds 12, under the 120 per minute rate limit
+PANEL_REFRESH_MS = 5000  # per IP: the desk ticks every 1.5 s (two callbacks, about 80 requests a minute), the visible panel adds 12 and an overlay open on the same machine 60 (it ticks every second): about 152 a minute, under the default RATE_LIMIT_PER_MIN of 600
 THEME = dict(pitch.THEMES["dark"], paper="#1a1a19")
 KINDS = [
     {"value": "shots", "label": "Shot map"},

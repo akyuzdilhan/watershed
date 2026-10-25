@@ -46,7 +46,7 @@ The console (`/`) has a view switch in its header: Desk (unchanged), Match graph
 
 Where the feed comes from: locally `<DESK_DIR>/<match>/feed.jsonl[.gz]`, else `<REPLAY_DIR>/<match>.jsonl[.gz]` (`REPLAY_DIR` defaults to `data/replay`); in Azure the `events` container, read incrementally by `_ts`. While the match state is not final, the feed is cut at its `last_seq`, so a replay file does not show what the desk has not reached yet. The feed is cached 5 s per process.
 
-Rate limit: the desk already ticks every 1.5 s (about 80 requests a minute for two callbacks). The graphics and insights panels refresh every 5 s with their own timers, enabled only while their view is shown. Before that change, four callbacks on the shared tick went past the 120 per minute limit and the console got 429s.
+Rate limit, counted per IP: the desk ticks every 1.5 s (about 80 requests a minute for two callbacks). The graphics and insights panels refresh every 5 s with their own timers, enabled only while their view is shown: 12 a minute, the After the match section included (same request as the insights). The overlay ticks every second, 60 a minute, on the same IP when it runs on the producer's machine (as for the video). Together about 152 a minute, under the default `RATE_LIMIT_PER_MIN` of 600; the former 120 was passed as soon as the overlay was open next to the console. Before the panels had their own timers, four callbacks on the shared tick went past 120 and the console got 429s.
 
 ## How to view
 
