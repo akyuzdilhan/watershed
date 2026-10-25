@@ -4,6 +4,10 @@ Statuses: `pending` (written and checked, waiting for a producer), `approved` (o
 
 Each card carries its commentary duo (`duo`), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason, minute, offside margin in centimetres from the card's `var_decision`) and what the duo says about it (`duo_ruling`). A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
+Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards).
+
+Cost guard: at most `max_calls_per_match` model calls per match (40), shared by every draft the desk sends to a model: a card costs one call, two when the Verifier sends it back; a rewrite is a new draft. Once the budget is spent, the templates write. Templates cost nothing.
+
 The producers can also judge every sentence (`feedback`: thumbs up or down, reasons, a note). The desk stores it, audits it, and reads the producer profile built from it (`worker.feedback`) before each draft: the Writer prompt gets the control room's preferences, the template writer picks the variants they turned down last.
 """
 
@@ -19,11 +23,12 @@ ACTION_FIELDS = ("event_id", "message_id", "minute_label", "cause")  # what the 
 
 class Desk:
     def __init__(self, sink, writer=None, auto_approve: bool = False, languages: tuple[str, ...] = LANGUAGES, max_calls_per_match: int = 40,
-                 profile=None) -> None:
+                 profile=None, insight_writer=None) -> None:
         self.sink = sink
-        self.max_calls_per_match = max_calls_per_match  # cost guard: beyond it, cards use the template
+        self.max_calls_per_match = max_calls_per_match  # cost guard: beyond it, the templates write
         self.calls: dict[str, int] = {}
         self.writer = writer or TemplateWriter()
+        self.insight_writer = insight_writer  # insights and the storyline; None: the card writer
         self.auto_approve = auto_approve
         self.languages = list(languages)
         self.loop = asyncio.new_event_loop()
@@ -84,9 +89,9 @@ class Desk:
         return self._stage(card, d, self.sink.card)
 
     def write_insight(self, doc: dict, teams: dict[str, str]) -> dict:
-        """Writes an insight (or the storyline) through the same Writer, Verifier, retry and template path as a card, with the same statuses and audit."""
+        """Writes an insight (or the storyline) with the insight writer (the card writer when there is none), through the same Verifier, retry and template path as a card, with the same statuses and audit."""
         doc.setdefault("version", 1)
-        d = self.loop.run_until_complete(draft_insight(doc, teams, self.writer, self.languages, calls_left=self._calls_left(doc["match_id"]),
+        d = self.loop.run_until_complete(draft_insight(doc, teams, self.insight_writer or self.writer, self.languages, calls_left=self._calls_left(doc["match_id"]),
                                                        memory=self.memory(doc["match_id"]), duo=True, **self._preferences(doc)))
         self.calls[doc["match_id"]] = self.calls.get(doc["match_id"], 0) + d.attempts
         return self._stage(doc, d, getattr(self.sink, "insight", None) or self.sink.card)

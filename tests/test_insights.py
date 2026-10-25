@@ -331,6 +331,46 @@ def test_every_step_of_a_fact_is_audited_once(demo, history):
     assert {"scorer-home-20-3", "comeback-home-2-2", "ht-lead-lost-away-1"} <= taken_back  # the three facts that counted the 63' goal, on air when VAR ruled it out
 
 
+# --- who writes the facts, and the call budget --------------------------------------------------------------
+
+class CountingWriter:
+    """Stands in for the model: replies with the template texts, and records what it is asked to write."""
+
+    name = "counting-model"
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def write_async(self, doc, facts, languages, note=None, avoid=None, duo=False, preferences=None):
+        from worker.writer import TemplateWriter
+
+        self.asked.append(doc.get("type", "card"))
+        if doc.get("type") in ("insight", "storyline"):
+            return TemplateWriter().write_insight(doc, facts[0], languages, duo=duo)
+        return TemplateWriter().write(doc, facts[0], languages, duo=duo)
+
+
+def test_live_the_model_writes_the_cards_the_templates_write_the_facts(demo, history):
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    sink, model = MemorySink(), CountingWriter()
+    desk = Desk(sink, model, auto_approve=True, insight_writer=TemplateWriter())
+    pipeline = run(demo[0], history, sink=sink, desk=desk)
+    written = [d for d in pipeline.insights("demo-0007") if "texts" in d]
+    assert written and all(d["writer"] == "template" for d in written)
+    assert set(model.asked) == {"card"} and 12 <= len(model.asked) <= 24  # 11 cards and a rewrite, a retry at most each
+    assert desk.calls["demo-0007"] == len(model.asked) <= desk.max_calls_per_match == 40
+
+
+def test_the_facts_go_to_the_model_only_when_asked(demo, history):
+    from worker.desk import Desk
+
+    sink, model = MemorySink(), CountingWriter()
+    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
+    assert "insight" in model.asked and len(model.asked) <= 40
+
+
 def test_without_history_the_pipeline_is_unchanged(demo):
     pipeline = Pipeline()
     for m in demo[0]:

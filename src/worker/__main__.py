@@ -6,6 +6,8 @@ Usage:
     python -m worker --live --cosmos --forever                                                # keep listening for new matches (container)
     python -m worker data/replay/demo-0007.jsonl.gz --history data/history/1                  # with the insight engine, against the league history
 Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment).
+
+With a writer, the desk writes the cards and their duo with it, and the insights and the storyline with the templates (unless --insights-writer writer). Every model call of a match comes out of one budget of 40 (worker.desk).
 """
 
 import argparse
@@ -41,6 +43,8 @@ def main() -> None:
     parser.add_argument("--cosmos", action="store_true", help="write events, cards and the audit trail to Cosmos DB")
     parser.add_argument("--desk-dir", type=Path, help="write cards, match state and audit as JSON files here (what the console reads without Cosmos DB)")
     parser.add_argument("--writer", choices=("none", "template", "foundry"), default="none", help="write the cards: fixed templates, or the Writer agent on Foundry")
+    parser.add_argument("--insights-writer", choices=("template", "writer"), default="template",
+                        help="who writes the insights and the storyline: the templates (default: the model only writes the cards), or the --writer")
     parser.add_argument("--auto-approve", action="store_true", help="put every written card on air without a producer (judging mode)")
     parser.add_argument("--threshold", type=float, default=0.08, help="minimum value of a chance that is not a goal, as a share of the result probabilities")
     parser.add_argument("--forever", action="store_true", help="with --live: keep waiting for new sessions instead of stopping when the subscription is idle")
@@ -71,7 +75,8 @@ def main() -> None:
 
         if args.writer == "foundry":
             service_bus_settings()  # loads .env (Foundry endpoint and model)
-        desk = Desk(sink, FoundryWriter() if args.writer == "foundry" else TemplateWriter(), auto_approve=args.auto_approve)
+        desk = Desk(sink, FoundryWriter() if args.writer == "foundry" else TemplateWriter(), auto_approve=args.auto_approve,
+                    insight_writer=TemplateWriter() if args.insights_writer == "template" else None)
     history = load_history(args.history) if args.history else None
     storyline_for = None
     if args.league_seed is not None:
