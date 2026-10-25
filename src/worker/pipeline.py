@@ -280,8 +280,9 @@ class Pipeline:
     _history_view: object | None = None
     storyline_for: object | None = None  # callable(match_id, teams) -> storyline document, built once when the match information arrives
     storylines: dict[str, dict] = field(default_factory=dict)
-    recap: bool = True  # with a desk: the post-match recap at the final whistle, written again if the feed changes a card after it
+    recap: bool = True  # with a desk: the post-match recap at the final whistle, written again if the feed changes a card after it, or if a flush finds a producer decision made since
     recaps: dict[str, dict] = field(default_factory=dict)
+    _recapped: dict[str, tuple] = field(default_factory=dict)  # per match: (card id, status, version) of each card the last recap was written from
     _tables: dict[str, list] = field(default_factory=dict)  # per match: (event id, table if the score holds) of each goal given a season context
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
@@ -292,9 +293,12 @@ class Pipeline:
         return self._process(match, ready)
 
     def flush(self) -> list[dict]:
+        """Processes what the reorder buffers still hold. A finished match gets its recap written again when a producer decided on one of its cards since the last one (the listener flushes when a session goes quiet)."""
         out = []
         for match in self.matches.values():
             out += self._process(match, match.flush())
+            if self.recap and match.full_time_seq is not None and match.match_id in self.spotters:
+                self._recap(match, self.spotters[match.match_id], self.timelines.get(match.match_id, []), only_if_changed=True)
         return out
 
     def _process(self, match: Match, ready: list[dict]) -> list[dict]:
@@ -336,17 +340,21 @@ class Pipeline:
                 self._recap(match, spotter, timeline)
         return out
 
-    def _recap(self, match: Match, spotter: Spotter, timeline: list[dict]) -> None:
-        """At the final whistle (and after a card action that comes later): the post-match recap, by the desk, from the cards with the producer's decisions read back from the store."""
+    def _recap(self, match: Match, spotter: Spotter, timeline: list[dict], only_if_changed: bool = False) -> None:
+        """The post-match recap, by the desk, from the cards with the producer's decisions read back from the store: at the final whistle, after a card action that comes later, and on a flush when a card's status or version changed since the last recap (`only_if_changed`)."""
         write = getattr(self.desk, "write_recap", None)
         if write is None:
             return
         cards = list(spotter.cards.values())
-        for card in cards:
-            self._refresh(card)
         try:
+            for card in cards:
+                self._refresh(card)
+            seen = tuple(sorted((c["id"], c.get("status"), c.get("version", 1)) for c in cards))
+            if only_if_changed and self._recapped.get(match.match_id) == seen:
+                return
             self.recaps[match.match_id] = write(cards, match_state(match, spotter, timeline), self.storylines.get(match.match_id))
-        except Exception as error:  # the final whistle is processed even if its recap fails
+            self._recapped[match.match_id] = seen
+        except Exception as error:  # the final whistle is processed, and the flush goes on, even if the recap fails
             log.warning("recap of %s failed: %s: %s", match.match_id, type(error).__name__, str(error)[:300])
 
     def _insights(self, match: Match, spotter: Spotter, m: dict, teams: dict[str, str]) -> None:

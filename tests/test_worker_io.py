@@ -635,6 +635,36 @@ def test_a_card_action_after_the_final_whistle_writes_the_recap_again(demo):
     assert recap["verification"]["verified"]
 
 
+def test_approvals_after_the_whistle_reach_the_recap_on_the_next_flush(demo):
+    """Without auto-approve the cards wait for a producer, and the recap at the whistle cites none. The goals approved in the console after it are in the recap the next flush writes (the listener flushes when the session goes quiet); a flush with no new decision writes nothing."""
+
+    class CountingDesk(Desk):
+        written = 0
+
+        def write_recap(self, cards, state, storyline=None):
+            self.written += 1
+            return super().write_recap(cards, state, storyline)
+
+    stream, _ = demo
+    sink = MemorySink()
+    desk = CountingDesk(sink, TemplateWriter())
+    pipeline = Pipeline(sink=sink, desk=desk)
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    assert desk.written == 1 and pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"] == []
+    goals = [json.loads(json.dumps(c)) for c in sink.cards.values() if c["moment"] == "goal" and c["status"] == "pending"]
+    console = Desk(sink)  # the console's desk, on the same store
+    for card in goals:
+        console.approve(card, "producer")
+    pipeline.flush()
+    recap = pipeline.recaps["demo-0007"]
+    assert desk.written == 2 and sink.recaps["demo-0007"] == recap
+    assert sorted(recap["analysis"]["cards_on_air"]) == sorted(c["id"] for c in goals) and recap["analysis"]["goals_consistent"]
+    pipeline.flush()
+    assert desk.written == 2
+
+
 def test_approvals_the_console_writes_survive_the_next_cards(demo, tmp_path):
     """Locally the console writes each approval into cards.json while the match goes on (here every card once, as soon as it is written): the worker's later writes keep them, and the recap counts them."""
     stream, _ = demo

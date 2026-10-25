@@ -59,7 +59,7 @@ With a desk, the pipeline asks the desk for the post-match recap once it has pro
 | `CosmosSink` | container `cards`, `type: "recap"`, id `recap-<match_id>`, as `python -m worker.recap --cosmos` writes it |
 | `ThreadedSink` | the ordered lane, after the cards |
 
-`--no-recap` turns it off. A recap that fails is logged (`recap of <match> failed`) and the final whistle is processed anyway: losing it would not be worth dead-lettering the `full_time` message. Approvals made after the whistle are not in the recap until `python -m worker.recap` runs again.
+`--no-recap` turns it off. A recap that fails is logged (`recap of <match> failed`) and the final whistle is processed anyway: losing it would not be worth dead-lettering the `full_time` message. Each `Pipeline.flush` reads the cards of a finished match back again and writes the recap again when a card's status or version changed since the last one (a failed recap is tried again there too). The listener flushes when a session goes quiet (`--idle`, 30 s after the final whistle), so goals a producer approves in that time are in the recap (test `test_approvals_after_the_whistle_reach_the_recap_on_the_next_flush`); later approvals need `python -m worker.recap`.
 
 ## Model calls per match
 
