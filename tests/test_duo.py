@@ -527,6 +527,17 @@ def test_insight_texts_and_lines_keep_league_wide_rates_off_air():
                 assert not {v for v, _ in numbers_in(text)} & OFF_AIR_VALUES, (out["id"], text)
 
 
+def test_a_feat_seen_every_season_keeps_its_count_in_the_history_off_air():
+    from worker.writer import on_air
+
+    docs = match_insights()
+    brace, hat_trick = docs[0]["headline_facts"], docs[2]["headline_facts"]
+    assert not {"history_count", "history_rank"} & set(on_air(brace, {})[0])  # 150 braces off the bench before: "the 151st" is a league-wide count
+    assert {"history_count", "history_rank"} <= set(on_air(hat_trick, {})[0])  # "only the 6th in 50 seasons" tells a rare feat
+    no_rate = {k: v for k, v in brace.items() if k != "history_per_season"}
+    assert not {"history_count", "history_rank"} & set(on_air(no_rate, {})[0])  # a store that left the rate out: the count and the seasons say it
+
+
 def test_no_insight_line_is_said_twice_in_a_match():
     desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
     outs = [desk.write_insight(doc, TEAMS) for doc in match_insights()]

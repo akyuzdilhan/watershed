@@ -205,8 +205,11 @@ OFF_AIR_FIELDS = ("one_in", "surprisal_bits", "history_opportunities", "history_
 
 
 def on_air(facts: dict, meanings: dict) -> tuple[dict, dict]:
-    """The facts the Writer may write from: an insight's facts without the league-wide rates, match counts, ratios, bits and desk values, and without league table points."""
-    kept = {k: v for k, v in facts.items() if k not in OFF_AIR_FIELDS and not league_points_field(k)}
+    """The facts the Writer may write from: an insight's facts without the league-wide rates, match counts, ratios, bits and desk values, and without league table points. For a feat the league sees every season, its count and rank in the history go too: "the 151st brace by a substitute" is a league-wide count, while "only the 6th in 50 seasons" tells a rare feat."""
+    from worker.insight_texts import often
+
+    off = OFF_AIR_FIELDS + (("history_count", "history_rank") if often(facts) else ())
+    kept = {k: v for k, v in facts.items() if k not in off and not league_points_field(k)}
     return kept, {k: v for k, v in meanings.items() if k in kept}
 
 

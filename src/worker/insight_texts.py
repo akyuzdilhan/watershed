@@ -335,8 +335,11 @@ def values(facts: dict, lang: str) -> tuple[dict, dict]:
 
 
 def often(facts: dict) -> bool:
-    """A feat the league sees at least once a season on average: told for who did it, never with the rate."""
-    return isinstance(facts.get("history_per_season"), (int, float)) and not isinstance(facts.get("history_per_season"), bool)
+    """A feat the league sees at least once a season on average: told for who did it, never with the rate, and its count in the history stays with the producer (`writer.on_air`). Read from `history_per_season`, or from the count and the seasons when a store left the rate out."""
+    per, count, seasons = facts.get("history_per_season"), facts.get("history_count"), facts.get("history_seasons")
+    if isinstance(per, (int, float)) and not isinstance(per, bool):
+        return True
+    return isinstance(count, int) and not isinstance(count, bool) and isinstance(seasons, int) and 0 < seasons <= count
 
 
 def usable(template: str, facts: dict) -> bool:
