@@ -71,3 +71,4 @@ Standalone HTML of any figure: `graphics.shot_map(matchfeed.build(matchfeed.load
 - Insight `value` weights are hand-set; `rarity` is within the match, not against a history.
 - In Cosmos the first read of a match's events reads every message (about 1,800 for a match, frames included); later reads are incremental.
 - Not checked in a deployed container; the web image already ships `src/` (it needs `worker/tactics.py`).
+- The read-only view is tested through real `_dash-update-component` POSTs; the clientside copy of the match picker is tested in node (`SAME_MATCH`) and in the callback graph, not in a browser.
