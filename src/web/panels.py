@@ -183,7 +183,7 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
 
 
 NOTES = {
-    "shots": "Marker size is the xG of the shot. Purple crosses are goals VAR ruled out.",
+    "shots": "Marker size is the xG of the shot. Purple crosses are goals VAR ruled out: drawn, but left out of the goals, shots and xG above the pitch.",
     "momentum": "Threat added: value of where completed passes and carries ended minus where they started (value = xG of a shot from there). Win probability from the desk's match state.",
     "buildups": "The possession behind the goal or chance (last 10 actions). Arrow width: threat added; the shot arrow: xG.",
     "setpieces": "Delivery width: value of the landing point. Play the animation: delivery, first contact, what followed.",

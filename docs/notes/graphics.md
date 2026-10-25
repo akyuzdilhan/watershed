@@ -6,11 +6,11 @@ Everything here is computed from the feed's actions and their 360 freeze frames,
 
 | Function | What it shows |
 |---|---|
-| `shot_map` | Every shot on one pitch, home attacking right. Marker area grows with xG (size = 8 + 34 √xG px). Outcome by colour and shape: goal (yellow, filled), goal ruled out by VAR (purple cross), saved, post, blocked, off target. Header per team: goals, shots, xG. |
+| `shot_map` | Every shot on one pitch, home attacking right. Marker area grows with xG (size = 8 + 34 √xG px). Outcome by colour and shape: goal (yellow, filled), goal ruled out by VAR (purple cross), saved, post, blocked, off target. Header per team: goals, shots, xG, without the shots VAR ruled out (still drawn as purple crosses), as in the insight facts: on the demo Rovers have 13 shots for 1.28 xG (the xG fact says 1.3), not 14 for 1.54. |
 | `buildup_figure` | The possession behind a goal or a big chance (xG ≥ 0.2), last 10 actions, as arrows over the players at the final action. Arrow width = threat added by the action (1.5 px for none, up to 12 px); the shot arrow's width is its xG, its colour its outcome. |
 | `set_piece_figure` | A corner or free kick animated in up to three steps: the frame at the delivery, the frame at the first contact, then what the contact did. The delivery arrow's width is the value of where it landed; a contact won by the attackers is sized by its threat added, a defensive contact is thin and grey. |
 | `set_pieces_map` | Every corner and crossed free kick of a team: arrow width by the value of the landing point, team colour when the attackers won the first contact, grey when they lost it. |
-| `momentum_figure` | Threat added per 5 minutes per team as mirrored bars (home up, away down), goals labelled (x for ruled out), and the desk's win-probability curve in a second panel with its own axis. The second half starts after the first half's added time. |
+| `momentum_figure` | Threat added per 5 minutes per team as mirrored bars (home up, away down), goals labelled (x for ruled out), and the desk's win-probability curve in a second panel with its own axis. The second half starts after the first half's added time. The shots xG in the hover leaves out the shots VAR ruled out. |
 | `shot_on_goal_figure` | A penalty or a direct free kick seen from behind the taker: where the ball crossed the goal line (`end_y`, `end_z`) and where the keeper stood in the frame. |
 | `line_break_figure`, `run_figure`, `space_figure`, `line_height_figure`, `pressing_figure` | The tactical details below. `run_figure` reuses `pitch.offside_figure` with the runner. |
 | `insight_figure(insight, feed)` | The figure an insight names in its `figure` field. |

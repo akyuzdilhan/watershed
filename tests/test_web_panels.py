@@ -1,18 +1,21 @@
 import json
+import math
 import sys
+from pathlib import Path
 
 import pytest
 from dash import no_update
 
 from generator import generate_match
-from web import panels, store
+from web import graphics, matchfeed, panels, store
 from web.app import app
-from worker import recap
+from worker import recap, tactics
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, Pipeline
 from worker.writer import TemplateWriter
 
 MATCH = "demo-0007"
+REPLAY = Path(__file__).resolve().parents[1] / "data" / "replay" / f"{MATCH}.jsonl.gz"
 
 
 def texts_in(component) -> str:
@@ -158,3 +161,29 @@ def test_the_cosmos_store_reads_the_recap_by_its_id():
     assert s.recap(MATCH) == doc and s.recap("demo-0008") is None
     assert s.state(MATCH)["final"] is True and s.storyline(MATCH) is None
     assert "Full time." in texts_in(panels.after_the_match(MATCH, "insights", None, s)[0])
+
+
+# --- match graphics ---------------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def demo_feed():
+    return matchfeed.build(matchfeed.load(REPLAY))
+
+
+def test_the_shot_map_totals_leave_out_the_shots_var_ruled_out(demo_feed):
+    shots = graphics.shots(demo_feed)
+    ruled_out = [a for a in shots if a.get("voided")]
+    assert {a["team"] for a in ruled_out} == {"home", "away"}  # one goal ruled out each on the demo
+    fig = graphics.shot_map(demo_feed)
+    teams = matchfeed.team_names(demo_feed["info"])
+    header = {a.text.split("</b>")[0].removeprefix("<b>"): a.text for a in fig.layout.annotations}
+    for side in ("home", "away"):
+        counted = [a for a in shots if a["team"] == side and not a.get("voided")]
+        goals = sum(tactics.counted_goal(a) for a in counted)
+        assert header[teams[side]].endswith(f" {goals} goals, {len(counted)} shots, xG {sum(a['shot']['xg'] for a in counted):.2f}"), side
+    label, color, symbol, _ = graphics.OUTCOMES["voided"]
+    crosses = next(t for t in fig.data if t.name == label)
+    assert sorted(crosses.ids) == sorted(a["event_id"] for a in ruled_out) and crosses.marker.symbol == symbol and crosses.marker.color == color  # still drawn
+    series = graphics.momentum_series(demo_feed)
+    for side in ("home", "away"):
+        assert math.isclose(sum(p["xg"] for p in series[side]), sum(a["shot"]["xg"] for a in shots if a["team"] == side and not a.get("voided")), abs_tol=0.01)
