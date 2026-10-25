@@ -8,6 +8,7 @@ import re
 import pytest
 
 from generator import generate_match
+from worker import insight_texts
 from worker.desk import Desk
 from worker.duo import CONDITIONS, EYE, HEART, LINES, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, fill, persona_brief
 from worker.pipeline import MemorySink, Pipeline
@@ -515,6 +516,52 @@ def test_insight_texts_and_lines_keep_league_wide_rates_off_air():
                 assert not {v for v, _ in numbers_in(text)} & OFF_AIR_VALUES, (out["id"], text)
 
 
+def test_no_insight_line_is_said_twice_in_a_match():
+    desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
+    outs = [desk.write_insight(doc, TEAMS) for doc in match_insights()]
+    for lang in LANGS:
+        lines = [PhraseMemory.key(l["line"]) for o in outs for l in o["duo"] if l["lang"] == lang]
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+    hearts = [l["line"] for o in outs if o["key"].startswith("comeback") for l in o["duo"] if l["lang"] == "en" and l["speaker"] == HEART]
+    assert len(hearts) == 3 and len(set(hearts)) == 3  # one line of its own at each stage
+
+
+def test_comeback_lines_are_their_own_at_each_stage():
+    for lang in LANGS:
+        for part in ("heart", "eye"):
+            stages = [set(insight_texts.T["comeback"][lang][part][s]) for s in ("level", "ahead", "won")]
+            assert all(not a & b for i, a in enumerate(stages) for b in stages[i + 1:]), (lang, part)
+
+
+def every_stage() -> list[tuple[str, dict]]:
+    """The facts of match_insights(), and its comebacks and lost leads again as a first for the club: between them, every template of every family is usable."""
+    out = [(d["key"], d["headline_facts"]) for d in match_insights()]
+    for key, facts in list(out):
+        if "club_last_season" in facts:
+            out.append((key, {k: v for k, v in facts.items() if k not in ("club_last_season", "club_seasons_since")} | {"club_first_time": True}))
+    return out
+
+
+def test_every_family_line_passes_the_verifier_at_every_stage():
+    from worker.writer import check_numbers, on_air
+
+    for key, facts in every_stage():
+        fam = insight_texts.family({"key": key, "headline_facts": facts})
+        full, _ = insight_facts({"headline_facts": facts}, TEAMS)
+        air, _ = on_air(full, {})
+        for lang in LANGS:
+            t, (values, fields) = insight_texts.T[fam][lang], insight_texts.values(full, lang)
+            parts = {p: insight_texts.part(t, p, full) for p in ("headlines", "whys", "heart", "eye")} | {"stat": insight_texts.STAT_HEART.get(fam, {}).get(lang, [])}
+            for part, templates in parts.items():
+                for template in (x for x in templates if insight_texts.usable(x, full)):
+                    done = fill(insight_texts.clean(template), values, fields)
+                    if done is None:  # a placeholder these facts lack: the picker skips it too
+                        continue
+                    nums = check_numbers(done[0], done[1], air)
+                    errors, _ = style_issues(done[0], "", lang, nums["good"], air) if part == "headlines" else style_issues("", done[0], lang, nums["good"], air)
+                    assert not errors and not nums["bad_claims"] and not nums["unclaimed_numbers"], (key, lang, part, done[0], errors, nums)
+
+
 class FactsSpy(FakeWriter):
     """Keeps the facts the model is given."""
 
@@ -592,3 +639,79 @@ def test_the_fourth_goal_is_his_fourth_goal_of_the_match():
     for lang in LANGS:
         lines = filled(make_card("goal", scorer_match_goals=4, minute="83'"), lang)
         assert any(words[lang] in l for l in lines) and not any("goal number" in l for l in lines), lang
+
+
+# --- nothing said twice in a match ---------------------------------------------------------------------------
+
+def test_no_duo_line_is_said_twice_in_a_match():
+    memory = PhraseMemory()
+    said = {lang: [] for lang in LANGS}
+    for i in range(14):
+        card = dict(make_card(score={"home": i, "away": 20}), id=f"g{i}")
+        d = asyncio.run(draft(card, TEAMS, TemplateWriter(), LANGS, memory=memory, duo=True))
+        assert d.report["verified"], d.report
+        for l in d.duo:
+            said[l["lang"]].append(PhraseMemory.key(l["line"]))
+    for lang, lines in said.items():
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+
+
+def test_no_duo_line_repeats_across_the_demo(demo):
+    sink, _ = demo
+    for lang in LANGS:
+        lines = [PhraseMemory.key(l["line"]) for c in sink.cards.values() for l in c["duo"] + c.get("duo_ruling", []) if l["lang"] == lang]
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+
+
+@pytest.fixture(scope="module")
+def story_demo():
+    """The demo with its storyline: the duo opens on the table, and the goals that change it tell it again."""
+    from worker import storyline as sl
+
+    stream, _ = generate_match(7, "demo")
+    sink = MemorySink()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True),
+                        storyline_for=lambda match_id, teams: sl.build_storyline(9, 30, None, match_id, home=teams["home"], away=teams["away"], n_sims=1000))
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    return sink
+
+
+def test_no_duo_line_repeats_when_the_goals_tell_the_table(story_demo):
+    docs = list(story_demo.cards.values()) + list(story_demo.insights.values())
+    for lang in LANGS:
+        lines = [PhraseMemory.key(l["line"]) for d in docs for l in d.get("duo", []) + d.get("duo_ruling", []) if l["lang"] == lang]
+        assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+        table = [l["line"] for c in story_demo.cards.values() for l in c["duo"] if l["lang"] == lang and l["line"].startswith(("If it stays", "Si ça reste", "Si se mantiene"))]
+        assert len(table) >= 3, (lang, table)  # 14', 57', 63' (then ruled out) and 66' tell the table, each in its own words
+
+
+def test_an_identical_duo_line_fails_and_a_new_version_keeps_what_the_old_one_said():
+    memory = PhraseMemory()
+    line = {"speaker": "wren", "lang": "en", "line": "And the table, Joss?"}
+    memory.record("a", [], [line], version=1)
+    assert [e["rule"] for e in memory.issues("b", [], [line])[0]] == ["repeated_line"]
+    other = dict(line, line="Joss, what about the table?")
+    memory.record("a", [], [other], version=2)  # the goal went to another player
+    assert [e["rule"] for e in memory.issues("a", [], [line])[0]] == ["repeated_line"]  # version 1 may have been said
+    assert memory.issues("a", [], [other])[0] == []  # a retry of version 2 is not a repeat
+
+
+def test_a_model_duo_line_already_said_is_refused():
+    memory = PhraseMemory()
+    scorer = make_card()["player"]["name"]
+    asyncio.run(draft(make_card(), TEAMS, FakeWriter([reply()]), ["en"], memory=memory, duo=True))
+    writer = FakeWriter([reply(f"{scorer} again for Rovers"), reply(f"{scorer} once more for Rovers")])
+    d = asyncio.run(draft(dict(make_card(), id="c-2"), TEAMS, writer, ["en"], memory=memory, duo=True))
+    assert d.writer == "fake" and d.duo_writer == "template" and d.report["verified"] and "duo line already said" in writer.calls[1]["note"]
+
+
+def test_after_a_goal_ruled_out_the_next_one_at_that_score_counts(demo):
+    sink, _ = demo
+    ruled, again = at(sink, "63'"), at(sink, "66'")
+    assert ruled["status"] == "retracted" and ruled["score_before"] == again["score_before"]
+    words = {"en": "this time it counts", "fr": "cette fois, ça compte", "es": "esta vez sí"}
+    for lang in LANGS:
+        first = next(l["line"] for l in again["duo"] if l["lang"] == lang)
+        assert words[lang] in first.lower().replace("\xa0", " "), (lang, first)

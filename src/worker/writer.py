@@ -79,7 +79,7 @@ A goal with no stake. When the facts have "stake": "low", the goal hardly change
 
 Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact and who did it, the why says why it is remarkable, with numbers only from the facts. A rarity is told in seasons, for the team or the player ("Rovers' first comeback from two goals down since 2019/20"); never a count of matches, a league-wide rate ("one match in 101", "about 3 a season"), a ratio ("228 times rarer") or bits: those stay with the producer.
 
-Variety. The request may list, per language, the headlines, openings and verbs already used in this match ("avoid"). Never repeat a headline; do not start a sentence or build a headline like those; vary the verbs. Each match has its story: tell it from the facts (goal_situation, score_after, scorer_match_goals), never with the same words twice.
+Variety. The request may list, per language, the headlines, openings, verbs and duo lines already used in this match ("avoid"). Never repeat a headline or a duo line; do not start a sentence or build a headline like those; vary the verbs. Each match has its story: tell it from the facts (goal_situation, score_after, scorer_match_goals), never with the same words twice.
 
 Commentary duo. When the request has "duo": true, also write what two fictional commentators say on air about the moment. Never name or imitate a real commentator or pundit; keep it broadcast-safe, never insulting.
 {persona_brief(list(LANGUAGES))}
@@ -517,15 +517,18 @@ def parse_reply(text: str) -> tuple[Any, Any, bool]:
 
 
 def verify_reply(text: str, languages: list[str], facts: dict, duo: bool = False, memory: PhraseMemory | None = None, doc_id: str = "") -> tuple[list[dict], list[dict], dict]:
-    """Texts and duo of a reply, checked: the card checks, the duo checks when asked, and repetition against the rest of the match."""
+    """Texts and duo of a reply, checked: the card checks, the duo checks when asked, and repetition against the rest of the match (a repeated headline fails the texts, a repeated duo line the duo)."""
     texts_raw, duo_raw, valid = parse_reply(text)
     texts, report = verify(json.dumps(texts_raw if isinstance(texts_raw, list) else [], ensure_ascii=False), languages, facts)
     report["json_valid"] = valid and report["json_valid"]
     lines = [l for l in duo_raw if isinstance(l, dict)] if isinstance(duo_raw, list) else []
     errors, warnings = memory.issues(doc_id, texts, lines if duo else []) if memory is not None else ([], [])
     report["repetition"] = {"errors": errors, "warnings": warnings}
-    report["texts_verified"] = report["verified"] and report["json_valid"] and not errors
+    report["texts_verified"] = report["verified"] and report["json_valid"] and not [e for e in errors if e["rule"] != "repeated_line"]
     report["duo"] = verify_duo(lines, languages, facts) if duo else None
+    if duo:
+        report["duo"]["repeated_lines"] = [e for e in errors if e["rule"] == "repeated_line"]
+        report["duo"]["verified"] = report["duo"]["verified"] and not report["duo"]["repeated_lines"]
     report["verified"] = report["texts_verified"] and (report["duo"]["verified"] if duo else True)
     return texts, lines, report
 
@@ -543,7 +546,8 @@ def feedback(report: dict) -> str:
         if problems:
             lines.append(f"{e['lang']}: " + "; ".join(problems))
     for i in (report.get("repetition") or {}).get("errors", []):
-        lines.append(f"{i['lang']}: headline already used in this match: {i['text']}")
+        what = "duo line already said" if i["rule"] == "repeated_line" else "headline already used"
+        lines.append(f"{i['lang']}: {what} in this match: {i['text']}")
     duo = report.get("duo")
     if duo and not duo["verified"]:
         for lang, v in duo["languages"].items():
@@ -677,6 +681,12 @@ def minute_number(label: str) -> int:
     return int(found.group(0)) if found else 0
 
 
+def digits(score_line: Any) -> str | None:
+    """"3-2" from "Rovers 3-2 United"."""
+    found = re.search(r"\d+-\d+", str(score_line or ""))
+    return found.group(0) if found else None
+
+
 def conditions(card: dict, facts: dict) -> dict:
     """The conditions of the duo lines (`duo.CONDITIONS`): "" when the line is true for this card, None to skip it."""
     slug = card["team_name"].lower()
@@ -707,6 +717,7 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
         "before": facts.get(before_field), "after": facts.get(f"{slug}_wp_after_pct"), "other": facts.get(f"{slug}_wp_if_goal_pct"),
         "swing": facts.get("swing_pts"), "value": facts.get("save_value_pts"), "xg": facts.get("shot_xg_pct"), "minute": facts.get("minute"),
         "de_scorer": fr_de(facts["scorer"]) if facts.get("scorer") else None, "de_player": fr_de(player),
+        "score_now": digits(facts.get("score_after")), "score_then": digits(facts.get("score_before")),
     }
     team_n, scorer_n = count_words(lang, facts.get("team_goals_after")), count_words(lang, facts.get("scorer_match_goals"))
     several = facts.get("scorer_match_goals", 0) >= 2
@@ -715,10 +726,15 @@ def template_values(card: dict, facts: dict, lang: str) -> tuple[dict, dict]:
                "scorer_nth_adj": scorer_n.get("nth_adj") if several else None, "scorer_count": scorer_n.get("count")}
     values |= conditions(card, facts)
     fields = {"before": before_field, "after": f"{slug}_wp_after_pct", "other": f"{slug}_wp_if_goal_pct", "swing": "swing_pts", "value": "save_value_pts",
-              "xg": "shot_xg_pct", "minute": "minute"}
+              "xg": "shot_xg_pct", "minute": "minute", "score_now": "score_after", "score_then": "score_before"}
     return values, fields
 
 
+FRESH = {  # closes a required duo line when the match has already heard every variant: the score and the minute make it new
+    "en": {"goal": "{score_now} at {minute}.", "other": "Still {score_then} at {minute}."},
+    "fr": {"goal": "{score_now} à la {minute}.", "other": "Toujours {score_then} à la {minute}."},
+    "es": {"goal": "{score_now} en el {minute}.", "other": "Sigue el {score_then} en el {minute}."},
+}
 DEMOTED = 500  # a variant the control room turned down repeatedly: after every other one, before a repeat
 
 
@@ -758,8 +774,8 @@ class _Picker:
         self.headlines.add(self.memory.key(best[1][0]))
         return best[1]
 
-    def line(self, pool: list[str], values: dict, fields: dict, slot: str, optional: bool = False) -> tuple[str, list[dict]] | None:
-        """The least used variant; an optional line already said word for word in the match is dropped instead."""
+    def line(self, pool: list[str], values: dict, fields: dict, slot: str, optional: bool = False, fresh: tuple | list = ()) -> tuple[str, list[dict]] | None:
+        """The least used variant. When the match has already heard every variant word for word, an optional line is dropped and a required one is closed with a fresh fact (`fresh`, see FRESH)."""
         best = None
         for template in rotated(pool, self.doc_id, self.lang, slot):
             filled = fill(template, values, fields)
@@ -769,12 +785,30 @@ class _Picker:
             score = 1000 * repeat + 10 * self.openings.count(self.memory.opening(filled[0])) + len(self.memory.ngrams(filled[0]) & self.phrases) + self.penalty(filled[0])
             if best is None or score < best[0]:
                 best = (score, filled)
+        if best is not None and best[0] >= 1000 and not optional:
+            for suffix in fresh:
+                extra = fill(suffix, values, fields)
+                text = f"{best[1][0]} {extra[0]}" if extra else None
+                if text and self.memory.key(text) not in self.said:
+                    best = (best[0] - 1000, (text, best[1][1] + extra[1]))
+                    break
         if best is None or (optional and best[0] >= 1000):
             return None
-        self.openings.append(self.memory.opening(best[1][0]))
-        self.phrases |= self.memory.ngrams(best[1][0])
-        self.said.add(self.memory.key(best[1][0]))
-        return best[1]
+        return self._said(best[1])
+
+    def first(self, pool: list[str], values: dict, fields: dict) -> tuple[str, list[dict]] | None:
+        """The first variant, in the order given, that the match has not heard word for word (the plain phrasing first, the others for a repeat); None when every one was said."""
+        for template in pool:
+            filled = fill(template, values, fields)
+            if filled and self.memory.key(filled[0]) not in self.said:
+                return self._said(filled)
+        return None
+
+    def _said(self, filled: tuple[str, list[dict]]) -> tuple[str, list[dict]]:
+        self.openings.append(self.memory.opening(filled[0]))
+        self.phrases |= self.memory.ngrams(filled[0])
+        self.said.add(self.memory.key(filled[0]))
+        return filled
 
     def penalty(self, text: str) -> int:
         return DEMOTED if self.demoted and skeleton(text, self.facts) in self.demoted else 0
@@ -816,6 +850,7 @@ class TemplateWriter:
                 t = TEMPLATES[card["moment"]][lang]
                 pools = [t.get("situations", {}).get(facts.get("goal_situation"), []), t["headlines"]]
             headline, h_claims = pick.headline([p for p in pools if p], values, fields, "headline")
+            pick.openings.append(pick.memory.opening(headline))  # neither the why nor the duo starts like the headline
             why, w_claims = pick.line(t["whys"], values, fields, "why")
             claims = [dict(c) for c in {tuple(sorted(c.items())): c for c in h_claims + w_claims}.values()]
             texts.append({"headline": headline, "why": why, "lang": lang, "claims": claims})
@@ -835,18 +870,24 @@ class TemplateWriter:
             n = min(n, 3)
         more = slots.get("eye_more", {}).get(story_key(facts) if kind.startswith("goal") else "any", []) or slots.get("eye_more", {}).get("any", [])
         heart = slots["heart"].get(facts.get("goal_situation"), []) if isinstance(slots["heart"], dict) else slots["heart"]
+        if kind.startswith("goal") and facts.get("score_after") in pick.memory.ruled_out:
+            heart = LINES["goal"][lang]["again"]  # VAR took a goal at this score away earlier: this one counts
+        fresh = [FRESH[lang]["goal" if kind.startswith("goal") else "other"]]
         plan = [(HEART, heart, "heart"), (EYE, slots["eye"], "eye"), (HEART, slots["heart_back"], "heart_back"), (EYE, more, "eye_more")]
-        if kind == "save" and seed % 2 == 0 and n >= 3:  # the old goalkeeper speaks first
-            plan = [(EYE, slots["eye_open"], "eye_open"), (HEART, heart, "heart"), (EYE, slots["eye"], "eye"), (HEART, slots["heart_back"], "heart_back")]
+        lines = []
+        if kind == "save" and seed % 2 == 0 and n >= 3:  # the old goalkeeper speaks first, if the match has not heard it yet
+            opener = pick.line(slots["eye_open"], values, fields, "eye_open", optional=True)
+            if opener:
+                lines.append({"speaker": EYE, "lang": lang, "line": opener[0], "claims": opener[1]})
+                plan = plan[:3]
         if kind.startswith("goal") and isinstance(facts.get("scorer_match_goals"), int) and facts["scorer_match_goals"] >= 3 and more:
             n = max(n, 4)  # the story of the scorer is worth a line
-        lines = []
         for speaker, pool, slot in plan:
             if len(lines) >= n:
                 break
             if not pool:
                 break
-            filled = pick.line(pool, values, fields, slot, optional=slot in ("heart_back", "eye_more"))
+            filled = pick.line(pool, values, fields, slot, optional=slot in ("heart_back", "eye_more"), fresh=fresh)
             if not filled:
                 break
             text, claims = filled
@@ -869,18 +910,19 @@ class TemplateWriter:
             pick = _Picker(memory, card["id"] + "#ruling", lang, facts, self.demoted)
             reason = facts.get("ruled_out_reason", "other")
             key = f"offside_{facts['offside_call']}" if reason == "offside" and facts.get("offside_call") else reason if reason in slots["eye"] else "other"
-            heart = pick.line(slots["heart"], values, fields, "heart")
-            eye = pick.line(slots["eye"][key], values, fields, "eye")
+            fresh = [FRESH[lang]["other"]]  # the score the goal would have made does not stand
+            heart = pick.line(slots["heart"], values, fields, "heart", fresh=fresh)
+            eye = pick.line(slots["eye"][key], values, fields, "eye", fresh=fresh)
             if key == "offside_tight" and eye:
                 tic = PERSONAS[EYE].voices[lang].tics[0]  # "Look at the line."
                 if tic not in pick.tics:
                     eye = (f"{tic} {eye[0]}", eye[1])
-            back = pick.line(slots["heart_back"].get(key) or slots["heart_back"]["any"], values, fields, "heart_back")
+            back = pick.line(slots["heart_back"].get(key) or slots["heart_back"]["any"], values, fields, "heart_back", optional=True)
             out += [{"speaker": s, "lang": lang, "line": f[0], "claims": f[1]} for s, f in ((HEART, heart), (EYE, eye), (HEART, back)) if f]
         return out
 
     def write_insight(self, doc: dict, facts: dict, languages: list[str], memory: PhraseMemory | None = None, duo: bool = False) -> str:
-        """An insight or the storyline: the document's own texts when it brings verified ones, else a line true for its kind."""
+        """An insight or the storyline: the document's own texts when it brings verified ones, else its family's texts, else a line true for its kind; the duo lines of its family, else of its kind."""
         kind = doc.get("kind") or ("storyline" if doc.get("type") == "storyline" else "record")
         subject = next((str(facts[k]) for k in ("player", "player_name", "scorer", "subject", "team", "club", "team_name") if isinstance(facts.get(k), str)), None)
         own = {t.get("lang"): t for t in doc.get("texts") or [] if isinstance(t, dict)}
@@ -891,35 +933,43 @@ class TemplateWriter:
             values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team")}
             mine = own.get(lang)
             if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], air)[1]["verified"] and memory_key_free(pick, mine):
-                texts.append(mine)
-                if duo and (own_lines := insight_fact_text(doc, facts, lang, pick, duo)):
-                    lines += own_lines[1]  # the document's text, the family's duo lines
-                    continue
-            elif fact_text := insight_fact_text(doc, facts, lang, pick, duo):
-                texts.append(fact_text[0])
-                lines += fact_text[1]
-                continue
+                texts.append(mine)  # the document's text, the family's duo lines
+                fact = insight_fact_text(doc, facts, lang, pick, duo) if duo else None
             else:
-                pairs = INSIGHT_TEMPLATES[lang].get(kind) or INSIGHT_TEMPLATES[lang]["storyline"]
-                chosen = None
-                for headline, why in rotated(pairs, doc["id"], lang):
-                    h, w = fill(headline, values, {}), fill(why, values, {})
-                    if h and w and pick.memory.key(h[0]) not in pick.headlines:
-                        chosen = (h[0], w[0])
-                        break
-                if chosen is None:
-                    chosen = (fill(pairs[-1][0], values, {}) or (pairs[-1][0], []))[0], (fill(pairs[-1][1], values, {}) or (pairs[-1][1], []))[0]
-                texts.append({"headline": chosen[0], "why": chosen[1], "lang": lang, "claims": []})
+                fact = insight_fact_text(doc, facts, lang, pick, duo)
+                texts.append(fact[0] if fact else self._kind_text(doc, kind, lang, values, pick))
             if duo:
-                slots = LINES["insight"][lang]
-                for speaker, pool, slot in ((HEART, slots["heart"].get(kind, []), "heart"), (EYE, slots["eye"].get(kind, []), "eye")):
-                    filled = pick.line(pool, values, {}, slot) or pick.line(slots[slot]["storyline"], values, {}, slot)
-                    lines.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
+                lines += (fact[1] if fact else None) or self._kind_lines(kind, lang, values, pick)
         return json.dumps({"texts": texts, "duo": lines} if duo else texts, ensure_ascii=False)
 
+    @staticmethod
+    def _kind_text(doc: dict, kind: str, lang: str, values: dict, pick: _Picker) -> dict:
+        """A headline and why true for the kind of fact, with no number."""
+        pairs = INSIGHT_TEMPLATES[lang].get(kind) or INSIGHT_TEMPLATES[lang]["storyline"]
+        chosen = None
+        for headline, why in rotated(pairs, doc["id"], lang):
+            h, w = fill(headline, values, {}), fill(why, values, {})
+            if h and w and pick.memory.key(h[0]) not in pick.headlines:
+                chosen = (h[0], w[0])
+                break
+        if chosen is None:
+            chosen = (fill(pairs[-1][0], values, {}) or (pairs[-1][0], []))[0], (fill(pairs[-1][1], values, {}) or (pairs[-1][1], []))[0]
+        return {"headline": chosen[0], "why": chosen[1], "lang": lang, "claims": []}
 
-def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: bool) -> tuple[dict, list[dict]] | None:
-    """The text (and duo lines) of an insight from its family's templates, with its numbers claimed; None when no family covers it or a line cannot be filled."""
+    @staticmethod
+    def _kind_lines(kind: str, lang: str, values: dict, pick: _Picker) -> list[dict]:
+        """Two duo lines true for the kind of fact, with no number; the storyline's lines when the kind's were all said."""
+        slots = LINES["insight"][lang]
+        out = []
+        for speaker, slot in ((HEART, "heart"), (EYE, "eye")):
+            filled = (pick.line(slots[slot].get(kind, []), values, {}, slot, optional=True) or pick.line(slots[slot]["storyline"], values, {}, slot, optional=True)
+                      or pick.line(slots[slot]["storyline"], values, {}, slot))
+            out.append({"speaker": speaker, "lang": lang, "line": filled[0], "claims": filled[1]})
+        return out
+
+
+def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: bool) -> tuple[dict, list[dict] | None] | None:
+    """The text and duo lines of an insight from its family's templates, with its numbers claimed: None when no family covers it or its text cannot be filled; no lines (None) when the match has already heard every line the family has for it."""
     from worker import insight_texts as it
 
     fam = it.family(doc)
@@ -927,52 +977,68 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
         return None
     t = it.T[fam][lang]
     vals, fields = it.values(facts, lang)
+    stat = "top_fact" in facts  # the stat of the match
 
     def pool(templates: list[str]) -> list[str]:
         return [it.clean(x) for x in templates if it.usable(x, facts)]
 
-    headline = pick.headline([pool(it.part(t, "headlines", facts))], vals, fields, "headline")
+    heads = pool(it.part(t, "headlines", facts))
+    if stat:
+        heads = [h for h in heads if ":" not in h] or heads  # after its own prefix, a second colon reads badly
+    headline = pick.headline([heads], vals, fields, "headline")
     why = pick.line(pool(it.part(t, "whys", facts)), vals, fields, "why")
     if not headline or not why:
         return None
     text, claims = headline[0], headline[1]
     body, body_claims = why
-    if "top_fact" in facts:  # the stat of the match
+    if stat:
         names = {w for v in facts.values() if isinstance(v, str) for w in v.split()}
         text = it.STAT_PREFIX[lang] + (text if text.split()[0] in names else text[:1].lower() + text[1:])
         extra = fill(it.STAT_WHY[lang], vals, fields)
         if extra:
             body, body_claims = body + extra[0], body_claims + extra[1]
     out = {"headline": text, "why": body, "lang": lang, "claims": claims + body_claims}
-    lines = []
-    if duo:
-        heart = pick.line(pool(it.part(t, "heart", facts)), vals, fields, "heart")
-        eye = pick.line(pool(it.part(t, "eye", facts)), vals, fields, "eye")
-        if not heart or not eye:
-            return None
-        lines = [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]
-    return out, lines
+    if not duo:
+        return out, []
+    hearts = it.STAT_HEART.get(fam, it.STAT_HEART["any"])[lang] if stat else it.part(t, "heart", facts)
+    heart = pick.line(pool(hearts), vals, fields, "heart", optional=True)
+    eye = pick.line(pool(it.part(t, "eye", facts)), vals, fields, "eye", optional=True)
+    if not heart or not eye:
+        return out, None
+    return out, [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]
 
 
 SEASON_LINES = {  # the duo on what a goal does to the table: Wren asks, Joss answers with the rank and the relegation chance if the score holds
-    "en": {"ask": ["And the table, Joss?", "What does it do to the table, Joss?"],
-           "leaves": "If it stays {score}, {club} climb out of the drop zone, up to {rank_ord}.", "enters": "If it stays {score}, {club} drop into the drop zone, down to {rank_ord}.",
-           "up": "If it stays {score}, {club} go up to {rank_ord}, and their chance of going down falls to {chance}%.",
-           "down": "If it stays {score}, {club} slip to {rank_ord}, and their chance of going down rises to {chance}%."},
-    "fr": {"ask": ["Et au classement, Joss ?", "Qu'est-ce que ça change au classement, Joss ?"],
-           "leaves": "Si ça reste {score}, {club} sort de la zone rouge et remonte {rank_ord}.", "enters": "Si ça reste {score}, {club} tombe dans la zone rouge, {rank_ord}.",
-           "up": "Si ça reste {score}, {club} remonte {rank_ord}, et son risque de descente tombe à {chance} %.",
-           "down": "Si ça reste {score}, {club} recule {rank_ord}, et son risque de descente monte à {chance} %."},
-    "es": {"ask": ["¿Y en la tabla, Joss?", "¿Qué cambia en la tabla, Joss?"],
-           "leaves": "Si se mantiene el {score}, el {club} sale del descenso y sube al {rank_ord} puesto.", "enters": "Si se mantiene el {score}, el {club} cae al descenso, {rank_ord}.",
-           "up": "Si se mantiene el {score}, el {club} sube al {rank_ord} puesto, y su riesgo de descenso baja al {chance}%.",
-           "down": "Si se mantiene el {score}, el {club} baja al {rank_ord} puesto, y su riesgo de descenso sube al {chance}%."},
+    "en": {"ask": ["And the table, Joss?", "What does it do to the table, Joss?", "How does the table look now, Joss?", "Joss, what about the table?",
+                   "And in the standings, Joss?", "What does {score} do to the table, Joss?"],
+           "leaves": ["If it stays {score}, {club} climb out of the drop zone, up to {rank_ord}.", "If it stays {score}, {club} are out of the drop zone and up to {rank_ord}."],
+           "enters": ["If it stays {score}, {club} drop into the drop zone, down to {rank_ord}.", "If it stays {score}, {club} are in the drop zone, down in {rank_ord}."],
+           "up": ["If it stays {score}, {club} go up to {rank_ord}, and their chance of going down falls to {chance}%.",
+                  "If it stays {score}, {club} rise to {rank_ord}, with a {chance}% chance of going down."],
+           "down": ["If it stays {score}, {club} slip to {rank_ord}, and their chance of going down rises to {chance}%.",
+                    "If it stays {score}, {club} fall to {rank_ord}, with a {chance}% chance of going down."]},
+    "fr": {"ask": ["Et au classement, Joss ?", "Qu'est-ce que ça change au classement, Joss ?", "Et le classement, Joss, il dit quoi ?", "Joss, et le classement ?",
+                   "Où en est-on au classement, Joss ?", "Que change ce {score} au classement, Joss ?"],
+           "leaves": ["Si ça reste {score}, {club} sort de la zone rouge et remonte {rank_ord}.", "Si ça reste {score}, {club} quitte la zone rouge, {rank_ord}."],
+           "enters": ["Si ça reste {score}, {club} tombe dans la zone rouge, {rank_ord}.", "Si ça reste {score}, {club} plonge dans la zone rouge, {rank_ord}."],
+           "up": ["Si ça reste {score}, {club} remonte {rank_ord}, et son risque de descente tombe à {chance} %.",
+                  "Si ça reste {score}, {club} grimpe {rank_ord}, avec {chance} % de risque de descente."],
+           "down": ["Si ça reste {score}, {club} recule {rank_ord}, et son risque de descente monte à {chance} %.",
+                    "Si ça reste {score}, {club} glisse {rank_ord}, avec {chance} % de risque de descente."]},
+    "es": {"ask": ["¿Y en la tabla, Joss?", "¿Qué cambia en la tabla, Joss?", "¿Cómo queda la tabla, Joss?", "Joss, ¿y la clasificación?",
+                   "¿Y la clasificación, Joss?", "¿Qué hace este {score} en la tabla, Joss?"],
+           "leaves": ["Si se mantiene el {score}, el {club} sale del descenso y sube al {rank_ord} puesto.", "Si se mantiene el {score}, el {club} abandona el descenso: {rank_ord}."],
+           "enters": ["Si se mantiene el {score}, el {club} cae al descenso, {rank_ord}.", "Si se mantiene el {score}, el {club} se mete en el descenso: {rank_ord}."],
+           "up": ["Si se mantiene el {score}, el {club} sube al {rank_ord} puesto, y su riesgo de descenso baja al {chance}%.",
+                  "Si se mantiene el {score}, el {club} escala al {rank_ord} puesto, con un {chance}% de riesgo de descenso."],
+           "down": ["Si se mantiene el {score}, el {club} baja al {rank_ord} puesto, y su riesgo de descenso sube al {chance}%.",
+                    "Si se mantiene el {score}, el {club} cae al {rank_ord} puesto, con un {chance}% de riesgo de descenso."]},
 }
 SEASON_LINES = {lang: fr_typography(v) if lang == "fr" else v for lang, v in SEASON_LINES.items()}
 
 
 def season_lines(card: dict, facts: dict, lang: str, pick: _Picker) -> list[dict] | None:
-    """Two duo lines on the table when a goal changes it: a club entering or leaving the drop zone first, else the scoring club moving two places or more."""
+    """Two duo lines on the table when a goal changes it: a club entering or leaving the drop zone first, else the scoring club moving two places or more. None when the match has already heard both lines word for word."""
     from worker.insight_texts import Ord
 
     score_field = "season_score_now"
@@ -999,8 +1065,8 @@ def season_lines(card: dict, facts: dict, lang: str, pick: _Picker) -> list[dict
     rank = facts[f"season_{c}_rank_if_score_holds"]
     values = {"score": score, "club": club, "rank_ord": Ord(rank, lang), "chance": facts.get(f"season_{c}_relegation_chance_if_score_holds_pct")}
     fields = {"score": score_field, "rank_ord": f"season_{c}_rank_if_score_holds", "chance": f"season_{c}_relegation_chance_if_score_holds_pct"}
-    answer = fill(SEASON_LINES[lang][move], values, fields)
-    ask = pick.line(SEASON_LINES[lang]["ask"], {}, {}, "season_ask")
+    answer = pick.first(SEASON_LINES[lang][move], values, fields)  # the plain answer, the second one when a goal VAR ruled out already gave it
+    ask = pick.line(SEASON_LINES[lang]["ask"], values, fields, "season_ask", optional=True) if answer else None
     if not answer or not ask:
         return None
     return [{"speaker": HEART, "lang": lang, "line": ask[0], "claims": ask[1]}, {"speaker": EYE, "lang": lang, "line": answer[0], "claims": answer[1]}]
@@ -1128,7 +1194,7 @@ async def _draft(doc: dict, facts: dict, meanings: dict, writer, languages: list
         lines = lines if lines is not None else fallback_lines
     _, _, report = verify_reply(json.dumps({"texts": texts, "duo": lines or []}, ensure_ascii=False), languages, facts, duo=duo, memory=memory, doc_id=doc["id"])
     if memory is not None:
-        memory.record(doc["id"], texts, lines or [], facts)
+        memory.record(doc["id"], texts, lines or [], facts, version=doc.get("version", 1))
     return Draft(doc["id"], doc.get("version", 1), name, attempts, texts, report, sorted(MACHINE_TRANSLATED & set(languages)), lines or [], duo_name)
 
 
@@ -1150,10 +1216,12 @@ async def draft_insight(doc: dict, teams: dict[str, str], writer, languages: lis
 
 
 def ruling_duo(card: dict, teams: dict[str, str], languages: list[str] = list(LANGUAGES), memory: PhraseMemory | None = None) -> tuple[list[dict], dict]:
-    """The duo's reaction when VAR rules a goal out (templates only: no model call for a retraction), checked like any duo."""
+    """The duo's reaction when VAR rules a goal out (templates only: no model call for a retraction), checked like any duo. The memory keeps the score the goal would have made: the next goal at that score is the one that counts."""
     facts, _ = ruling_facts(card, teams)
     lines = TemplateWriter().ruling(card, facts, languages, memory)
     report = verify_duo(lines, languages, facts)
-    if memory is not None and report["verified"]:
-        memory.record(card["id"] + "#ruling", [], lines, facts)
+    if memory is not None:
+        memory.mark_ruled_out(facts.get("score_after"))
+        if report["verified"]:
+            memory.record(card["id"] + "#ruling", [], lines, facts)
     return (lines if report["verified"] else []), report

@@ -4,7 +4,7 @@ Wren Calder lives the moment and the story; Joss Ferrier sees the detail, the nu
 
 A line can carry conditions (`CONDITIONS`, such as `{if_home}`): placeholders that `writer.conditions` fills with "" when the line is true for the card and None when it is not, so `fill` skips it. The stadium only roars for the home club, "the man this time" needs a new scorer, "small margins" a small one.
 
-`PhraseMemory` remembers, per match, the headlines, openings, verbs, phrases and tics already used (texts and duo). The Writer prompt receives what to avoid, the templates pick the least used variant deterministically, and the Verifier warns on a reused phrase and fails an identical headline.
+`PhraseMemory` remembers, per match, the headlines, openings, verbs, phrases, tics and duo lines already used, and the scores of the goals VAR ruled out. The Writer prompt receives what to avoid, the templates pick the least used variant deterministically, and the Verifier warns on a reused phrase and fails an identical headline or an identical duo line.
 """
 
 import hashlib
@@ -187,6 +187,7 @@ LINES: dict[str, dict[str, dict]] = {
     "goal": {
         "en": {
             "heart": GOAL_HEART["en"],
+            "again": ["This time it counts! {scorer} for {team}!", "Again, and this time it counts! {scorer} for {team}!"],
             "eye": ["{team} were on {before}% to win before that; now {after}%, a jump of {swing} points.", "That goal is worth {swing} points to {team}: from {before}% to {after}% to win.",
                     "Put a number on it: {team} go from {before}% to {after}% to win.", "{team} now on {after}% to win, up {swing} points from {before}%.",
                     "Before the goal, {team} had {before}% to win; it is {after}% now.", "Look at the jump: {swing} points in one kick, and {team} are on {after}% to win."],
@@ -200,6 +201,7 @@ LINES: dict[str, dict[str, dict]] = {
         },
         "fr": {
             "heart": GOAL_HEART["fr"],
+            "again": ["Cette fois, ça compte ! {scorer} pour {team} !", "Encore, et cette fois, ça compte ! {scorer} pour {team} !"],
             "eye": ["{team} était à {before} % de chances de gagner avant ce but ; {after} % maintenant, soit {swing} points de mieux.",
                     "Ce but vaut {swing} points pour {team}, qui passe de {before} % à {after} % de chances de gagner.",
                     "Mettons un chiffre dessus : {team} passe de {before} % à {after} % de chances de gagner.",
@@ -216,6 +218,7 @@ LINES: dict[str, dict[str, dict]] = {
         },
         "es": {
             "heart": GOAL_HEART["es"],
+            "again": ["¡Esta vez sí vale! ¡{scorer} para el {team}!", "¡Otra vez, y esta vez sí cuenta! ¡{scorer} para el {team}!"],
             "eye": ["El {team} tenía un {before}% de opciones de ganar antes del gol; ahora, un {after}%: {swing} puntos más.",
                     "Ese gol vale {swing} puntos para el {team}, que pasa del {before}% al {after}% de opciones de ganar.",
                     "Pongámosle número: el {team} pasa del {before}% al {after}% de opciones de ganar.",
@@ -346,38 +349,71 @@ LINES: dict[str, dict[str, dict]] = {
                "eye_more": {"any": []}},
     },
     "ruling": {  # VAR rules a goal out; "eye" is keyed by the reason, offside split into tight and clear (the margin in cm stays off air: frames are 30 cm apart at sprint speed)
-        "en": {"heart": ["No! Oh no. It's gone. VAR has taken it away from {scorer}.", "And it's off. VAR rules it out, and {team} cannot believe it."],
-               "eye": {"offside_tight": ["Offside by a whisker, judged at the moment of the pass."], "offside_clear": ["Clearly offside at the moment of the pass. No debate."], "offside": ["Offside, says the review. The goal comes off the board."],
-                       "handball": ["Handball, says the review, and the goal comes off the board."], "other": ["The review says no, and the goal comes off the board."]},
-               "heart_back": {"offside_tight": ["That close, Joss. A whole celebration, for a whisker."], "any": ["All that joy, and it counts for nothing."]}},
-        "fr": {"heart": ["Non ! Oh non. C'est annulé. La VAR reprend le but à {scorer}.", "Et c'est refusé. La VAR annule, et {team} n'en revient pas."],
-               "eye": {"offside_tight": ["Hors-jeu d'un rien, au moment de la passe."], "offside_clear": ["Hors-jeu net au moment de la passe. Pas de débat."], "offside": ["Hors-jeu, dit la vidéo. Le but disparaît du tableau."],
-                       "handball": ["Main, dit la vidéo, et le but disparaît du tableau."], "other": ["La vidéo dit non, et le but disparaît du tableau."]},
-               "heart_back": {"offside_tight": ["Si peu, Joss. Toute une célébration, pour un rien."], "any": ["Toute cette joie, et elle ne compte pas."]}},
-        "es": {"heart": ["¡No! Ay, no. Anulado. El VAR le quita el gol a {scorer}.", "Y se anula. El VAR lo invalida, y el {team} no se lo cree."],
-               "eye": {"offside_tight": ["Fuera de juego por muy poco, en el momento del pase."], "offside_clear": ["Fuera de juego claro en el momento del pase. Sin debate."], "offside": ["Fuera de juego, dice la revisión. El gol desaparece del marcador."],
-                       "handball": ["Mano, dice la revisión, y el gol desaparece del marcador."], "other": ["La revisión dice que no, y el gol desaparece del marcador."]},
-               "heart_back": {"offside_tight": ["Tan poco, Joss. Toda una celebración, por nada."], "any": ["Toda esa alegría, y no cuenta para nada."]}},
+        "en": {"heart": ["No! Oh no. It's gone. VAR has taken it away from {scorer}.", "And it's off. VAR rules it out, and {team} cannot believe it.",
+                         "VAR says no. That goal from {scorer} does not stand."],
+               "eye": {"offside_tight": ["Offside by a whisker, judged at the moment of the pass.", "A whisker offside when the pass was played. That is how fine it was."],
+                       "offside_clear": ["Clearly offside at the moment of the pass. No debate.", "Offside, and clearly so, when the ball was played."],
+                       "offside": ["Offside, says the review. The goal comes off the board.", "The review finds an offside, and the goal is gone."],
+                       "handball": ["Handball, says the review, and the goal comes off the board.", "The review finds a handball. No goal."],
+                       "other": ["The review says no, and the goal comes off the board.", "The review takes it away. No goal."]},
+               "heart_back": {"offside_tight": ["That close, Joss. A whole celebration, for a whisker.", "A whisker, Joss. That is all it took."],
+                              "any": ["All that joy, and it counts for nothing.", "All that joy, gone in an instant."]}},
+        "fr": {"heart": ["Non ! Oh non. C'est annulé. La VAR reprend le but à {scorer}.", "Et c'est refusé. La VAR annule, et {team} n'en revient pas.",
+                         "La VAR dit non. Le but {de_scorer} ne compte pas."],
+               "eye": {"offside_tight": ["Hors-jeu d'un rien, au moment de la passe.", "Hors-jeu d'un rien au départ du ballon. C'est dire si c'était serré."],
+                       "offside_clear": ["Hors-jeu net au moment de la passe. Pas de débat.", "Hors-jeu, et net, au moment de la passe."],
+                       "offside": ["Hors-jeu, dit la vidéo. Le but disparaît du tableau.", "La vidéo signale un hors-jeu, et le but s'envole."],
+                       "handball": ["Main, dit la vidéo, et le but disparaît du tableau.", "La vidéo signale une main. Pas de but."],
+                       "other": ["La vidéo dit non, et le but disparaît du tableau.", "La vidéo efface le but. Rien à faire."]},
+               "heart_back": {"offside_tight": ["Si peu, Joss. Toute une célébration, pour un rien.", "Un rien, Joss. Il n'a fallu que ça."],
+                              "any": ["Toute cette joie, et elle ne compte pas.", "Toute cette joie, envolée d'un coup."]}},
+        "es": {"heart": ["¡No! Ay, no. Anulado. El VAR le quita el gol a {scorer}.", "Y se anula. El VAR lo invalida, y el {team} no se lo cree.",
+                         "El VAR dice que no. El gol de {scorer} no sube al marcador."],
+               "eye": {"offside_tight": ["Fuera de juego por muy poco, en el momento del pase.", "Fuera de juego por un pelo al salir el pase. Así de ajustado."],
+                       "offside_clear": ["Fuera de juego claro en el momento del pase. Sin debate.", "Fuera de juego, y claro, en el momento del pase."],
+                       "offside": ["Fuera de juego, dice la revisión. El gol desaparece del marcador.", "La revisión ve un fuera de juego, y el gol se esfuma."],
+                       "handball": ["Mano, dice la revisión, y el gol desaparece del marcador.", "La revisión ve una mano. No hay gol."],
+                       "other": ["La revisión dice que no, y el gol desaparece del marcador.", "La revisión borra el gol. No hay nada que hacer."]},
+               "heart_back": {"offside_tight": ["Tan poco, Joss. Toda una celebración, por nada.", "Un pelo, Joss. No hizo falta más."],
+                              "any": ["Toda esa alegría, y no cuenta para nada.", "Toda esa alegría, esfumada de golpe."]}},
     },
-    "insight": {  # keyed by insight kind; numbers stay with the model, which has the history facts and their meanings
-        "en": {"heart": {"record": ["Hold on, Joss, are you telling me nobody has done this in the league before?"], "rarity": ["Joss, how often do we see something like this?"],
-                         "streak": ["{subject} just keep going!"], "milestone": ["A landmark for {subject}, and what a day to reach it!"],
-                         "storyline": ["Every match has its story, and this one is a good one."], "tactical": ["Joss, you have been waiting to tell me something."]},
-               "eye": {"record": ["Not in this league's history. That is a record."], "rarity": ["Almost never. That is what makes it worth telling."],
-                       "streak": ["The run goes on, and it is worth watching where it ends."], "milestone": ["One for the record books, and earned the hard way."],
-                       "storyline": ["Keep that in mind for the next few minutes."], "tactical": ["Yes: the same idea keeps coming back. Watch for it."]}},
-        "fr": {"heart": {"record": ["Attends, Joss, tu me dis que personne n'avait fait ça dans ce championnat ?"], "rarity": ["Joss, on voit ça tous les combien ?"],
-                         "streak": ["{subject} ne s'arrête plus !"], "milestone": ["Un cap pour {subject}, et quel jour pour l'atteindre !"],
-                         "storyline": ["Chaque match a son histoire, et celle-ci est belle."], "tactical": ["Joss, tu attends de me dire quelque chose."]},
-               "eye": {"record": ["Jamais dans l'histoire de ce championnat. C'est un record."], "rarity": ["Presque jamais. C'est pour ça qu'il faut le raconter."],
-                       "streak": ["La série continue, et on a envie de voir où elle s'arrête."], "milestone": ["Une page pour les livres d'histoire, et pas volée."],
-                       "storyline": ["Gardez ça en tête pour les prochaines minutes."], "tactical": ["Oui : la même idée revient sans cesse. Surveillez-la."]}},
-        "es": {"heart": {"record": ["Espera, Joss, ¿me estás diciendo que nadie había hecho esto en la liga?"], "rarity": ["Joss, ¿cada cuánto vemos algo así?"],
-                         "streak": ["¡{subject} no se detiene!"], "milestone": ["¡Una marca para {subject}, y qué día para alcanzarla!"],
-                         "storyline": ["Cada partido tiene su historia, y esta es buena."], "tactical": ["Joss, estás deseando contarme algo."]},
-               "eye": {"record": ["Nunca en la historia de esta liga. Es un récord."], "rarity": ["Casi nunca. Por eso merece contarse."],
-                       "streak": ["La racha sigue, y apetece ver dónde termina."], "milestone": ["Una para los libros de historia, y bien ganada."],
-                       "storyline": ["Tengan eso en cuenta para los próximos minutos."], "tactical": ["Sí: la misma idea vuelve una y otra vez. Atentos."]}},
+    "insight": {  # keyed by insight kind, for the facts no family of worker.insight_texts covers: no number, a line true for the kind
+        "en": {"heart": {"record": ["Hold on, Joss, are you telling me nobody has done this in the league before?", "Joss, where does this one sit in the history books?"],
+                         "rarity": ["Joss, how often do we see something like this?", "Have we seen many of these, Joss?"],
+                         "streak": ["{subject} just keep going!", "Another chapter in the {subject} story, Joss."],
+                         "milestone": ["A landmark for {subject}, and what a day to reach it!", "A landmark day for {subject}, Joss!"],
+                         "storyline": ["Every match has its story, and this one is a good one.", "There is a story behind this one, Joss."],
+                         "tactical": ["Joss, you have been waiting to tell me something.", "Joss, what are you seeing?"]},
+               "eye": {"record": ["Not in this league's history. That is a record.", "One for the history books, Wren."],
+                       "rarity": ["Almost never. That is what makes it worth telling.", "Rarely, Wren. Enjoy it."],
+                       "streak": ["The run goes on, and it is worth watching where it ends.", "Runs like this tell you a lot about a team, Wren."],
+                       "milestone": ["One for the record books, and earned the hard way.", "Worth a place in the records, Wren."],
+                       "storyline": ["Keep that in mind for the next few minutes.", "Worth remembering as this match goes on."],
+                       "tactical": ["Yes: the same idea keeps coming back. Watch for it.", "The pattern is there, Wren: watch the next few minutes."]}},
+        "fr": {"heart": {"record": ["Attends, Joss, tu me dis que personne n'avait fait ça dans ce championnat ?", "Joss, où se situe celui-là dans l'histoire ?"],
+                         "rarity": ["Joss, on voit ça tous les combien ?", "On en a vu beaucoup, des comme ça, Joss ?"],
+                         "streak": ["{subject} ne s'arrête plus !", "Un chapitre de plus pour {subject}, Joss."],
+                         "milestone": ["Un cap pour {subject}, et quel jour pour l'atteindre !", "Une journée à marquer pour {subject}, Joss !"],
+                         "storyline": ["Chaque match a son histoire, et celle-ci est belle.", "Il y a une histoire derrière celui-là, Joss."],
+                         "tactical": ["Joss, tu attends de me dire quelque chose.", "Joss, qu'est-ce que tu vois ?"]},
+               "eye": {"record": ["Jamais dans l'histoire de ce championnat. C'est un record.", "Ça entre dans l'histoire, Wren."],
+                       "rarity": ["Presque jamais. C'est pour ça qu'il faut le raconter.", "Rarement, Wren. Profitons-en."],
+                       "streak": ["La série continue, et on a envie de voir où elle s'arrête.", "Une série comme ça en dit long sur une équipe, Wren."],
+                       "milestone": ["Une page pour les livres d'histoire, et pas volée.", "Ça mérite sa place dans les archives, Wren."],
+                       "storyline": ["Gardez ça en tête pour les prochaines minutes.", "À garder en tête pour la suite du match."],
+                       "tactical": ["Oui : la même idée revient sans cesse. Surveillez-la.", "Le schéma est là, Wren : regardez les prochaines minutes."]}},
+        "es": {"heart": {"record": ["Espera, Joss, ¿me estás diciendo que nadie había hecho esto en la liga?", "Joss, ¿dónde queda esto en la historia?"],
+                         "rarity": ["Joss, ¿cada cuánto vemos algo así?", "¿Hemos visto muchas así, Joss?"],
+                         "streak": ["¡{subject} no se detiene!", "Un capítulo más para {subject}, Joss."],
+                         "milestone": ["¡Una marca para {subject}, y qué día para alcanzarla!", "¡Un día para recordar para {subject}, Joss!"],
+                         "storyline": ["Cada partido tiene su historia, y esta es buena.", "Hay una historia detrás de esto, Joss."],
+                         "tactical": ["Joss, estás deseando contarme algo.", "Joss, ¿qué estás viendo?"]},
+               "eye": {"record": ["Nunca en la historia de esta liga. Es un récord.", "Esto entra en la historia, Wren."],
+                       "rarity": ["Casi nunca. Por eso merece contarse.", "Pocas veces, Wren. A disfrutarlo."],
+                       "streak": ["La racha sigue, y apetece ver dónde termina.", "Una racha así dice mucho de un equipo, Wren."],
+                       "milestone": ["Una para los libros de historia, y bien ganada.", "Merece un lugar en los archivos, Wren."],
+                       "storyline": ["Tengan eso en cuenta para los próximos minutos.", "Para tenerlo presente el resto del partido."],
+                       "tactical": ["Sí: la misma idea vuelve una y otra vez. Atentos.", "El patrón está ahí, Wren: atentos a los próximos minutos."]}},
     },
 }
 
@@ -461,11 +497,13 @@ def names_from(facts: dict) -> set[str]:
 
 
 class PhraseMemory:
-    """What one match has already said, per language: headlines, openings, verbs, phrases and tics, for texts and duo lines alike."""
+    """What one match has already said, per language: headlines, openings, verbs, phrases, tics and duo lines, for texts and duo lines alike; and the scores of the goals VAR ruled out."""
 
     def __init__(self) -> None:
         self.docs: dict[str, list[tuple[str, str, str]]] = {}  # doc id -> [(lang, kind, text)], kind "headline", "why" or "duo"
+        self.versions: dict[str, int] = {}  # doc id -> version of what `docs` holds for it
         self.names: set[str] = set()
+        self.ruled_out: set[str] = set()  # score lines ("Rovers 3-2 United") of goals VAR took away: the next goal at that score is the one that counts
 
     def _items(self, exclude: str | None = None):
         for doc_id, items in self.docs.items():
@@ -474,6 +512,10 @@ class PhraseMemory:
 
     def headlines(self, lang: str, exclude: str | None = None) -> set[str]:
         return {self.key(t) for l, k, t in self._items(exclude) if l == lang and k == "headline"}
+
+    def lines(self, lang: str, exclude: str | None = None) -> list[str]:
+        """The duo lines already said in the match, in order."""
+        return [t for l, k, t in self._items(exclude) if l == lang and k == "duo"]
 
     def openings(self, lang: str, exclude: str | None = None) -> list[str]:
         return [self.opening(t) for l, k, t in self._items(exclude) if l == lang and k != "headline"]
@@ -506,10 +548,20 @@ class PhraseMemory:
     def learn_names(self, facts: dict) -> None:
         self.names |= names_from(facts)
 
-    def record(self, doc_id: str, texts: list[dict], duo: list[dict], facts: dict | None = None) -> None:
-        """Keeps what a document finally says; a new version of the document replaces the old one."""
+    def mark_ruled_out(self, score_after: str | None) -> None:
+        """Remembers the score a goal VAR ruled out would have made."""
+        if score_after:
+            self.ruled_out.add(score_after)
+
+    def record(self, doc_id: str, texts: list[dict], duo: list[dict], facts: dict | None = None, version: int | None = None) -> None:
+        """Keeps what a document finally says; a new draft replaces the old one. When the new draft is a new version (a goal credited to another player, an insight updated), the duo lines of the earlier version stay remembered: the commentary team may already have said them."""
         if facts:
             self.learn_names(facts)
+        before = self.versions.get(doc_id)
+        if version is not None and before is not None and before != version and doc_id in self.docs:
+            self.docs[f"{doc_id}@v{before}"] = [i for i in self.docs[doc_id] if i[1] == "duo"]
+        if version is not None:
+            self.versions[doc_id] = version
         items = []
         for t in texts or []:
             items += [(t.get("lang"), "headline", str(t.get("headline", ""))), (t.get("lang"), "why", str(t.get("why", "")))]
@@ -517,15 +569,23 @@ class PhraseMemory:
         self.docs[doc_id] = items
 
     def issues(self, doc_id: str, texts: list[dict], duo: list[dict]) -> tuple[list[dict], list[dict]]:
-        """(errors, warnings) of a draft against the rest of the match: an identical headline fails; a reused opening, phrase or tic is a warning."""
+        """(errors, warnings) of a draft against the rest of the match: an identical headline or duo line fails; a reused opening, phrase or tic is a warning."""
         errors, warnings = [], []
         seen_open: dict[str, set] = {}
         seen_phrase: dict[str, set] = {}
+        said: dict[str, set] = {}
         tics = self.tics_used(exclude=doc_id)
         for t in texts or []:
             lang = t.get("lang")
             if self.key(str(t.get("headline", ""))) in self.headlines(lang, exclude=doc_id):
                 errors.append({"rule": "repeated_headline", "lang": lang, "text": t.get("headline")})
+        for d in duo or []:
+            lang, line = d.get("lang"), str(d.get("line", ""))
+            if lang not in said:
+                said[lang] = {self.key(x) for x in self.lines(lang, exclude=doc_id)}
+            if self.key(line) and self.key(line) in said[lang]:
+                errors.append({"rule": "repeated_line", "lang": lang, "text": line})
+            said[lang].add(self.key(line))
         lines = [(t.get("lang"), str(t.get("why", ""))) for t in texts or []] + [(d.get("lang"), str(d.get("line", ""))) for d in duo or []]
         for lang, text in lines:
             if lang not in seen_open:
@@ -552,8 +612,11 @@ class PhraseMemory:
             heads = [t for l, k, t in self._items() if l == lang and k == "headline"]
             openings = list(dict.fromkeys(self.opening(t) for l, k, t in self._items() if l == lang and k != "headline"))
             verbs = list(dict.fromkeys(self.verbs(lang)))
+            said = list(dict.fromkeys(self.lines(lang)))
             if heads or openings:
                 out[lang] = {"headlines": heads[-limit:], "openings": openings[-limit:], "verbs": verbs[-limit:]}
+                if said:
+                    out[lang]["lines"] = said[-limit:]
         tics = sorted(self.tics_used())
         if tics:
             out["tics_used"] = tics
