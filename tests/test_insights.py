@@ -1,6 +1,7 @@
 import json
 import math
 import random
+import re
 
 import pytest
 
@@ -396,6 +397,35 @@ def test_the_facts_go_to_the_model_only_when_asked(demo, history):
     sink, model = MemorySink(), CountingWriter()
     run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
     assert "insight" in model.asked and len(model.asked) <= 40
+
+
+def test_the_figures_kept_for_the_producer_reach_no_writer(demo, history):
+    """Every insight keeps its bits and the matches its history counts, and the stat of the match how many times rarer it is than the next fact, for the console. Neither the templates nor a model get them: no text or duo line quotes them."""
+    from worker.desk import OFF_AIR_FACTS, Desk
+    from worker.writer import TemplateWriter
+
+    sink = MemorySink()
+    docs = [d for d in run(demo[0], history, sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True)).insights("demo-0007") if "texts" in d]
+    stat = next(d for d in docs if d.get("stat_of_the_match"))
+    assert {"surprisal_bits", "history_opportunities", "times_rarer_than_runner_up", "top_value"} <= set(stat["headline_facts"])
+    claimed = {c["source_field"] for d in docs for x in d["texts"] + d["duo"] for c in x["claims"]}
+    assert claimed and not claimed & set(OFF_AIR_FACTS)
+    said = [t["headline"] + " " + t["why"] for d in docs for t in d["texts"]] + [l["line"] for d in docs for l in d["duo"]]
+    assert [x for x in said if re.search(r"(?i)times rarer|fois plus rare|veces m[aá]s raro|\bbits?\b", x)] == []
+
+    class Model(CountingWriter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.given: set[str] = set()
+
+        async def write_async(self, doc, facts, languages, **kwargs):
+            if doc.get("type") == "insight":
+                self.given |= set(facts[0]) | set(facts[1])
+            return await super().write_async(doc, facts, languages, **kwargs)
+
+    sink, model = MemorySink(), Model()
+    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
+    assert "top_fact" in model.given and not model.given & set(OFF_AIR_FACTS)
 
 
 def test_without_history_the_pipeline_is_unchanged(demo):

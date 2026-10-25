@@ -4,7 +4,7 @@ Statuses: `pending` (written and checked, waiting for a producer), `approved` (o
 
 Each card carries the duo's suggested lines (`duo`: text proposed to the commentary team, never voiced), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason and minute; its `margin_cm` stays null) and the duo's lines about it (`duo_ruling`). The offside margin and how close it was (`var_decision.margin_m` and `call`, set by the Spotter) are for the producer only: neither the duo nor the recap gets them, so no line says "by a whisker" or "clear". A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
-Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards and the recap); the post-match recap by `recap_writer` (`worker.recap.RecapWriter` on Foundry; the recap template when it is None).
+Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards and the recap); the post-match recap by `recap_writer` (`worker.recap.RecapWriter` on Foundry; the recap template when it is None). An insight writer gets the insight's `headline_facts` without the figures kept for the producer (`OFF_AIR_FACTS`: bits, match counts, the stat of the match's ratio, desk values), and the Verifier checks its texts against what it got; the stored document keeps them for the console.
 
 Cost guard: at most `max_calls_per_match` model calls per match (40), shared by every draft the desk sends to a model: a card costs one call, two when the Verifier sends it back, and so does the recap; a rewrite is a new draft. Once the budget is spent, the templates write. Templates cost nothing.
 
@@ -19,6 +19,17 @@ from worker.duo import PhraseMemory
 from worker.writer import LANGUAGES, TemplateWriter, card_facts, draft, draft_insight, insight_facts, low_stake, ruling_duo
 
 ACTION_FIELDS = ("event_id", "message_id", "minute_label", "cause")  # what the desk's audit entry keeps of a card action from the feed
+# Figures of an insight for the producer, never given to a writer: rarity in bits, the matches the history counts, how many times rarer the stat of the
+# match is than the next fact, values on the desk. `one_in` and `history_per_season` are still given: the insight templates quote them (docs/notes/insights.md).
+OFF_AIR_FACTS = ("surprisal_bits", "runner_up_surprisal_bits", "history_opportunities", "times_rarer_than_runner_up", "top_value", "runner_up_value")
+
+
+def on_air_view(doc: dict) -> dict:
+    """The insight as a writer sees it: `headline_facts` and `field_meanings` without `OFF_AIR_FACTS`; the storyline (`facts`) as it is."""
+    if not isinstance(doc.get("headline_facts"), dict):
+        return doc
+    return {**doc, "headline_facts": {k: v for k, v in doc["headline_facts"].items() if k not in OFF_AIR_FACTS},
+            "field_meanings": {k: v for k, v in (doc.get("field_meanings") or {}).items() if k not in OFF_AIR_FACTS}}
 
 
 class Desk:
@@ -90,9 +101,9 @@ class Desk:
         return self._stage(card, d, self.sink.card)
 
     def write_insight(self, doc: dict, teams: dict[str, str]) -> dict:
-        """Writes an insight (or the storyline) with the insight writer (the card writer when there is none), through the same Verifier, retry and template path as a card, with the same statuses and audit."""
+        """Writes an insight (or the storyline) with the insight writer (the card writer when there is none), through the same Verifier, retry and template path as a card, with the same statuses and audit; the writer and the Verifier see `on_air_view(doc)`."""
         doc.setdefault("version", 1)
-        d = self.loop.run_until_complete(draft_insight(doc, teams, self.insight_writer or self.writer, self.languages, calls_left=self._calls_left(doc["match_id"]),
+        d = self.loop.run_until_complete(draft_insight(on_air_view(doc), teams, self.insight_writer or self.writer, self.languages, calls_left=self._calls_left(doc["match_id"]),
                                                        memory=self.memory(doc["match_id"]), duo=True, **self._preferences(doc)))
         self.calls[doc["match_id"]] = self.calls.get(doc["match_id"], 0) + d.attempts
         return self._stage(doc, d, getattr(self.sink, "insight", None) or self.sink.card)
