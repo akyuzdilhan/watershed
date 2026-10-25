@@ -51,7 +51,7 @@ def ruled_out_by_var(card: dict) -> bool:
 
 
 def disallowed_goals(cards: list[dict]) -> list[dict]:
-    """Goals VAR ruled out, in match order, with the reason, the offside call (tight or clear: `var_decision.call` first, so that it survives a store with no feed events) and the margin, which stays with the producer."""
+    """Goals VAR ruled out, in match order, with the reason, the offside call (tight or clear: `var_decision.call` first, so that it survives a store with no feed events) and the margin as the desk's `ruled_out` gives it, for the producer (`var_decision.margin_m` is never copied here)."""
     out = []
     for c in sorted((c for c in cards if ruled_out_by_var(c)), key=lambda c: c["clock_s"]):
         r = var_ruling(c)

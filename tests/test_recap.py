@@ -251,6 +251,23 @@ def test_the_offside_call_survives_a_store_without_feed_events(demo, call, words
     assert recap["facts"]["disallowed_1_offside_call"] == call and not any("margin" in k for k in recap["facts"])
 
 
+def test_the_margin_in_var_decision_is_never_copied_into_the_recap(demo):
+    """Cards whose desk keeps the margin out of `ruled_out` and whose worker puts it in `var_decision`: the recap document, stored next to the cards, gets the call and never the margin."""
+    cards, state, _, _ = demo
+    given = []
+    for c in json.loads(json.dumps(cards)):
+        if c.get("ruled_out"):
+            margin = c["ruled_out"]["margin_cm"]
+            c["var_decision"] = {"reason": c["ruled_out"]["cause"], "call": "tight" if margin is not None else None, "margin_m": margin / 100 if margin is not None else None}
+            c["ruled_out"]["margin_cm"] = None
+        given.append(c)
+    assert any(c.get("var_decision", {}).get("margin_m") for c in given)
+    recap = build_recap(given, state)
+    assert [g["margin_cm"] for g in recap["analysis"]["disallowed_goals"]] == [None, None] and recap["verification"]["verified"]
+    assert "margin_m" not in json.dumps(recap) and not any("margin" in k for k in recap["facts"])
+    assert "(offside by a whisker)" in next(t for t in recap["texts"] if t["lang"] == "en")["recap"]
+
+
 # --- the instructions and the model's replies ------------------------------------------------------------
 
 def test_recap_instructions_follow_the_templates():

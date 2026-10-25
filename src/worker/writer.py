@@ -218,14 +218,11 @@ def offside_call(margin_cm: int) -> str:
 
 
 def var_ruling(card: dict) -> dict:
-    """Why VAR ruled a goal out, from the worker's `var_decision` (`{reason, call, margin_m}`) or else the desk's `ruled_out`: {reason, call, margin_cm}. The call, tight or clear, is what goes on air; the margin stays with the producer."""
+    """Why VAR ruled a goal out: {reason, call, margin_cm}. The reason and the call (tight or clear, what goes on air) come from the worker's `var_decision` (`{reason, call, margin_m}`) first, else from the desk's `ruled_out`. The margin is only what `ruled_out.margin_cm` holds: `var_decision.margin_m` is never read, so the margin is never copied into what reads the ruling (the duo, the recap document)."""
     ruled, var = card.get("ruled_out") or {}, card.get("var_decision") or {}
     cause = str(var.get("reason") or ruled.get("cause") or "")
     reason = ruled.get("reason") or (cause[4:] if cause.startswith("var_") else cause) or "other"
-    margin = ruled.get("margin_cm")
-    if not isinstance(margin, int) or isinstance(margin, bool):
-        m = var.get("margin_m")
-        margin = round(100 * m) if isinstance(m, (int, float)) and not isinstance(m, bool) else None
+    margin = ruled.get("margin_cm") if isinstance(ruled.get("margin_cm"), int) and not isinstance(ruled.get("margin_cm"), bool) else None
     call = var.get("call") if var.get("call") in ("tight", "clear") else offside_call(margin) if margin is not None else None
     return {"reason": reason, "call": call if reason == "offside" else None, "margin_cm": margin}
 
