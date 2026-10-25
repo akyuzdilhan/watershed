@@ -280,9 +280,10 @@ class Pipeline:
     _history_view: object | None = None
     storyline_for: object | None = None  # callable(match_id, teams) -> storyline document, built once when the match information arrives
     storylines: dict[str, dict] = field(default_factory=dict)
-    recap: bool = True  # with a desk: the post-match recap at the final whistle, written again if the feed changes a card after it, or if a flush finds a producer decision made since
+    recap: bool = True  # with a desk: the post-match recap once the final whistle is processed, written again if the feed changes a card after it, or if a flush finds a producer decision made since
     recaps: dict[str, dict] = field(default_factory=dict)
     _recapped: dict[str, tuple] = field(default_factory=dict)  # per match: (card id, status, version) of each card the last recap was written from
+    _whistled: set[str] = field(default_factory=set)  # matches whose full_time message has been processed (Match.full_time_seq is set as soon as it is released)
     _tables: dict[str, list] = field(default_factory=dict)  # per match: (event id, table if the score holds) of each goal given a season context
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
@@ -297,7 +298,7 @@ class Pipeline:
         out = []
         for match in self.matches.values():
             out += self._process(match, match.flush())
-            if self.recap and match.full_time_seq is not None and match.match_id in self.spotters:
+            if self.recap and match.match_id in self._whistled and match.match_id in self.spotters:
                 self._recap(match, self.spotters[match.match_id], self.timelines.get(match.match_id, []), only_if_changed=True)
         return out
 
@@ -305,6 +306,9 @@ class Pipeline:
         out = []
         for m in ready:
             self.sink.event(m)
+            whistle = m["type"] == "full_time" and match.match_id not in self._whistled
+            if whistle:
+                self._whistled.add(match.match_id)
             spotter = self.spotters.get(match.match_id)
             if spotter is None and match.info is not None:
                 spotter = self.spotters[match.match_id] = Spotter(match, make_model(match, SkellamWinProb), self.threshold)
@@ -336,7 +340,7 @@ class Pipeline:
             self._insights(match, spotter, m, teams)
             if hasattr(self.sink, "state") and (produced or m["type"] in ("period_end", "full_time", "correction") or len(timeline) % self.state_every == 0):
                 self.sink.state(match_state(match, spotter, timeline))
-            if self.recap and match.full_time_seq is not None and (m["type"] == "full_time" or produced):
+            if self.recap and match.match_id in self._whistled and (whistle or produced):  # not for the messages released with the whistle but before it
                 self._recap(match, spotter, timeline)
         return out
 

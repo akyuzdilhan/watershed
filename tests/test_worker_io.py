@@ -636,6 +636,35 @@ def test_a_card_action_after_the_final_whistle_writes_the_recap_again(demo):
     assert recap["verification"]["verified"]
 
 
+def test_the_recap_waits_for_the_whistle_itself(demo):
+    """The last goal arrives late: the reorder buffer releases it with every message after it, the VAR check on it and the final whistle included, in one batch. The recap is written once, when the whistle itself is processed, and counts the goal."""
+
+    class CountingDesk(Desk):
+        written = 0
+
+        def write_recap(self, cards, state, storyline=None):
+            self.written += 1
+            return super().write_recap(cards, state, storyline)
+
+    stream, truth = demo
+    feed = sorted({m["message_id"]: m for m in stream}.values(), key=lambda m: m["seq"])
+    last = max((g for g in truth["goals"] if g["counts"]), key=lambda g: g["clock_s"])
+    k = next(i for i, m in enumerate(feed) if m["type"] == "action" and m["event_id"] == last["event_id"])
+    sink = MemorySink()
+    desk = CountingDesk(sink, TemplateWriter(), auto_approve=True)
+    pipeline = Pipeline(sink=sink, desk=desk)
+    for m in feed[:k]:
+        pipeline.handle(m)
+    for m in feed[k + 1:]:
+        assert pipeline.handle(m, now=feed[k]["emitted_at_s"]) == []  # held until the goal arrives
+    released = pipeline.handle(feed[k])
+    assert [r["action"] for r in released if "action" in r] and any(r.get("moment") == "goal" for r in released)
+    assert desk.written == 1 and pipeline.recaps["demo-0007"]["final"]
+    assert f"card-{last['event_id']}" in pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"]
+    pipeline.flush()
+    assert desk.written == 1
+
+
 def test_approvals_after_the_whistle_reach_the_recap_on_the_next_flush(demo):
     """Without auto-approve the cards wait for a producer, and the recap at the whistle cites none. The goals approved in the console after it are in the recap the next flush writes (the listener flushes when the session goes quiet); a flush with no new decision writes nothing."""
 

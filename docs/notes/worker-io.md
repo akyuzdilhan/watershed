@@ -50,7 +50,7 @@ Fix: the client is created with `retry_total=0` and `consume` handles retries it
 
 ## Recap at the final whistle
 
-With a desk, the pipeline asks the desk for the post-match recap once it has processed the `full_time` message, and again whenever a later message produces a card or a card action (a goal voided after the whistle). The cards are read back from the store first (`load_card`), so the recap sees the producer's approvals made in the console; only approved cards count (`worker.recap`). The desk writes it with its `recap_writer` (the recap agent on Foundry with `--writer foundry`, the template otherwise) and stores it through the sink:
+With a desk, the pipeline asks the desk for the post-match recap once it has processed the `full_time` message, and again whenever a later message produces a card or a card action (a goal voided after the whistle). The messages the reorder buffer releases in the same batch as the whistle, but before it, do not write it: `Match.full_time_seq` is set as soon as the batch is applied, so the pipeline keeps its own record of the whistles it has processed. Before, a late goal released with its VAR check and the whistle wrote the recap four times, each a draft for the recap agent (test `test_the_recap_waits_for_the_whistle_itself`). The cards are read back from the store first (`load_card`), so the recap sees the producer's approvals made in the console; only approved cards count (`worker.recap`). The desk writes it with its `recap_writer` (the recap agent on Foundry with `--writer foundry`, the template otherwise) and stores it through the sink:
 
 | Sink | Where |
 |---|---|
