@@ -124,4 +124,6 @@ body:has(.ov-page) { background: #0b0b0b; }
 .ov-retraction { border-left-color: var(--bad); }
 .ov-retraction .ov-headline { color: var(--bad); }
 .ov-struck { text-decoration: line-through; color: var(--muted); }
-@media (max-width: 600px) { .ov-headline { font-size: 18px; } .ov-why { font-size: 14px; } .ov-lower { left: 16px; right: 16px; } .ov-bug { left: 16px; } }
+.ov-second { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.ov-second-text { font-size: 16px; color: var(--ink-2); }
+@media (max-width: 600px) { .ov-headline { font-size: 18px; } .ov-why { font-size: 14px; } .ov-second-text { font-size: 13px; } .ov-lower { left: 16px; right: 16px; } .ov-bug { left: 16px; } }

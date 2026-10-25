@@ -201,6 +201,88 @@ def test_overlay_shows_the_retraction_of_a_card_that_was_on_air(tmp_path, monkey
     assert "But refusé" in texts_in(overlay.render("?lang=fr", store=s))
 
 
+def test_a_card_holds_the_overlay_while_its_facts_wait_on_the_detail_line():
+    goal = {"id": "card-g", "type": "card", "status": "approved", "moment": "goal", "minute_label": "50'", "clock_s": 2950.0, "team": "home",
+            "texts": [{"lang": "en", "headline": "Goal headline", "why": "Goal why."}]}
+    fact = {"id": "insight-f", "type": "insight", "status": "approved", "minute_label": "50'", "clock_s": 2950.0, "texts": [{"lang": "en", "headline": "Fact headline", "why": "Fact why."}]}
+
+    def entry(doc: dict, action: str, at: float, by: str = "auto-approve") -> dict:
+        return {"card_id": doc["id"], "action": action, "by": by, "at": at}
+
+    same_message = [entry(goal, "written", 100.0, "template"), entry(goal, "approved", 100.0), entry(fact, "written", 100.1, "template"), entry(fact, "approved", 100.1)]
+
+    def shown(clock, period=2, docs=(goal, fact), audit=same_message) -> dict:
+        return overlay.on_air(list(docs), audit, clock, period)
+
+    item = shown(2960.0)
+    assert item["kind"] == "card" and item["card"]["id"] == goal["id"] and item["detail"]["id"] == fact["id"]
+    lower = texts_in(overlay.lower_third(item, "en"))
+    assert "Goal headline" in lower and "The detail Fact headline" in lower
+    assert shown(2950.0 + overlay.CARD_HOLD_S)["card"]["id"] == fact["id"]  # the card's time is up: the fact takes the screen
+    assert shown(None)["card"]["id"] == fact["id"]  # no clock: the latest approval
+    assert shown(3100.0, docs=(dict(goal, under_review=True), fact))["card"]["id"] == goal["id"]  # held while VAR checks it
+    assert shown(2960.0, docs=(dict(goal, status="rejected"), fact))["card"]["id"] == fact["id"]  # taken off air: nothing to hold
+    late = [entry(goal, "written", 100.0, "template"), entry(goal, "approved", 160.0, "producer-1"), entry(fact, "approved", 161.0, "producer-1")]
+    assert shown(3030.0, audit=late)["card"]["id"] == goal["id"]  # approved a minute after the goal: held from then
+    assert shown(3040.0, audit=late)["card"]["id"] == fact["id"]
+    first_half = dict(goal, minute_label="45+2'", clock_s=2820.0)
+    assert shown(2830.0, period=1, docs=(first_half, fact))["card"]["id"] == goal["id"]
+    assert shown(2705.0, period=2, docs=(first_half, fact))["card"]["id"] == fact["id"]  # no hold across half-time
+    retracted = dict(goal, status="retracted", retracted_on_air=True)
+    taken_back = same_message + [{"card_id": goal["id"], "action": "retract", "minute_label": "51'"}, dict(entry(goal, "retracted", 160.0, "feed"), was_on_air=True),
+                                 entry(fact, "approved", 160.5)]
+    item = shown(3065.0, docs=(retracted, fact), audit=taken_back)
+    assert item["kind"] == "retraction" and item["detail"] is None  # the retraction holds the screen the same way
+    assert shown(3060.0 + overlay.CARD_HOLD_S + 1, docs=(retracted, fact), audit=taken_back)["card"]["id"] == fact["id"]
+
+
+def test_overlay_keeps_the_goal_on_screen_when_its_facts_are_approved_in_the_same_message(tmp_path):
+    from test_insights import FakeHistory  # the small league history of the insight tests
+
+    stream, _ = generate_match(7, "demo")
+    sink = JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True), history=FakeHistory())
+    s = store.FileStore(tmp_path)
+    s.cache_s = 0.0
+    messages = iter(stream)
+
+    def until(done) -> list[dict]:
+        for m in messages:
+            results = pipeline.handle(m)
+            if done(results):
+                return results
+        raise AssertionError("never happened")
+
+    def goal_at(minute: str) -> dict:
+        return next(r for r in until(lambda rs: any(r.get("moment") == "goal" and r["minute_label"] == minute for r in rs)) if r.get("moment") == "goal")
+
+    def shown() -> tuple[dict, str]:
+        state = s.state(MATCH)
+        item = overlay.on_air(s.cards(MATCH) + overlay.aireable_insights(s.insights(MATCH)), s.audit(MATCH), state["clock_s"], state["period"])
+        return item, texts_in(overlay.render(f"?match={MATCH}&lang=en", store=s))
+
+    def facts_after(card_id: str) -> list[str]:
+        audit = s.audit(MATCH)
+        last = max(i for i, e in enumerate(audit) if e.get("card_id") == card_id and e.get("action") == "approved")
+        return [e["card_id"] for e in audit[last + 1:] if e.get("action") == "approved"]
+
+    for minute in ("57'", "63'", "66'", "83'"):
+        goal = goal_at(minute)
+        facts = facts_after(goal["id"])
+        assert facts, minute  # the card and its facts went on air in the same message
+        item, text = shown()
+        headline = next(t["headline"] for t in s.card(MATCH, goal["id"])["texts"] if t["lang"] == "en")
+        assert item["card"]["id"] == goal["id"] and item["detail"]["id"] == facts[-1] and headline in text and "The detail" in text, minute
+        if minute == "57'":  # the card's time is up: the latest fact takes the screen
+            until(lambda rs: s.state(MATCH)["clock_s"] >= goal["clock_s"] + overlay.CARD_HOLD_S)
+            item, text = shown()
+            assert item["card"]["id"] == facts[-1] and headline not in text
+        if minute == "63'":  # ruled out after VAR: the retraction is on screen, not a fact
+            until(lambda rs: any(r.get("action") == "retract" for r in rs))
+            item, text = shown()
+            assert item["kind"] == "retraction" and item["card"]["id"] == goal["id"] and "Goal ruled out: card withdrawn" in text
+
+
 def test_overlay_module_never_loads_the_writer_or_a_model():
     code = "import sys, web.overlay; print(json.dumps(sorted(m for m in sys.modules if m.startswith(('worker', 'agent_framework', 'openai', 'azure.ai')))))"
     out = subprocess.run([sys.executable, "-c", "import json; " + code], capture_output=True, text=True, check=True,
