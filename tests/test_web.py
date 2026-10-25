@@ -130,11 +130,12 @@ def test_an_edit_with_an_invented_number_is_refused(desk):
 
 def test_an_edit_that_keeps_the_facts_goes_on_air(desk):
     card = card_at(desk, "57'")
-    message, done = console.decide("approve-edited", MATCH, card["id"], "producer-1", {"en": {"headline": "Lightfoot again!", "why": "Rovers jump from 8% to 32% to win."}})
+    headline = f"{card['player']['name'].split()[-1]} again!"
+    message, done = console.decide("approve-edited", MATCH, card["id"], "producer-1", {"en": {"headline": headline, "why": "Rovers jump from 8% to 32% to win."}})
     assert done, message
     after = card_at(desk, "57'")
     en = next(t for t in after["texts"] if t["lang"] == "en")
-    assert after["status"] == "approved" and en["headline"] == "Lightfoot again!"
+    assert after["status"] == "approved" and en["headline"] == headline
     assert [a for a, _ in audit_of(desk, card["id"])][-2:] == ["edited", "approved"]
 
 
@@ -269,8 +270,9 @@ def test_overlay_shows_the_latest_approved_card_in_the_chosen_language(desk):
     console.decide("approve", MATCH, card_at(desk, "66'")["id"], "producer-1")
     console.decide("approve", MATCH, card_at(desk, "57'")["id"], "producer-1")
     shown = overlay.render(f"?match={MATCH}&lang=fr")
-    fr_headline = next(t["headline"] for t in card_at(desk, "57'")["texts"] if t["lang"] == "fr")  # the templates vary their wording within a match
-    assert fr_headline.startswith("Dorian Lightfoot") and fr_headline in texts_in(shown) and "57'" in texts_in(shown)
+    goal = card_at(desk, "57'")
+    fr_headline = next(t["headline"] for t in goal["texts"] if t["lang"] == "fr")  # the templates vary their wording within a match
+    assert fr_headline.startswith(goal["player"]["name"]) and fr_headline in texts_in(shown) and "57'" in texts_in(shown)
     es = texts_in(overlay.render("?lang=es&clean=1"))
     assert "traducción automática" in es and "EN" not in es
     console.decide("reject", MATCH, card_at(desk, "57'")["id"], "producer-1")  # taken off air: the previous card is back
