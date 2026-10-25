@@ -40,15 +40,15 @@ def test_demo_recap_is_verified_in_three_languages(demo):
     for t in recap["texts"]:
         for section, limit in MAX_WORDS.items():
             assert 0 < len(t[section].split()) <= limit
-    assert recap["facts"]["final_score"] == "Rovers 5-2 United" and recap["facts"]["half_time_score"] == "Rovers 0-2 United"
+    assert recap["facts"]["final_score"] == "Varleigh 5-2 Yarnford" and recap["facts"]["half_time_score"] == "Varleigh 0-2 Yarnford"
 
 
-def test_turning_point_is_a_second_half_rovers_goal(demo):
+def test_turning_point_is_a_second_half_varleigh_goal(demo):
     cards, _, truth, recap = demo
     tp = recap["analysis"]["turning_point"]
-    rovers_second_half = {f"card-{g['event_id']}" for g in truth["goals"] if g["counts"] and g["team"] == "home" and g["period"] == 2}
+    varleigh_second_half = {f"card-{g['event_id']}" for g in truth["goals"] if g["counts"] and g["team"] == "home" and g["period"] == 2}
     sub = player_of(truth, "sub-46")
-    assert tp["card_id"] in rovers_second_half and tp["player"] == sub and tp["swing_pts"] > 30
+    assert tp["card_id"] in varleigh_second_half and tp["player"] == sub and tp["swing_pts"] > 30
     assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": sub, "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
 
 
@@ -117,9 +117,9 @@ def test_only_approved_cards_count(demo):
 def test_fan_text_for_the_losing_side(demo):
     cards, state, _, _ = demo
     recap = build_recap(cards, state, fan_side="away")
-    assert recap["fan_team"] == "United" and recap["verification"]["verified"]
+    assert recap["fan_team"] == "Yarnford" and recap["verification"]["verified"]
     en = next(t for t in recap["texts"] if t["lang"] == "en")
-    assert en["fan"].startswith("Hard to take for United")
+    assert en["fan"].startswith("Hard to take for Yarnford")
 
 
 def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
@@ -129,11 +129,11 @@ def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
     good = [dict(t) for t in recap["texts"]]
     assert verify_recap(json.dumps(good), ["en", "fr", "es"], facts, cards)[1]["verified"]
     cases = {
-        "invented number": "Rovers won with 61% possession.",
+        "invented number": "Varleigh won with 61% possession.",
         "retracted goal": f"{sub} scored at 63' too.",
-        "unknown player": "Rovers won, Umberto Valtonen starred.",  # not a player of the match
+        "unknown player": "Varleigh won, Umberto Valtonen starred.",  # not a player of the match
         "spelled number": f"{sub} scored four goals.",
-        "too long": " ".join(["Rovers"] * (MAX_WORDS["recap"] + 1)),
+        "too long": " ".join(["Varleigh"] * (MAX_WORDS["recap"] + 1)),
     }
     for case, text in cases.items():
         bad = [dict(good[0], recap=text)] + good[1:]
@@ -159,7 +159,7 @@ class FailingWriter:
 
     async def write_async(self, match_id, facts, languages, note=None):
         self.calls += 1
-        return json.dumps([{"lang": lang, "recap": "Rovers won 9-0.", "fan": "Yes.", "analyst": "Yes.", "claims": []} for lang in languages])
+        return json.dumps([{"lang": lang, "recap": "Varleigh won 9-0.", "fan": "Yes.", "analyst": "Yes.", "claims": []} for lang in languages])
 
 
 def test_a_failing_model_gets_one_retry_then_the_template(demo):

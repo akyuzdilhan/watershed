@@ -40,7 +40,7 @@ Every number a text may show is in `headline_facts`, with its meaning in `field_
 - value = round(100 x (0.75 x min(bits / 12, 1) + 0.25 x relevance)). Relevance is the win-probability move of the moment the fact is tied to (the Spotter card's `value_pts` / 40, capped at 1; 0.3 when no card), 1 for a result fact at full time (comeback won, half-time lead lost), 0.6 to 0.8 for runs and head-to-head, 0.2 to 0.4 for records and KPIs.
 - `basis`: "what: k in n opportunities since <first season>", then "never before" or "last time <season>, <match> (<player>)" from `History.last`.
 
-Worked example, the demo match against the test history (12 seasons, 4,560 matches). At 83' substitute #20 scores his fourth goal that counts (52', 57', 66', 83'; the 63' goal was ruled out). No substitute scored four in the history: k = 0, n = 4,560, p = 1 / 4,562, 12.16 bits, over the 12-bit cap, so the rarity part is 75. The goal took Rovers from 91 % to 99 %, a card worth 8 points: relevance 8 / 40 = 0.2, 5 points. Value 80. Against the real history (about 19,000 matches) the same fact would be 14.2 bits, still capped. The comeback from 0-2 to a 5-2 win is "teams 2 or more goals down that won: 44 in 2,072", p = 45 / 2,074, 5.5 bits, value 60 with the full-time relevance of 1.
+Worked example, the demo match against the test history (12 seasons, 4,560 matches). At 83' substitute #20 scores his fourth goal that counts (52', 57', 66', 83'; the 63' goal was ruled out). No substitute scored four in the history: k = 0, n = 4,560, p = 1 / 4,562, 12.16 bits, over the 12-bit cap, so the rarity part is 75. The goal took Varleigh from 91 % to 99 %, a card worth 8 points: relevance 8 / 40 = 0.2, 5 points. Value 80. Against the real history (about 19,000 matches) the same fact would be 14.2 bits, still capped. The comeback from 0-2 to a 5-2 win is "teams 2 or more goals down that won: 44 in 2,072", p = 45 / 2,074, 5.5 bits, value 60 with the full-time relevance of 1.
 
 ## Lifecycle
 
@@ -73,4 +73,4 @@ Only the contract API (`seasons`, `matches`, `head_to_head`, `last`, `player`). 
 - Conditional rarities (comebacks, half-time leads, ten men) count over their opportunities, match-level ones over all matches; the two kinds of p are not on the same footing, and the value formula does not correct for it.
 - KPI probabilities are model probabilities (Poisson, binomial, normal) with independence assumptions that real football breaks; the possession model in particular treats each possession as an independent trial.
 - Weights (75/25, 12-bit cap, relevance per detector), `min_value` 40 and the cap of 4 per period are hand-set, not fitted to what producers keep.
-- Many related facts can describe one story (Rovers' comeback and United's lost lead): both are kept, the cap and the ranking decide.
+- Many related facts can describe one story (Varleigh's comeback and Yarnford's lost lead): both are kept, the cap and the ranking decide.

@@ -14,7 +14,7 @@
 
 Frame of reference: the feed gives locations from the acting team, which attacks towards x = 105. `view=None` draws them as they are; `view="home"` or `"away"` flips the frame so that this team attacks towards x = 105. A build-up is drawn from the team of its last action, so that a change of possession does not flip the picture, and players carry `ids` so that plotly moves each one between frames.
 
-The offside margin. The annotation shows the feed's figure when the action carries one (the `offside` field added by the VAR `update` correction: 0.25 m at 63'), otherwise the margin measured on the frame. The frame rounds locations to 0.1 m, so the two can differ: at 63' the frame shows the runner at 91.8 m and the second-last defender (United #6) at 91.6 m, that is 0.20 m. The line is drawn where the frame puts it; the tests check that the annotated margin is within 0.05 m of the frame geometry. The ball is drawn 1 m from the actor along the action so that it does not hide the shirt number; the true start is kept in the ball trace's `customdata`.
+The offside margin. The annotation shows the feed's figure when the action carries one (the `offside` field added by the VAR `update` correction: 0.25 m at 63'), otherwise the margin measured on the frame. The frame rounds locations to 0.1 m, so the two can differ: at 63' the frame shows the runner at 91.8 m and the second-last defender (Yarnford #6) at 91.6 m, that is 0.20 m. The line is drawn where the frame puts it; the tests check that the annotated margin is within 0.05 m of the frame geometry. The ball is drawn 1 m from the actor along the action so that it does not hide the shirt number; the true start is kept in the ball trace's `customdata`.
 
 ## Export for the video
 

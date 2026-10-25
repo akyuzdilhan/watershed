@@ -88,8 +88,8 @@ def test_time_left_includes_the_added_time():
     assert model.minutes_left(MatchState(0, 0, 0)) == model.length == 100.0
 
 
-def test_reference_case_rovers_united_at_67():
-    # Rovers 1-1 United at 67' (the key save of the demo match), close strengths.
+def test_reference_case_varleigh_yarnford_at_67():
+    # Varleigh 1-1 Yarnford at 67' (the key save of the demo match), close strengths.
     wp = SkellamWinProb(home_strength=1.4, away_strength=1.3).predict(MatchState(67, 1, 1))
     assert 0.20 < wp.away < 0.40
 
@@ -126,4 +126,4 @@ def test_with_goal_is_the_counterfactual_state():
     assert s.with_goal("away") == MatchState(67, 1, 2, home_reds=1)
     assert s == MatchState(67, 1, 1, home_reds=1)
     with pytest.raises(ValueError):
-        s.with_goal("Rovers")
+        s.with_goal("Varleigh")

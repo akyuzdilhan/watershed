@@ -30,7 +30,7 @@ All match data is synthetic, produced by the match engine in this repository. No
 
 ## Why it matters
 
-A broadcast graphic that says "United equalise" and stays on screen after VAR rules the goal out is a visible error, live, in front of millions. Feeds correct themselves all the time: goals are voided, scorers are reassigned after a deflection, actions arrive late or twice. A system that writes on-air text from a feed has to treat those corrections as normal traffic, keep a human in charge of what airs, and never let a language model invent a number. Watershed is built around those three constraints:
+A broadcast graphic that says "Yarnford equalise" and stays on screen after VAR rules the goal out is a visible error, live, in front of millions. Feeds correct themselves all the time: goals are voided, scorers are reassigned after a deflection, actions arrive late or twice. A system that writes on-air text from a feed has to treat those corrections as normal traffic, keep a human in charge of what airs, and never let a language model invent a number. Watershed is built around those three constraints:
 
 - **Every number comes from code.** The win probabilities, the swing and the value of a chance are computed deterministically; the model only writes sentences and must declare, for each number, the field it took it from. A deterministic Verifier rejects anything else.
 - **A producer decides what airs.** Cards wait in `pending` until approved, edited or rejected; every step is in the audit trail. An auto-approve mode exists for unattended judging and is labelled as such.
@@ -38,22 +38,22 @@ A broadcast graphic that says "United equalise" and stays on screen after VAR ru
 
 ## The demo match
 
-Seed 7, story `demo`: Rovers (home) against United, both fictional. The committed replay is `data/replay/demo-0007.jsonl.gz` and its hidden ground truth `data/replay/demo-0007.truth.json`. The win probabilities below are those of the cards, from `python -m worker data/replay/demo-0007.jsonl.gz --writer template --auto-approve` (deterministic, no Azure needed).
+Seed 7, story `demo`: Varleigh (home) against Yarnford, both fictional. The committed replay is `data/replay/demo-0007.jsonl.gz` and its hidden ground truth `data/replay/demo-0007.truth.json`. The win probabilities below are those of the cards, from `python -m worker data/replay/demo-0007.jsonl.gz --writer template --auto-approve` (deterministic, no Azure needed).
 
 | Minute | What happens in the feed | What the desk does | Card figures |
 |---|---|---|---|
-| 14' | United #9 scores | Goal card | United 30% → 58% to win |
-| 31' | United goal credited to #10; at 33' the provider reassigns it to #7 (deflection) | Card rewritten as version 2 with the new scorer | United 60% → 84% |
-| 41' | United #5 booked | No card (a yellow card does not move the result probabilities) | |
-| 46' | Rovers 0-2 at half-time bring on #20 for #9 | | |
-| 52', 57' | #20 scores twice: 2-2 | Two goal cards | Rovers 2% → 10%, then 8% → 32% |
-| **63'** | **#20 scores again. The card goes on air. A VAR check starts 15 seconds later; at 64' the goal is ruled out: the through ball found him 0.25 m offside, visible in the freeze frame of the pass** | **Card held during the check, then retracted, flagged as retracted on air** | Rovers 29% → 78%, withdrawn |
-| 66' | #20 scores anyway: 3-2 | Goal card | Rovers 28% → 79% |
-| 69' | United equalise; VAR rules it out for handball at 70' | Card held, then retracted | United 3% → 20%, withdrawn |
-| 72' | Rovers' keeper saves a United shot at 3-2 | Save card that credits the keeper, not the shooter | Rovers kept at 81% instead of 24% if it had gone in |
-| 78' | United #5 gets a second yellow | Red-card card | United 2% → 1% with ten men |
-| 83' | #20's fourth goal | Goal card | Rovers 91% → 99% |
-| 88' | Rovers #10 scores; VAR check; the goal stands | Card held, then released | 99%, never 100% before the final whistle |
+| 14' | Yarnford #9 scores | Goal card | Yarnford 30% → 58% to win |
+| 31' | Yarnford goal credited to #10; at 33' the provider reassigns it to #7 (deflection) | Card rewritten as version 2 with the new scorer | Yarnford 60% → 84% |
+| 41' | Yarnford #5 booked | No card (a yellow card does not move the result probabilities) | |
+| 46' | Varleigh 0-2 at half-time bring on #20 for #9 | | |
+| 52', 57' | #20 scores twice: 2-2 | Two goal cards | Varleigh 2% → 10%, then 8% → 32% |
+| **63'** | **#20 scores again. The card goes on air. A VAR check starts 15 seconds later; at 64' the goal is ruled out: the through ball found him 0.25 m offside, visible in the freeze frame of the pass** | **Card held during the check, then retracted, flagged as retracted on air** | Varleigh 29% → 78%, withdrawn |
+| 66' | #20 scores anyway: 3-2 | Goal card | Varleigh 28% → 79% |
+| 69' | Yarnford equalise; VAR rules it out for handball at 70' | Card held, then retracted | Yarnford 3% → 20%, withdrawn |
+| 72' | Varleigh's keeper saves a Yarnford shot at 3-2 | Save card that credits the keeper, not the shooter | Varleigh kept at 81% instead of 24% if it had gone in |
+| 78' | Yarnford #5 gets a second yellow | Red-card card | Yarnford 2% → 1% with ten men |
+| 83' | #20's fourth goal | Goal card | Varleigh 91% → 99% |
+| 88' | Varleigh #10 scores; VAR check; the goal stands | Card held, then released | 99%, never 100% before the final whistle |
 
 Final score 5-2. Against the ground truth, the worker finds all 11 moments that deserve a card, produces no extra card, and takes exactly the three expected card actions (one rewrite, two retractions) (`tests/test_worker.py`). The feed also carries 13 duplicated and 32 delayed messages, which the worker absorbs.
 
@@ -63,11 +63,11 @@ Every number a viewer sees is anchored to something they can picture. The desk c
 
 | When | What airs (French texts and duo, from the template writer) |
 |---|---|
-| Before kick-off | "Rovers - United, duel pour le maintien": United are on 34% to go down, 16% with a win, 43% with a defeat. Wren: "Rovers 17e, United 18e. Ce soir, on joue le maintien, Joss." |
+| Before kick-off | "Varleigh - Yarnford, duel pour le maintien": Yarnford are on 34% to go down, 16% with a win, 43% with a defeat. Wren: "Varleigh 17e, Yarnford 18e. Ce soir, on joue le maintien, Joss." |
 | 66' | "Seulement le 6e triplé d'un remplaçant en 50 saisons, le premier depuis Tino Höglund en 2021/22." |
 | 83' | "Premier quadruplé d'un joueur entré en cours de match en 50 saisons de championnat." Joss: "Jamais, Wren. En 50 saisons, aucun joueur entré en cours de match n'avait marqué 4 fois." |
-| Full time | "Première défaite de United à l'extérieur après avoir mené à la pause depuis 2020/21, il y a 6 saisons." Stat of the match: the substitute's four goals, ranked first by rarity. |
-| Recap | Names both goals VAR ruled out and why ("hors-jeu d'un rien", "main"), and what the result changed: "Rovers passe de la 17e à la 14e place, et son risque de descente de 11 % à 4 %." |
+| Full time | "Première défaite de Yarnford à l'extérieur après avoir mené à la pause depuis 2020/21, il y a 6 saisons." Stat of the match: the substitute's four goals, ranked first by rarity. |
+| Recap | Names both goals VAR ruled out and why ("hors-jeu d'un rien", "main"), and what the result changed: "Varleigh passe de la 17e à la 14e place, et son risque de descente de 11 % à 4 %." |
 
 Offside margins stay off air: they are not announced in real broadcasts, and at sprint speed a player covers about 30 cm between two tracking frames, so a centimetre figure would be false precision. The console keeps the measured margin for the producer.
 

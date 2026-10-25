@@ -69,14 +69,14 @@ def test_producer_decisions_are_audited():
 
 
 def test_verifier_rejects_invented_numbers_and_misused_percentages():
-    card = {"id": "c", "team": "home", "team_name": "Rovers", "moment": "save", "minute_label": "72'", "player": {"name": "Keeper"},
+    card = {"id": "c", "team": "home", "team_name": "Varleigh", "moment": "save", "minute_label": "72'", "player": {"name": "Keeper"},
             "score_before": {"home": 3, "away": 2}, "facts": {"xg_pct": 20, "team_wp_before_pct": 81, "team_wp_if_goal_pct": 24}}
-    facts, _ = card_facts(card, {"home": "Rovers", "away": "United"})
-    good = [{"headline": "Keeper saves", "why": "Rovers stay at 81% instead of 24%.", "lang": "en",
-             "claims": [{"value": 81, "source_field": "rovers_wp_after_save_pct"}, {"value": 24, "source_field": "rovers_wp_if_goal_pct"}]}]
+    facts, _ = card_facts(card, {"home": "Varleigh", "away": "Yarnford"})
+    good = [{"headline": "Keeper saves", "why": "Varleigh stay at 81% instead of 24%.", "lang": "en",
+             "claims": [{"value": 81, "source_field": "varleigh_wp_after_save_pct"}, {"value": 24, "source_field": "varleigh_wp_if_goal_pct"}]}]
     assert verify(json.dumps(good), ["en"], facts)[1]["verified"]
-    invented = [dict(good[0], why="Rovers stay at 81% instead of 24%, his 12th save.")]
+    invented = [dict(good[0], why="Varleigh stay at 81% instead of 24%, his 12th save.")]
     assert not verify(json.dumps(invented), ["en"], facts)[1]["verified"]
-    wrong_unit = [dict(good[0], why="Rovers stay at 81% instead of 57%.", claims=good[0]["claims"] + [{"value": 57, "source_field": "save_value_pts"}])]
+    wrong_unit = [dict(good[0], why="Varleigh stay at 81% instead of 57%.", claims=good[0]["claims"] + [{"value": 57, "source_field": "save_value_pts"}])]
     assert not verify(json.dumps(wrong_unit), ["en"], facts)[1]["verified"]
     assert not verify("not json", ["en"], facts)[1]["verified"]

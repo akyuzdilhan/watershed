@@ -1,6 +1,6 @@
-"""The 20 clubs of the Synthetic League. Rovers and United are the two clubs of the demo match; the other 18 names are invented and share no word with a current Premier League club."""
+"""The 20 clubs of the Synthetic League. Varleigh and Yarnford are the two clubs of the demo match; the other 18 names are invented and share no word with a current Premier League club."""
 
-DEMO_HOME, DEMO_AWAY = "Rovers", "United"
+DEMO_HOME, DEMO_AWAY = "Varleigh", "Yarnford"
 
 CLUBS: tuple[str, ...] = (
     DEMO_HOME, DEMO_AWAY,

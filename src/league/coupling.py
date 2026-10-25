@@ -1,4 +1,4 @@
-"""Season to match: what the league gives the demo fixture, Rovers v United.
+"""Season to match: what the league gives the demo fixture, Varleigh v Yarnford.
 
 Two sets of expected goals, kept apart so the win-probability model never reads the generator's hidden truth: `expected_goals` comes from the true strengths and is meant for the match generator, `prior_expected_goals` from the observer and is meant for the win-probability model (match_info). The context is for the cards: positions, points, chances and stakes, in named fields with integer percentages.
 """
@@ -28,7 +28,7 @@ def _pct(p: float) -> int:
 
 
 def demo_fixture(seed: int = 1, matchday: int = DEMO_MATCHDAY, params: Params = Params(), n_sims: int = N_SIMS, league: League | None = None) -> dict:
-    """Expected goals and card context for Rovers (home) v United at `matchday` of the league of `seed`."""
+    """Expected goals and card context for Varleigh (home) v Yarnford at `matchday` of the league of `seed`."""
     if league is None:
         league = League.create(seed, params, demo_matchday=matchday)
     elif league.demo_matchday != matchday:

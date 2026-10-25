@@ -94,7 +94,7 @@ STORY_MIN_SEASONS = 0.4  # share of the seasons each demo club must have spent i
 def simulate_clubs(seed: int, n_seasons: int) -> ClubLayer:
     """Strengths, tables and top-tier scores of `n_seasons` seasons ending in 2025/26, for the history of `seed`.
 
-    Deterministic search for a history that serves the demo: the first attempt where Rovers and United have each spent at least 40 % of the seasons in the top tier and have won at least one title between them (over 10 seasons or more). Falls back to the last attempt.
+    Deterministic search for a history that serves the demo: the first attempt where Varleigh and Yarnford have each spent at least 40 % of the seasons in the top tier and have won at least one title between them (over 10 seasons or more). Falls back to the last attempt.
     """
     for attempt in range(STORY_ATTEMPTS):
         layer = _simulate(seed, n_seasons, attempt)
@@ -156,7 +156,7 @@ def _simulate(seed: int, n_seasons: int, attempt: int) -> ClubLayer:
 def _names(seed: int, q_next: np.ndarray, top_next: np.ndarray, tier_last: np.ndarray, rng: np.random.Generator) -> list[str]:
     """Name the latent clubs: the 20 clubs of the next season by strength rank against League.create(seed), the others with the extra names.
 
-    Rovers and United must have played the last season in the top tier (their head-to-head and the demo players' last season are then on record): if either is matched to a promoted club, it swaps names with the closest-ranked club that stayed up.
+    Varleigh and Yarnford must have played the last season in the top tier (their head-to-head and the demo players' last season are then on record): if either is matched to a promoted club, it swaps names with the closest-ranked club that stayed up.
     """
     league = League.create(seed)
     overall = league.attack - league.defence

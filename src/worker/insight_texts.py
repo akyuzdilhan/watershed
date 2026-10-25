@@ -2,7 +2,7 @@
 
 The generic lines of `writer.INSIGHT_TEMPLATES` stay for the kinds not covered here. Each number is a placeholder named after its fact field, so `duo.fill` claims it against that field and the Verifier checks it.
 
-What a viewer can picture: the feat named for who did it ("the first four-goal haul by a substitute in 50 seasons"), and a team's own landmark in seasons ("United's first away defeat after leading at half-time since 2020/21"). League-wide rates and match counts ("once in 83", "0 in 19,000") stay in the console, in `rarity.basis`.
+What a viewer can picture: the feat named for who did it ("the first four-goal haul by a substitute in 50 seasons"), and a team's own landmark in seasons ("Yarnford's first away defeat after leading at half-time since 2020/21"). League-wide rates and match counts ("once in 83", "0 in 19,000") stay in the console, in `rarity.basis`.
 """
 
 from worker.duo import fr_typography
@@ -214,7 +214,7 @@ def values(facts: dict, lang: str) -> tuple[dict, dict]:
             vals[k] = v
         if isinstance(v, (int, float)) or any(c.isdigit() for c in str(v)):
             fields[k] = k
-    for side in ("home", "away"):  # storyline facts are keyed by club slug (rovers_rank): give them a side alias, ranks as ordinals
+    for side in ("home", "away"):  # storyline facts are keyed by club slug (varleigh_rank): give them a side alias, ranks as ordinals
         club = facts.get(f"{side}_club")
         if not isinstance(club, str):
             continue

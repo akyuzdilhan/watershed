@@ -52,7 +52,7 @@ def _mmss(minutes: int, seconds: int) -> float:
     return minutes * 60.0 + seconds
 
 
-# Rovers 0-2 United at half-time, then Rovers' substitute #20 comes on and the match turns: 5-2. The 63' goal is the central moment of the video: its card goes on air during the VAR check, then the goal is ruled out for offside and the card is retracted. United's 69' equaliser is ruled out too, for handball.
+# Varleigh 0-2 Yarnford at half-time, then Varleigh's substitute #20 comes on and the match turns: 5-2. The 63' goal is the central moment of the video: its card goes on air during the VAR check, then the goal is ruled out for offside and the card is retracted. Yarnford's 69' equaliser is ruled out too, for handball.
 DEMO_SCRIPT = [
     Moment("goal-14", "goal", "away", 9, _mmss(13, 20), (93.0, 36.0), assist=10),
     Moment("goal-31", "goal", "away", 10, _mmss(30, 40), (92.0, 31.0), assist=11, deflector=7,

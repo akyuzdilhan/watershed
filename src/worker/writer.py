@@ -30,20 +30,20 @@ Numbers. Each number has a field name that says what it means: never use a numbe
 - Fields ending in _pct are percentages: write them with a % sign (34%, never 0.34).
 - Fields ending in _pts are percentage points: always write the word points (French: points, Spanish: puntos) right after the number, never a % sign.
 
-Content. Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Every sentence that gives a win probability names the team it belongs to: rovers_wp_after_pct is the chance of Rovers. Never write "win chance", "the chances" or "les chances" without the team.
+Content. Explain why the moment matters through the change in win probability, and credit the action that caused it (a save, not the shot it stopped). Every sentence that gives a win probability names the team it belongs to: varleigh_wp_after_pct is the chance of Varleigh. Never write "win chance", "the chances" or "les chances" without the team.
 - Headline: at most 8 words, names the player or the team. No minute and no number at the start: the graphic already shows the minute and the score.
 - Why: one sentence, at most 25 words.
 - Same meaning in every language, each written natively as a broadcaster of that country would say it, not translated word for word.
 
 Language rules.
-- en: plain broadcast English. Say "Rovers go from 30% to 54% to win", "worth 13 points". No jargon: no "+24-point swing", no "win chance".
-- fr: French TV style. Club names without article: "Rovers", "pour United", "contre Rovers"; never "l'United", "le Rovers", "d'United", "du Rovers", "aux Rovers". If an article or "d'" would fall before a club name, make the club the subject of the sentence. No English words: never "swing" or "momentum"; say "points", "points de probabilité" or "bascule" ("soit 24 points de mieux"). Put a space before %: "34 %".
-- es: Spanish broadcast style. Use the article before a club name as Spanish commentators do ("el Rovers", "del United", "al Town"). Say "opciones de ganar" and "puntos". Never "swing" or "momentum", never "en puntos de diferencia".
+- en: plain broadcast English. Say "Varleigh go from 30% to 54% to win", "worth 13 points". No jargon: no "+24-point swing", no "win chance".
+- fr: French TV style. Club names without article: "Varleigh", "pour Yarnford", "contre Varleigh"; never "l'Yarnford", "le Varleigh", "d'Yarnford", "du Varleigh", "aux Varleigh". If an article or "d'" would fall before a club name, make the club the subject of the sentence. No English words: never "swing" or "momentum"; say "points", "points de probabilité" or "bascule" ("soit 24 points de mieux"). Put a space before %: "34 %".
+- es: Spanish broadcast style. Use the article before a club name as Spanish commentators do ("el Varleigh", "del Yarnford", "al Town"). Say "opciones de ganar" and "puntos". Never "swing" or "momentum", never "en puntos de diferencia".
 
-Good and bad "why" sentences (a goal taking Rovers from 30% to 54%, swing_pts 24):
-- en good: "Rovers go from 30% to 54% to win, up 24 points." Bad: "Win chance jumped: a +24-point swing." (no team, sign, jargon)
-- fr good: "Rovers passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux." Bad: "Le but fait bondir les chances de l'United : swing de 24 points." (whose chances, article, anglicism)
-- es good: "El Rovers pasa del 30% al 54% de opciones de ganar: 24 puntos más." Bad: "Swing para el Rovers con un +24 en puntos de diferencia." (anglicism, sign, clumsy)
+Good and bad "why" sentences (a goal taking Varleigh from 30% to 54%, swing_pts 24):
+- en good: "Varleigh go from 30% to 54% to win, up 24 points." Bad: "Win chance jumped: a +24-point swing." (no team, sign, jargon)
+- fr good: "Varleigh passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux." Bad: "Le but fait bondir les chances de l'Yarnford : swing de 24 points." (whose chances, article, anglicism)
+- es good: "El Varleigh pasa del 30% al 54% de opciones de ganar: 24 puntos más." Bad: "Swing para el Varleigh con un +24 en puntos de diferencia." (anglicism, sign, clumsy)
 
 Reply with valid JSON only, no other text: a JSON array with one object per requested language:
 {"headline": string (max 8 words), "why": string (max 25 words), "lang": string, "claims": [{"value": number, "source_field": string}]}
@@ -75,7 +75,7 @@ WRITER_INSTRUCTIONS += f"""
 
 Points. The word points (French points, Spanish puntos) means only a change in a team's chance of winning, from a field ending in _pts. Never write any other value as points.
 
-A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Rovers make it 5", "a 4th for Scarpetta"), with no probability and no points.
+A goal with no stake. When the facts have "stake": "low", the goal hardly changes the result: there is no probability in the facts. Write it as a milestone or a story line from team_goals_after and scorer_match_goals ("Varleigh make it 5", "a 4th for Scarpetta"), with no probability and no points.
 
 Insights and storyline. When the request has "document": "insight" or "storyline", the facts compare the match with the league's history: the headline states the fact, the why says why it is remarkable, with numbers only from the facts (write them without thousands separators: 18620).
 
@@ -306,7 +306,7 @@ HEADLINE_MAX_WORDS, WHY_MAX_WORDS = 8, 25
 
 
 def teams_in(facts: dict) -> list[str]:
-    """The two club names, read from the score line "Rovers 0-2 United" (or the home_team and away_team facts of an insight)."""
+    """The two club names, read from the score line "Varleigh 0-2 Yarnford" (or the home_team and away_team facts of an insight)."""
     found = re.match(r"^(.*\S)\s+\d+-\d+\s+(\S.*)$", str(facts.get("score_before", "")))
     if found:
         return [found.group(1), found.group(2)]

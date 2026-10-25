@@ -6,7 +6,7 @@
   "story": "demo",
   "teams": {
     "home": {
-      "name": "Rovers",
+      "name": "Varleigh",
       "formation": "4-3-3",
       "expected_goals": 1.5,
       "squad": [
@@ -133,7 +133,7 @@
       ]
     },
     "away": {
-      "name": "United",
+      "name": "Yarnford",
       "formation": "4-2-3-1",
       "expected_goals": 1.2,
       "squad": [

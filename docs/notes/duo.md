@@ -44,7 +44,7 @@ Before this lot, every goal card of the demo had the same headline pattern and t
 
 - **(a) Goals ruled out in the recap.** `recap.analyse` reads `disallowed_goals` from the `ruled_out` record of retracted goal cards (or `build_recap(..., disallowed=[...])`), and `recap_facts` exposes `disallowed_<i>_minute/_team/_player/_reason/_margin_cm`. Templates: "VAR ruled out Marijn Scarpetta's goal at 63' (offside by 25 cm) and Jakub Méndez's goal at 69' (handball)." and in the analyst text "VAR: 63' (offside by 25 cm), 69' (handball)." The margin is in centimetres because the Verifier treats any number below 1 as a misused probability. `verify_recap` still fails a retracted minute in a sentence that does not say VAR or ruled out. The recap limit went from 60 to 80 words to make room.
 - **(b) One meaning for "points".** `value_pts` (the ranking key) is no longer a recap fact, and "(51 pts)" left the analyst template ("Top moments: 66', 57', 14'."). Cards never had it. The prompts say "points" means only a change in a team's chance of winning.
-- **(c) A goal with no stake.** `low_stake(card)`: a goal moving its team's chance of winning by less than 2 points. `card_facts` then drops every probability field and adds `stake: low`, `team_goals_after`, `scorer_match_goals`, so a probability cannot even be claimed; the templates write a milestone ("Joaquim Kosznik adds the fifth", "it is goal number five for Rovers today"). The desk sets `on_air_priority: low` (88' in the demo, 99% to 99%).
+- **(c) A goal with no stake.** `low_stake(card)`: a goal moving its team's chance of winning by less than 2 points. `card_facts` then drops every probability field and adds `stake: low`, `team_goals_after`, `scorer_match_goals`, so a probability cannot even be claimed; the templates write a milestone ("Joaquim Kosznik adds the fifth", "it is goal number five for Varleigh today"). The desk sets `on_air_priority: low` (88' in the demo, 99% to 99%).
 
 ## Sample exchanges (template writer, demo match, as the desk writes them today)
 
@@ -52,9 +52,9 @@ Before this lot, every goal card of the demo had the same headline pattern and t
 
 | | en | fr | es |
 |---|---|---|---|
-| Wren (goal) | Hold on to your seats! In front! Marijn Scarpetta puts Rovers ahead and the bench is on its feet! | Notez-le quelque part ! Marijn Scarpetta trouve l'ouverture, et Rovers prend les commandes ! | ¡Apúntenlo! ¡Por delante! ¡Marijn Scarpetta adelanta al Rovers! |
-| Joss | Put a number on it: Rovers go from 29% to 78% to win. | Ce but vaut 49 points pour Rovers, qui passe de 29 % à 78 % de chances de gagner. | Pongámosle número: el Rovers pasa del 29% al 78% de opciones de ganar. |
-| Wren (VAR) | And it's off. VAR rules it out, and Rovers cannot believe it. | Et c'est refusé. La VAR annule, et Rovers n'en revient pas. | Y se anula. El VAR lo invalida, y el Rovers no se lo cree. |
+| Wren (goal) | Hold on to your seats! In front! Marijn Scarpetta puts Varleigh ahead and the bench is on its feet! | Notez-le quelque part ! Marijn Scarpetta trouve l'ouverture, et Varleigh prend les commandes ! | ¡Apúntenlo! ¡Por delante! ¡Marijn Scarpetta adelanta al Varleigh! |
+| Joss | Put a number on it: Varleigh go from 29% to 78% to win. | Ce but vaut 49 points pour Varleigh, qui passe de 29 % à 78 % de chances de gagner. | Pongámosle número: el Varleigh pasa del 29% al 78% de opciones de ganar. |
+| Wren (VAR) | And it's off. VAR rules it out, and Varleigh cannot believe it. | Et c'est refusé. La VAR annule, et Varleigh n'en revient pas. | Y se anula. El VAR lo invalida, y el Varleigh no se lo cree. |
 | Joss | Look at the line. Offside by 25 centimetres, measured at the moment of the pass. | Regardez la ligne. Hors-jeu de 25 centimètres, mesuré au moment de la passe. | Miren la línea. Fuera de juego por 25 centímetros, medido en el momento del pase. |
 | Wren | 25 centimetres, Joss. A whole celebration, for 25 centimetres. | 25 centimètres, Joss. Toute une célébration, pour 25 centimètres. | 25 centímetros, Joss. Toda una celebración, por 25 centímetros. |
 
@@ -63,28 +63,28 @@ Before this lot, every goal card of the demo had the same headline pattern and t
 | | en | fr | es |
 |---|---|---|---|
 | Joss | Speaking as an old goalkeeper: that one deserves its own replay. | En tant qu'ancien gardien, je le dis : celui-là mérite son propre ralenti. | Como exportero, lo digo: esa merece su propia repetición. |
-| Wren | Oh, the drama of it! Valdemar McGrory gets something on it! I don't believe it! | Accrochez vos ceintures ! Quel arrêt ! Valdemar McGrory, tu viens de garder Rovers en vie ! | ¡Agárrense fuerte! ¡Qué parada! ¡Valdemar McGrory, acabas de mantener vivo al Rovers! |
-| Joss | Had it gone in, Rovers would be down to 24% to win; Valdemar McGrory kept them on 81%. | Si ça rentrait, Rovers tombait à 24 % de chances de gagner ; Valdemar McGrory garde Rovers à 81 %. | Pequeños márgenes: 57 puntos salvados para el Rovers, que sigue en el 81% de opciones de ganar. |
+| Wren | Oh, the drama of it! Valdemar McGrory gets something on it! I don't believe it! | Accrochez vos ceintures ! Quel arrêt ! Valdemar McGrory, tu viens de garder Varleigh en vie ! | ¡Agárrense fuerte! ¡Qué parada! ¡Valdemar McGrory, acabas de mantener vivo al Varleigh! |
+| Joss | Had it gone in, Varleigh would be down to 24% to win; Valdemar McGrory kept them on 81%. | Si ça rentrait, Varleigh tombait à 24 % de chances de gagner ; Valdemar McGrory garde Varleigh à 81 %. | Pequeños márgenes: 57 puntos salvados para el Varleigh, que sigue en el 81% de opciones de ganar. |
 | Wren | | Voilà pourquoi on paie un gardien ! | Joss, estás sonriendo. ¡Nunca te había visto sonreír por un número! |
 
 **The substitute's four goals (Scarpetta, on at half-time).**
 
 | | en | fr | es |
 |---|---|---|---|
-| 52' Wren | Marijn Scarpetta gives Rovers a lifeline! | Une lueur pour Rovers, et elle vient de Marijn Scarpetta ! | ¿Hay partido? ¡Marijn Scarpetta recorta para el Rovers! |
-| 57' Wren | They said Rovers were gone. Marijn Scarpetta disagrees! | Égalisation ! Marijn Scarpetta remet Rovers dans le match ! | Decían que el Rovers estaba muerto. ¡Marijn Scarpetta no opina lo mismo! |
+| 52' Wren | Marijn Scarpetta gives Varleigh a lifeline! | Une lueur pour Varleigh, et elle vient de Marijn Scarpetta ! | ¿Hay partido? ¡Marijn Scarpetta recorta para el Varleigh! |
+| 57' Wren | They said Varleigh were gone. Marijn Scarpetta disagrees! | Égalisation ! Marijn Scarpetta remet Varleigh dans le match ! | Decían que el Varleigh estaba muerto. ¡Marijn Scarpetta no opina lo mismo! |
 | 57' Joss | | Deux pour Marijn Scarpetta déjà. Retenez ce nom. | |
-| 66' Wren | Write it down! Marijn Scarpetta finds the gap, and Rovers have their noses in front! | Quel scénario ! Et voilà ! Marijn Scarpetta met Rovers en tête ! | ¡Qué guion! ¡Marijn Scarpetta encuentra el hueco y el Rovers manda! |
+| 66' Wren | Write it down! Marijn Scarpetta finds the gap, and Varleigh have their noses in front! | Quel scénario ! Et voilà ! Marijn Scarpetta met Varleigh en tête ! | ¡Qué guion! ¡Marijn Scarpetta encuentra el hueco y el Varleigh manda! |
 | 66' Joss | Three for Marijn Scarpetta. Remember where you were for this one. | Trois pour Marijn Scarpetta. Souvenez-vous où vous étiez. | Tres de Marijn Scarpetta: el balón del partido ya tiene dueño. |
-| 83' Joss | Marijn Scarpetta, goal number four of the match. Write that one in pen. | Marijn Scarpetta, quatrième but du match. Ça s'écrit à l'encre. | Sin hacer ruido, el Rovers acaba de ganar 8 puntos: 99% de opciones de ganar. |
+| 83' Joss | Marijn Scarpetta, goal number four of the match. Write that one in pen. | Marijn Scarpetta, quatrième but du match. Ça s'écrit à l'encre. | Sin hacer ruido, el Varleigh acaba de ganar 8 puntos: 99% de opciones de ganar. |
 
-The 88' goal (5-2, no stake): "The result was settled a while ago, but nobody told Joaquim Kosznik!" / "Nothing changes in the result, but it is goal number five for Rovers today."
+The 88' goal (5-2, no stake): "The result was settled a while ago, but nobody told Joaquim Kosznik!" / "Nothing changes in the result, but it is goal number five for Varleigh today."
 
 ## What a native speaker should review
 
-- **French.** Tutoiement between the two ("Je te crois sur parole", "Laisse-les savourer"); "La VAR" (feminine, usage in France) against "le VAR"; "Rovers était à" (club as singular, as in the card templates); "ballon du match est réservé" for a hat-trick; "Souvenez-vous où vous étiez" (vs "de l'endroit où"); "Ça s'écrit à l'encre"; "celui-là mérite son propre ralenti"; masculine agreement in "On disait Rovers perdu", "Réduit à dix".
+- **French.** Tutoiement between the two ("Je te crois sur parole", "Laisse-les savourer"); "La VAR" (feminine, usage in France) against "le VAR"; "Varleigh était à" (club as singular, as in the card templates); "ballon du match est réservé" for a hat-trick; "Souvenez-vous où vous étiez" (vs "de l'endroit où"); "Ça s'écrit à l'encre"; "celui-là mérite son propre ralenti"; masculine agreement in "On disait Varleigh perdu", "Réduit à dix".
 - **Spanish.** "Pongámosle número", "Como exportero" (one word), "¡Agárrense fuerte!" (ustedes, Spain vs Latin America), "el balón del partido ya tiene dueño" for a hat-trick, "hace más grande un día para recordar". Spanish stays labelled machine-translated on air.
-- **English.** "noses in front", "the match ball is spoken for", "Write that one in pen" (British idioms, on purpose); "they said Rovers were gone" (plural club).
+- **English.** "noses in front", "the match ball is spoken for", "Write that one in pen" (British idioms, on purpose); "they said Varleigh were gone" (plural club).
 - **All.** Whether Wren's tic on top of an exclamation ("Hold on to your seats! In front! ...") is too much in one line; whether the old-goalkeeper line on saves should appear at most once per match (today it can come back, as a warned repeat).
 
 ## What is imperfect

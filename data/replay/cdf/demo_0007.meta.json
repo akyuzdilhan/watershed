@@ -16,16 +16,16 @@
         "play_direction": "left_right",
         "start_time": "2026-10-24T14:00:00.000Z",
         "end_time": "2026-10-24T14:48:38.940Z",
-        "left_team_id": "rovers",
-        "right_team_id": "united"
+        "left_team_id": "varleigh",
+        "right_team_id": "yarnford"
       },
       {
         "period": "second_half",
         "play_direction": "right_left",
         "start_time": "2026-10-24T15:03:38.940Z",
         "end_time": "2026-10-24T15:59:10.120Z",
-        "left_team_id": "united",
-        "right_team_id": "rovers"
+        "left_team_id": "yarnford",
+        "right_team_id": "varleigh"
       }
     ],
     "whistles": [
@@ -53,11 +53,11 @@
   },
   "teams": {
     "home": {
-      "id": "rovers",
+      "id": "varleigh",
       "players": [
         {
           "id": "home_1",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 1,
           "is_starter": true,
           "first_name": "Valdemar",
@@ -65,7 +65,7 @@
         },
         {
           "id": "home_2",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 2,
           "is_starter": true,
           "first_name": "Loui",
@@ -73,7 +73,7 @@
         },
         {
           "id": "home_5",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 5,
           "is_starter": true,
           "first_name": "Andrew",
@@ -81,7 +81,7 @@
         },
         {
           "id": "home_4",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 4,
           "is_starter": true,
           "first_name": "Tomé",
@@ -89,7 +89,7 @@
         },
         {
           "id": "home_3",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 3,
           "is_starter": true,
           "first_name": "Brett",
@@ -97,7 +97,7 @@
         },
         {
           "id": "home_6",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 6,
           "is_starter": true,
           "first_name": "Rune",
@@ -105,7 +105,7 @@
         },
         {
           "id": "home_8",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 8,
           "is_starter": true,
           "first_name": "Paul",
@@ -113,7 +113,7 @@
         },
         {
           "id": "home_10",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 10,
           "is_starter": true,
           "first_name": "Joaquim",
@@ -121,7 +121,7 @@
         },
         {
           "id": "home_7",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 7,
           "is_starter": true,
           "first_name": "Joseph",
@@ -129,7 +129,7 @@
         },
         {
           "id": "home_9",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 9,
           "is_starter": true,
           "first_name": "Oliwier",
@@ -137,7 +137,7 @@
         },
         {
           "id": "home_11",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 11,
           "is_starter": true,
           "first_name": "Jeremías",
@@ -145,7 +145,7 @@
         },
         {
           "id": "home_13",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 13,
           "is_starter": false,
           "first_name": "Severino",
@@ -153,7 +153,7 @@
         },
         {
           "id": "home_12",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 12,
           "is_starter": false,
           "first_name": "Jake",
@@ -161,7 +161,7 @@
         },
         {
           "id": "home_15",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 15,
           "is_starter": false,
           "first_name": "Werner",
@@ -169,7 +169,7 @@
         },
         {
           "id": "home_16",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 16,
           "is_starter": false,
           "first_name": "Sabas",
@@ -177,7 +177,7 @@
         },
         {
           "id": "home_18",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 18,
           "is_starter": false,
           "first_name": "Enzo",
@@ -185,7 +185,7 @@
         },
         {
           "id": "home_21",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 21,
           "is_starter": false,
           "first_name": "Zachary",
@@ -193,7 +193,7 @@
         },
         {
           "id": "home_17",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 17,
           "is_starter": false,
           "first_name": "Warren",
@@ -201,7 +201,7 @@
         },
         {
           "id": "home_19",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 19,
           "is_starter": false,
           "first_name": "Pavel",
@@ -209,7 +209,7 @@
         },
         {
           "id": "home_20",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 20,
           "is_starter": false,
           "first_name": "Marijn",
@@ -218,11 +218,11 @@
       ]
     },
     "away": {
-      "id": "united",
+      "id": "yarnford",
       "players": [
         {
           "id": "away_1",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 1,
           "is_starter": true,
           "first_name": "Keelan",
@@ -230,7 +230,7 @@
         },
         {
           "id": "away_2",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 2,
           "is_starter": true,
           "first_name": "Conchur",
@@ -238,7 +238,7 @@
         },
         {
           "id": "away_5",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 5,
           "is_starter": true,
           "first_name": "Otto",
@@ -246,7 +246,7 @@
         },
         {
           "id": "away_6",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 6,
           "is_starter": true,
           "first_name": "Jesper",
@@ -254,7 +254,7 @@
         },
         {
           "id": "away_3",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 3,
           "is_starter": true,
           "first_name": "Pete",
@@ -262,7 +262,7 @@
         },
         {
           "id": "away_4",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 4,
           "is_starter": true,
           "first_name": "Max",
@@ -270,7 +270,7 @@
         },
         {
           "id": "away_8",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 8,
           "is_starter": true,
           "first_name": "Mohammed",
@@ -278,7 +278,7 @@
         },
         {
           "id": "away_7",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 7,
           "is_starter": true,
           "first_name": "Dominic",
@@ -286,7 +286,7 @@
         },
         {
           "id": "away_10",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 10,
           "is_starter": true,
           "first_name": "Honoré",
@@ -294,7 +294,7 @@
         },
         {
           "id": "away_11",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 11,
           "is_starter": true,
           "first_name": "Hayden",
@@ -302,7 +302,7 @@
         },
         {
           "id": "away_9",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 9,
           "is_starter": true,
           "first_name": "Jakub",
@@ -310,7 +310,7 @@
         },
         {
           "id": "away_13",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 13,
           "is_starter": false,
           "first_name": "Vidar",
@@ -318,7 +318,7 @@
         },
         {
           "id": "away_12",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 12,
           "is_starter": false,
           "first_name": "Gordon",
@@ -326,7 +326,7 @@
         },
         {
           "id": "away_15",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 15,
           "is_starter": false,
           "first_name": "Salvador",
@@ -334,7 +334,7 @@
         },
         {
           "id": "away_16",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 16,
           "is_starter": false,
           "first_name": "Verner",
@@ -342,7 +342,7 @@
         },
         {
           "id": "away_18",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 18,
           "is_starter": false,
           "first_name": "Alain",
@@ -350,7 +350,7 @@
         },
         {
           "id": "away_21",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 21,
           "is_starter": false,
           "first_name": "Assar",
@@ -358,7 +358,7 @@
         },
         {
           "id": "away_17",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 17,
           "is_starter": false,
           "first_name": "Sean",
@@ -366,7 +366,7 @@
         },
         {
           "id": "away_19",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 19,
           "is_starter": false,
           "first_name": "Marcin",
@@ -374,7 +374,7 @@
         },
         {
           "id": "away_20",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 20,
           "is_starter": false,
           "first_name": "Eugène",

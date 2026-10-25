@@ -39,7 +39,7 @@ def test_demo_matchday_only_reorders_the_calendar():
     assert results(a) == results(b)
     for lg, md in ((a, 30), (b, 12)):
         fixtures = lg.schedule[md - 1].tolist()
-        assert [CLUBS.index("Rovers"), CLUBS.index("United")] in fixtures
+        assert [CLUBS.index("Varleigh"), CLUBS.index("Yarnford")] in fixtures
 
 
 def test_calendar_is_a_double_round_robin():
@@ -131,10 +131,10 @@ def test_observer_is_not_the_truth_and_learns(league):
 
 
 def test_with_result_replaces_one_score(league):
-    rovers, united = CLUBS.index("Rovers"), CLUBS.index("United")
-    hit = (league.schedule[..., 0] == rovers) & (league.schedule[..., 1] == united)
-    changed = league.with_result("Rovers", "United", 5, 2)
-    assert changed.table(38)["goals_for"][rovers] - league.table(38)["goals_for"][rovers] == 5 - int(league.home_goals[hit][0])
+    varleigh, yarnford = CLUBS.index("Varleigh"), CLUBS.index("Yarnford")
+    hit = (league.schedule[..., 0] == varleigh) & (league.schedule[..., 1] == yarnford)
+    changed = league.with_result("Varleigh", "Yarnford", 5, 2)
+    assert changed.table(38)["goals_for"][varleigh] - league.table(38)["goals_for"][varleigh] == 5 - int(league.home_goals[hit][0])
     assert np.array_equal(changed.table(29)["points"], league.table(29)["points"]), "the demo fixture is on matchday 30"
 
 
@@ -144,7 +144,7 @@ def test_demo_fixture_coupling():
     assert demo["expected_goals"] == {"home": 0.98, "away": 1.79}  # true strengths: for generator.generate_match
     assert demo["prior_expected_goals"] == {"home": 1.25, "away": 2.26}  # observer: for the win-probability model
     c = demo["context"]
-    assert (c["home_club"], c["home_rank"], c["home_points"], c["away_club"], c["away_rank"], c["away_points"]) == ("Rovers", 16, 28, "United", 3, 57)
+    assert (c["home_club"], c["home_rank"], c["home_points"], c["away_club"], c["away_rank"], c["away_points"]) == ("Varleigh", 16, 28, "Yarnford", 3, 57)
     assert c["home_played"] == c["away_played"] == 29
     assert c["points_gap_home_minus_away"] == -29
     for key, value in c.items():

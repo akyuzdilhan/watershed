@@ -144,7 +144,7 @@ def _squad(rng: np.random.Generator, side: str, formation: str, surnames: set[st
 def make_teams(rng: np.random.Generator, home_xg: float, away_xg: float) -> tuple[Team, Team, str]:
     """The two teams of a fixture and a fictional referee name. No surname appears twice among the 40 players and the referee."""
     surnames: set[str] = set()
-    home = Team("home", "Rovers", "4-3-3", home_xg, _squad(rng, "home", "4-3-3", surnames))
-    away = Team("away", "United", "4-2-3-1", away_xg, _squad(rng, "away", "4-2-3-1", surnames))
+    home = Team("home", "Varleigh", "4-3-3", home_xg, _squad(rng, "home", "4-3-3", surnames))
+    away = Team("away", "Yarnford", "4-2-3-1", away_xg, _squad(rng, "away", "4-2-3-1", surnames))
     referee = f"{_pick(rng, FIRST_NAMES, set())} {_pick(rng, SURNAMES, surnames)}"
     return home, away, referee

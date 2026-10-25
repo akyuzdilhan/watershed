@@ -9,7 +9,7 @@ from worker.insight_history import HistoryView, comeback_stage
 from worker.insight_rarity import bits, laplace, poisson_sf, value
 from worker.pipeline import JsonFileSink, MemorySink, Pipeline, ThreadedSink
 
-CLUBS = ["Rovers", "United"] + [f"Club {c}" for c in "ABCDEFGHIJKLMNOPQR"]
+CLUBS = ["Varleigh", "Yarnford"] + [f"Club {c}" for c in "ABCDEFGHIJKLMNOPQR"]
 
 
 class FakeHistory:
@@ -142,7 +142,7 @@ def test_history_view_reads_the_contract_api(history):
     view = HistoryView(history)
     assert view.n == 12 * 380 and view.first_season == "1976/77" and view.current_season == "1988/89"
     assert all(f.goals_of("home") == sum(1 for g in f.goals if g.side == "home") for f in view.features[:200])
-    assert view.runs()["current"]["Rovers"]["unbeaten"] >= 0
+    assert view.runs()["current"]["Varleigh"]["unbeaten"] >= 0
 
 
 def test_demo_substitute_scores_four_never_before(demo_run, demo):
@@ -174,14 +174,14 @@ def test_demo_comeback_from_two_down(demo_run):
     _, docs = demo_run
     won = docs["comeback-home-2-3"]
     hf = won["headline_facts"]
-    assert won["status"] == "proposed" and (hf["team"], hf["deficit_goals"], hf["trailing_score"], hf["stage"], hf["score"]) == ("Rovers", 2, "0-2", "won", "5-2")
+    assert won["status"] == "proposed" and (hf["team"], hf["deficit_goals"], hf["trailing_score"], hf["stage"], hf["score"]) == ("Varleigh", 2, "0-2", "won", "5-2")
     assert 0 < hf["history_count"] < hf["history_opportunities"]
     assert 0.005 < won["rarity"]["p"] < 0.3  # sensible: a comeback from two down is rare, not unheard of
     assert won["rarity"]["basis"].startswith("teams 2 or more goals down that won: ")
     for stage in ("2-1", "2-2"):
         assert docs[f"comeback-home-{stage}"]["status"] == "superseded"
     lost = docs["ht-lead-lost-away-2"]
-    assert (lost["headline_facts"]["team"], lost["headline_facts"]["half_time_score"], lost["headline_facts"]["stage"]) == ("United", "0-2", "lost")
+    assert (lost["headline_facts"]["team"], lost["headline_facts"]["half_time_score"], lost["headline_facts"]["stage"]) == ("Yarnford", "0-2", "lost")
 
 
 def test_voided_goals_are_never_counted(demo_run, demo):

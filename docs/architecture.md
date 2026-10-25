@@ -107,7 +107,7 @@ The win probability before an action uses the state just before its sequence num
 
 ## Writer and Verifier
 
-1. `card_facts` turns a card into facts with explicit names (`rovers_wp_before_pct`, `save_value_pts`, `shot_xg_pct`) and a meaning for each field. Win probabilities are clamped to 1 to 99% before the final whistle.
+1. `card_facts` turns a card into facts with explicit names (`varleigh_wp_before_pct`, `save_value_pts`, `shot_xg_pct`) and a meaning for each field. Win probabilities are clamped to 1 to 99% before the final whistle.
 2. The Writer agent (Agent Framework, `FoundryWriter`) is asked for one JSON object per language. It fetches the facts with the `get_moment` function tool and must list, in `claims`, every number it writes with the field it comes from. Output is capped at 3,000 tokens.
 3. The Verifier rejects the draft if any number in the text is not claimed, a claim does not match its field, a percentage comes from a field that is not a percentage, a decimal probability appears, a language is missing, or the JSON is invalid. Unknown capitalised names and over-long texts are reported but do not block.
 4. A rejected draft gets one retry. After that, or once the match has used its 40 model calls, the fixed `TemplateWriter` writes the card from the same facts; its output always verifies.
