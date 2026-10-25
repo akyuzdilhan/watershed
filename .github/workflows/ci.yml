@@ -24,11 +24,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            src/worker/constraints.txt
+      # The worker image's pins apply here too: the tests run on the versions the image installs, and a minimum raised in
+      # pyproject.toml above a pin fails here rather than in the image build.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[azure,agents,web,dev]"
+          pip install -c src/worker/constraints.txt -e ".[azure,agents,web,dev]"
       # No Azure credentials here: the tests run on synthetic data and the template writer only.
       - name: Tests
         run: pytest -q

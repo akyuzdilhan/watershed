@@ -10,7 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml LICENSE ./
 COPY src ./src
-RUN pip install ".[azure,agents]"
+# Exact versions from src/worker/constraints.txt (in the copied src/): two builds of the same commit install the same Python packages.
+RUN pip install -c src/worker/constraints.txt ".[azure,agents]"
 # The demo replay, read by the replay job (python -m generator.publish data/replay/demo-0007.jsonl.gz)
 COPY data/replay ./data/replay
 # The league history behind the insights and the storyline (data/history/9/, about 2.5 MB). Deterministic for a seed and
