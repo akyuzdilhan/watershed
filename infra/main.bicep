@@ -35,6 +35,18 @@ param workerExtraArgs string = ''
 @description('Client id of the Entra app registration for Easy Auth on the web app. Empty: Easy Auth is off.')
 param webAuthClientId string = ''
 
+@description('Optional allow-list of producers (comma-separated sign-in names). Empty: any user Easy Auth signs in.')
+param webProducers string = ''
+
+@minValue(0)
+@maxValue(2)
+@description('Minimum replicas of the web app: 0 scales to zero when idle, 1 keeps one warm (for example while the demo is judged).')
+param webMinReplicas int = 0
+
+@minValue(1)
+@description('Requests per minute allowed to one client IP on the web app.')
+param webRateLimitPerMin int = 600
+
 var tags = { 'azd-env-name': environmentName }
 var placeholderImage = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -60,6 +72,9 @@ module resources 'resources.bicep' = {
     foundryReasoningEffort: foundryReasoningEffort
     workerExtraArgs: workerExtraArgs
     webAuthClientId: webAuthClientId
+    webProducers: webProducers
+    webMinReplicas: webMinReplicas
+    webRateLimitPerMin: webRateLimitPerMin
   }
 }
 
