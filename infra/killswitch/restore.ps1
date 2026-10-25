@@ -3,7 +3,7 @@
 Undoes the Watershed kill switch: recreates the Foundry deployments, re-enables the worker subscription, starts the worker container app.
 
 .DESCRIPTION
-Run by a human with `az login` (Contributor on the two resource groups is enough).
+Run by hand, signed in with `az login` (Contributor on the two resource groups is enough).
 The kill switch leaves the web app running, so there is nothing to restore there. A replay it stopped is not resumed: start a new run of the job when needed.
 The default deployments match the settings the runbook prints as RESTORE-SETTINGS in its job output; check them there if they changed.
 -DryRun prints what would be done. If a listing fails, the script stops with an error and does not report the restore as finished.

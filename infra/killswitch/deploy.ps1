@@ -3,7 +3,7 @@
 Deploys the Watershed kill switch (Automation runbook + webhook + action group) and wires it to the subscription budget.
 
 .DESCRIPTION
-Run by a human, logged in with `az login` as Owner (or User Access Administrator + Contributor) of the subscription.
+Run by hand, signed in with `az login` as Owner (or User Access Administrator + Contributor) of the subscription.
 Pass 1 deploys the resource group, Automation account, empty runbook, custom role and its two assignments.
 The script then uploads and publishes the runbook and asks Automation for a webhook URI.
 Pass 2 deploys the webhook, the action group and the budget with the kill switch notifications.
