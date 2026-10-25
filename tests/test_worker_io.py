@@ -695,6 +695,36 @@ def test_approvals_after_the_whistle_reach_the_recap_on_the_next_flush(demo):
     assert desk.written == 2
 
 
+def test_a_flush_reads_back_only_the_matches_finished_within_the_window(demo):
+    """A long-running worker flushes at every quiet session. It reads the cards of a finished match back for `recap_window_s` after the whistle, so an approval made then is in the recap; later, the match is left alone and a matchday of finished matches is not read again at each flush."""
+
+    class CountingSink(MemorySink):
+        reads = 0
+
+        def load_card(self, match_id, card_id):
+            self.reads += 1
+            return super().load_card(match_id, card_id)
+
+    stream, _ = demo
+    clock, sink = FakeClock(), CountingSink()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()), clock=clock, recap_window_s=600)
+    for m in stream:
+        pipeline.handle(m)
+    pipeline.flush()
+    goals = [json.loads(json.dumps(c)) for c in sink.cards.values() if c["moment"] == "goal" and c["status"] == "pending"]
+    console = Desk(sink)
+    console.approve(goals[0], "producer")
+    clock.now += 300
+    reads = sink.reads
+    pipeline.flush()
+    assert sink.reads > reads and pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"] == [goals[0]["id"]]
+    console.approve(goals[1], "producer")
+    clock.now += 600
+    reads = sink.reads
+    pipeline.flush()
+    assert sink.reads == reads and pipeline.recaps["demo-0007"]["analysis"]["cards_on_air"] == [goals[0]["id"]]
+
+
 def test_approvals_the_console_writes_survive_the_next_cards(demo, tmp_path):
     """Locally the console writes each approval into cards.json while the match goes on (here every card once, as soon as it is written): the worker's later writes keep them, and the recap counts them."""
     stream, _ = demo

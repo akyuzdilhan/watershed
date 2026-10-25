@@ -7,6 +7,7 @@ import copy
 import json
 import logging
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -283,7 +284,9 @@ class Pipeline:
     recap: bool = True  # with a desk: the post-match recap once the final whistle is processed, written again if the feed changes a card after it, or if a flush finds a producer decision made since
     recaps: dict[str, dict] = field(default_factory=dict)
     _recapped: dict[str, tuple] = field(default_factory=dict)  # per match: (card id, status, version) of each card the last recap was written from
-    _whistled: set[str] = field(default_factory=set)  # matches whose full_time message has been processed (Match.full_time_seq is set as soon as it is released)
+    recap_window_s: float = 3600.0  # how long after its final whistle a flush still reads a match's cards back for the producer's decisions
+    clock: object = time.monotonic  # seconds, for recap_window_s
+    _whistled: dict[str, float] = field(default_factory=dict)  # match id -> clock when its full_time message was processed (Match.full_time_seq is set as soon as it is released)
     _tables: dict[str, list] = field(default_factory=dict)  # per match: (event id, table if the score holds) of each goal given a season context
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
@@ -294,11 +297,12 @@ class Pipeline:
         return self._process(match, ready)
 
     def flush(self) -> list[dict]:
-        """Processes what the reorder buffers still hold. A finished match gets its recap written again when a producer decided on one of its cards since the last one (the listener flushes when a session goes quiet)."""
+        """Processes what the reorder buffers still hold. A match finished less than `recap_window_s` ago gets its recap written again when a producer decided on one of its cards since the last one (the listener flushes when a session goes quiet); older ones are not read back."""
         out = []
         for match in self.matches.values():
             out += self._process(match, match.flush())
-            if self.recap and match.match_id in self._whistled and match.match_id in self.spotters:
+            whistled = self._whistled.get(match.match_id)
+            if self.recap and whistled is not None and self.clock() - whistled <= self.recap_window_s and match.match_id in self.spotters:
                 self._recap(match, self.spotters[match.match_id], self.timelines.get(match.match_id, []), only_if_changed=True)
         return out
 
@@ -308,7 +312,7 @@ class Pipeline:
             self.sink.event(m)
             whistle = m["type"] == "full_time" and match.match_id not in self._whistled
             if whistle:
-                self._whistled.add(match.match_id)
+                self._whistled[match.match_id] = self.clock()
             spotter = self.spotters.get(match.match_id)
             if spotter is None and match.info is not None:
                 spotter = self.spotters[match.match_id] = Spotter(match, make_model(match, SkellamWinProb), self.threshold)
