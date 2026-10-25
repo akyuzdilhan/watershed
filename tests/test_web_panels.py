@@ -318,7 +318,7 @@ def margins_in(fig: dict) -> list[str]:
             + ([title] if " m beyond" in title or " m behind" in title else []))
 
 
-def test_a_visitor_sees_the_graphics_without_the_offside_margins(public):
+def test_a_visitor_sees_the_graphics_without_the_offside_margins(public, monkeypatch):
     feed = public.feed(MATCH)
     item, margin = official_run(feed)
     values = {**ON_GRAPHICS, "c-g-kind.value": "tactics", "c-g-item.value": item}
@@ -334,6 +334,8 @@ def test_a_visitor_sees_the_graphics_without_the_offside_margins(public):
     assert visitor["layout"]["meta"]["offside"]["line_x"] and "beyond the second-last defender" in visitor["layout"]["title"]["text"]  # the line and the call stay
     shots = dash_post("c-g-figure.figure", {**ON_GRAPHICS, "c-g-kind.value": "shots"}, "c-g-kind.value")
     assert shots["c-g-figure"]["figure"]["data"]  # every other graphic as the producer sees it
+    monkeypatch.setenv("PUBLIC_MODE", "0")  # locally, the local producer sees everything
+    assert margins_in(dash_post("c-g-figure.figure", values, "c-g-item.value")["c-g-figure"]["figure"])
 
 
 def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypatch):
@@ -369,6 +371,10 @@ def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypat
     for shown in (words(seen["visitor", run["key"]]["c-i-detail"]), words(seen["visitor", run["key"]]["c-s-detail"])):  # the duo's lines: proposed text, signed by persona
         assert "Suggested lines" in shown and "never voiced" in shown and "Commentary" not in shown, shown
     assert f"{PERSONAS['wren'].short}: " in words(seen["visitor", run["key"]]["c-i-detail"]) and "wren: " not in words(seen["visitor", run["key"]]["c-i-detail"])
+    monkeypatch.setenv("PUBLIC_MODE", "0")  # locally, the local producer has every control and every figure
+    local = dash_post("c-r-detail.children", {**ON_INSIGHTS, "c-i-list.value": rare["id"]}, "c-i-list.value")
+    assert [local[b]["disabled"] for b in ("c-i-approve", "c-i-reject", "c-s-approve", "c-s-reject")] == [False] * 4
+    assert feedback_ids(local["c-i-detail"]) and fact_keys(local["c-i-detail"]) == set(rare["headline_facts"])
 
 
 def test_a_visitor_cannot_approve_or_reject_an_insight_or_the_storyline(public):
