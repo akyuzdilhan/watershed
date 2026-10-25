@@ -8,8 +8,8 @@ from generator import generate_match
 from worker import recap as recap_cli
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, MemorySink, Pipeline
-from worker.recap import MAX_WORDS, RULED_OUT_WORDS, analyse, build_recap, recap_facts, verify_recap
-from worker.writer import TemplateWriter, sentences
+from worker.recap import MAX_WORDS, RULED_OUT_WORDS, RecapTemplateWriter, analyse, build_recap, recap_facts, season_facts, verify_recap
+from worker.writer import TemplateWriter, sentences, word_count
 
 
 def run_desk(seed: int, story: str = "random", sink=None, frames: bool = False):
@@ -34,7 +34,7 @@ def test_demo_recap_is_verified_in_three_languages(demo):
     assert sorted(t["lang"] for t in recap["texts"]) == ["en", "es", "fr"] and recap["machine_translated"] == ["es"]
     for t in recap["texts"]:
         for section, limit in MAX_WORDS.items():
-            assert 0 < len(t[section].split()) <= limit
+            assert 0 < word_count(t[section]) <= limit  # "44 %" is one word
     assert recap["facts"]["final_score"] == "Rovers 5-2 United" and recap["facts"]["half_time_score"] == "Rovers 0-2 United"
 
 
@@ -79,7 +79,7 @@ def test_recap_tells_the_goals_ruled_out_and_why(demo):
 
 def test_disallowed_goals_can_be_passed_explicitly(demo):
     cards, state, _, _ = demo
-    plain = [{k: v for k, v in c.items() if k != "ruled_out"} for c in cards]  # a desk written before the ruled_out record
+    plain = [{k: v for k, v in c.items() if k not in ("ruled_out", "var_decision")} for c in cards]  # a desk written before the cards recorded VAR decisions
     assert build_recap(plain, state)["analysis"]["disallowed_goals"] == []
     given = [{"minute_label": "63'", "team": "home", "player": "Dorian Lightfoot", "reason": "offside", "margin_cm": 25}]
     recap = build_recap(plain, state, disallowed=given)
@@ -168,3 +168,84 @@ def test_cli_writes_recap_next_to_the_cards(tmp_path, monkeypatch, capsys):
     written = json.loads((tmp_path / "demo-0007" / "recap.json").read_text(encoding="utf-8"))
     assert written["verification"]["verified"] and written["id"] == "recap-demo-0007"
     assert json.loads(capsys.readouterr().out)["id"] == "recap-demo-0007"
+
+
+# --- the table after the match -------------------------------------------------------------------------
+
+SEASON_FACTS = {"season_rovers_rank_before": 17, "season_rovers_relegation_chance_before_pct": 11, "season_rovers_relegation_chance_after_pct": 4}
+
+
+@pytest.mark.parametrize("lang,matchday,provisional", [
+    ("en", "Rovers move from 17th to 16th once the matchday is played", "With this result, Rovers are provisionally 14th (17th before the match)"),
+    ("fr", "Après la journée, Rovers est 16e (17e avant le match)", "Avec ce résultat, Rovers est provisoirement 14e (17e avant le match)"),
+    ("es", "Tras la jornada, el Rovers queda 16.º (17.º antes del partido)", "Con este resultado, el Rovers es provisionalmente 14.º (17.º antes del partido)"),
+])
+def test_the_season_sentence_gives_the_rank_after_the_matchday_or_says_it_is_provisional(lang, matchday, provisional):
+    writer = RecapTemplateWriter({"season_slug": "rovers", "season_club": "Rovers"})
+    for facts, expected in ((SEASON_FACTS | {"season_rovers_rank_after_matchday": 16}, matchday), (SEASON_FACTS | {"season_rovers_rank_after": 14}, provisional)):
+        text, claims = writer.fill(writer.season_sentence(lang, facts), facts)
+        assert text.replace("\xa0", " ").startswith(expected) and {c["source_field"] for c in claims} <= set(facts), text
+
+
+def test_season_facts_keep_the_rank_after_the_matchday_and_no_league_points(monkeypatch):
+    import worker.storyline as storyline
+
+    extra = {"final_score": "Rovers 5-2 United"}
+    for club, ranks, chances in (("rovers", (17, 14, 16), (11, 4)), ("united", (18, 18, 19), (34, 52))):
+        extra |= {f"{club}_rank_before": ranks[0], f"{club}_rank_after": ranks[1], f"{club}_rank_after_matchday": ranks[2], f"{club}_points_before": 28, f"{club}_points_after": 31,
+                  f"{club}_in_drop_zone_before": ranks[0] >= 18, f"{club}_in_drop_zone_after": ranks[1] >= 18, f"{club}_relegation_chance_before_pct": chances[0],
+                  f"{club}_relegation_chance_after_pct": chances[1], f"{club}_relegation_change_pts": abs(chances[1] - chances[0]), f"{club}_relegation_change_direction": "down"}
+    monkeypatch.setattr(storyline, "post_match", lambda story, home, away: (dict(extra), {k: k for k in extra}))
+    facts, meanings, roles = {}, {}, {}
+    analysis = {"score": {"home": 5, "away": 2}, "teams": {"home": "Rovers", "away": "United"}, "winner": "home"}
+    season_facts({"focus": {"Rovers": "relegation", "United": "relegation"}}, analysis, facts, meanings, roles)
+    assert facts["season_rovers_rank_after_matchday"] == 16 and "season_rovers_rank_after" not in facts and set(meanings) == set(facts)
+    assert facts["season_rovers_in_drop_zone_after_matchday"] is False and facts["season_united_in_drop_zone_after_matchday"] is True
+    assert not [k for k in facts if k.endswith("_in_drop_zone_after")] and not [k for k in facts if "points" in k.split("_")]
+    assert roles == {"season_club": "Rovers", "season_slug": "rovers"}  # the winner's season: its chance of going down moved by 7 points
+
+
+# --- texts and typography -----------------------------------------------------------------------------
+
+def test_every_language_keeps_its_moments_sentence_and_its_typography(demo):
+    _, _, _, recap = demo
+    texts = {t["lang"]: t for t in recap["texts"]}
+    for lang, words in (("en", "Top moments: "), ("fr", "Moments les plus lourds\xa0: "), ("es", "Momentos de más peso: ")):
+        assert words in texts[lang]["analyst"], texts[lang]["analyst"]
+    winner = recap["facts"]["winner"]  # in the demo the winner is also the fan team and the team of the turning point
+    for section in MAX_WORDS:
+        fr = texts["fr"][section]
+        assert not re.search(r" [:;%?!]", fr) and not re.search(rf"\b(?:le|la|les|du|des|au|aux)\s+{winner}\b|\b[ld]['’]\s?{winner}\b", fr), fr  # no article before a club
+    assert re.search(r"à la \d+'", texts["fr"]["recap"]), texts["fr"]["recap"]  # "à la 66'", not "à 66'"
+    es = texts["es"]
+    assert f"El {winner} cayó" in es["recap"] and f"llevó al {winner}" in es["recap"] and f"para el {winner}" in es["fan"], es  # the article before a club
+
+
+# --- goals ruled out by VAR ---------------------------------------------------------------------------
+
+def stored(cards, offside_call=None, keep_ruled_out=True):
+    """The cards as a store that keeps no feed events gives them back: the desk could not find the margin; `var_decision` is what the worker put on the card."""
+    out = []
+    for c in json.loads(json.dumps(cards)):
+        if c.get("ruled_out"):
+            cause = c["ruled_out"]["cause"]
+            c["var_decision"] = {"reason": cause, "call": offside_call if cause == "var_offside" else None, "margin_m": None}
+            if keep_ruled_out:
+                c["ruled_out"]["margin_cm"] = None
+            else:
+                c.pop("ruled_out")
+        out.append(c)
+    return out
+
+
+@pytest.mark.parametrize("call,words", [("tight", "offside by a whisker"), ("clear", "clear offside")])
+@pytest.mark.parametrize("keep_ruled_out", [True, False])
+def test_the_offside_call_survives_a_store_without_feed_events(demo, call, words, keep_ruled_out):
+    cards, state, _, _ = demo
+    recap = build_recap(stored(cards, call, keep_ruled_out), state)
+    en = next(t for t in recap["texts"] if t["lang"] == "en")
+    assert [g["reason"] for g in recap["analysis"]["disallowed_goals"]] == ["offside", "handball"] and recap["verification"]["verified"]
+    assert f"({words})" in en["recap"] and f"({words})" in en["analyst"] and "(handball)" in en["recap"]
+    assert recap["facts"]["disallowed_1_offside_call"] == call and not any("margin" in k for k in recap["facts"])
+
+

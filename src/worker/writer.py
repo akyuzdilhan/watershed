@@ -212,14 +212,27 @@ def offside_call(margin_cm: int) -> str:
     return "tight" if margin_cm <= TIGHT_OFFSIDE_CM else "clear"
 
 
+def var_ruling(card: dict) -> dict:
+    """Why VAR ruled a goal out, from the worker's `var_decision` (`{reason, call, margin_m}`) or else the desk's `ruled_out`: {reason, call, margin_cm}. The call, tight or clear, is what goes on air; the margin stays with the producer."""
+    ruled, var = card.get("ruled_out") or {}, card.get("var_decision") or {}
+    cause = str(var.get("reason") or ruled.get("cause") or "")
+    reason = ruled.get("reason") or (cause[4:] if cause.startswith("var_") else cause) or "other"
+    margin = ruled.get("margin_cm")
+    if not isinstance(margin, int) or isinstance(margin, bool):
+        m = var.get("margin_m")
+        margin = round(100 * m) if isinstance(m, (int, float)) and not isinstance(m, bool) else None
+    call = var.get("call") if var.get("call") in ("tight", "clear") else offside_call(margin) if margin is not None else None
+    return {"reason": reason, "call": call if reason == "offside" else None, "margin_cm": margin}
+
+
 def ruling_facts(card: dict, teams: dict[str, str]) -> tuple[dict, dict]:
-    """A goal card's facts plus why VAR ruled it out: the reason, and for offside whether it was tight or clear (the margin in centimetres stays on the card for the console, never on air)."""
+    """A goal card's facts plus why VAR ruled it out: the reason, and for offside whether it was tight or clear (the margin stays on the card for the console, never on air)."""
     facts, meanings = card_facts(card, teams)
-    ruled = card.get("ruled_out") or {}
-    facts["ruled_out_reason"] = ruled.get("reason") or "other"
+    ruling = var_ruling(card)
+    facts["ruled_out_reason"] = ruling["reason"]
     meanings["ruled_out_reason"] = "why VAR ruled the goal out: offside, handball or other"
-    if isinstance(ruled.get("margin_cm"), int):
-        facts["offside_call"] = offside_call(ruled["margin_cm"])
+    if ruling["call"]:
+        facts["offside_call"] = ruling["call"]
         meanings["offside_call"] = "how close the offside was: tight (within the distance a sprinting player covers between two frames) or clear"
     return facts, meanings
 
@@ -261,6 +274,11 @@ def numbers_in(text: str) -> list[tuple[float, bool]]:
 
 def normalise(text: str) -> str:
     return text.replace("\xa0", " ").replace("\u202f", " ")
+
+
+def word_count(text: str) -> int:
+    """Words of a text, French typography aside: "44 %" or "Rovers :" count as one word."""
+    return sum(1 for w in normalise(text).split() if re.search(r"[\w\u00c0-\u00ff]", w))
 
 
 def claim_ok(claim: Any, facts: dict) -> bool:
@@ -396,8 +414,8 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
         found = re.search(STRUCTURAL_RULES[rule][1], headline)
         if found:
             add(rule, headline)
-    if len(headline.split()) > HEADLINE_MAX_WORDS or len(why.split()) > WHY_MAX_WORDS:
-        add("too_long", f"{len(headline.split())} + {len(why.split())} words")
+    if word_count(headline) > HEADLINE_MAX_WORDS or word_count(why) > WHY_MAX_WORDS:
+        add("too_long", f"{word_count(headline)} + {word_count(why)} words")
     counts = {v for v in facts.values() if isinstance(v, int) and not isinstance(v, bool)}
     for w in re.findall(r"[\wÀ-ÿ]+", body.lower()):
         if w in COUNT_WORDS.get(lang, {}) and COUNT_WORDS[lang][w] not in counts:
@@ -488,7 +506,7 @@ def verify(text: str, languages: list[str], facts: dict, style: bool = True) -> 
             "unclaimed_numbers": nums["unclaimed_numbers"],
             "wrong_unit": nums["wrong_unit"],
             "unknown_names": sorted(set(names_ok(str(d.get("headline", "")), facts)) | set(names_ok(str(d.get("why", "")), facts))),  # each starts a sentence
-            "length_ok": len(str(d.get("headline", "")).split()) <= HEADLINE_MAX_WORDS and len(str(d.get("why", "")).split()) <= WHY_MAX_WORDS,
+            "length_ok": word_count(str(d.get("headline", ""))) <= HEADLINE_MAX_WORDS and word_count(str(d.get("why", ""))) <= WHY_MAX_WORDS,
             "style_errors": errors,
             "style_warnings": warnings,
         }
@@ -515,8 +533,8 @@ def verify_duo(lines: Any, languages: list[str], facts: dict) -> dict:
         nums = check_numbers(text, claims, facts)
         errors, warnings = style_issues("", text, str(l.get("lang")), nums["good"], facts)
         warnings = [w for w in warnings if w["rule"] != "too_long"]
-        if len(text.split()) > DUO_LINE_MAX_WORDS:
-            warnings.append({"rule": "too_long", "text": f"{len(text.split())} words"})
+        if word_count(text) > DUO_LINE_MAX_WORDS:
+            warnings.append({"rule": "too_long", "text": f"{word_count(text)} words"})
         entry = {"lang": l.get("lang"), "speaker": l.get("speaker"), "keys_ok": isinstance(l.get("line"), str) and bool(text.strip()) and l.get("lang") in languages,
                  "bad_claims": nums["bad_claims"], "unclaimed_numbers": nums["unclaimed_numbers"], "wrong_unit": nums["wrong_unit"],
                  "unknown_names": names_ok(text, facts, ALLOWED_NAMES), "style_errors": errors, "style_warnings": warnings}
