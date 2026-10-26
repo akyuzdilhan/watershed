@@ -580,26 +580,39 @@ def _region(text: str, name: str) -> tuple[int, int] | None:
     return start, end + len(end_marker(name))
 
 
+REGIONS = ("report", "bench", "timing")  # their order in the file
+
+
+def check(existing: str) -> None:
+    """Raises ValueError when `existing` cannot be spliced: no "report" region, or a region with a begin marker and no end marker."""
+    if _region(existing, "report") is None:
+        raise ValueError("no generated region in the existing file: put the markers around its generated part, or write to a new file")
+    for name in REGIONS:
+        _region(existing, name)
+
+
 def splice(existing: str | None, blocks: dict[str, str | None]) -> str:
     """The file to write: the layout of `render` with markers when there is no file yet, else `existing` with each generated region replaced.
 
     A region whose block is None keeps what it holds (a benchmark table read on another machine), except "timing", which is removed with its
-    markers: its numbers belong to one run. A block whose region the file lacks is appended at the end. A file without the "report" region is
-    refused rather than overwritten: the markers are what tells the generated text from the text written by hand.
+    markers: its numbers belong to one run. A block whose region the file lacks goes right after the last region before it in `REGIONS` (section 6
+    after the benchmark table, before any section written by hand). A file without the "report" region is refused rather than overwritten
+    (`check`): the markers are what tells the generated text from the text written by hand.
     """
     if existing is None:
         parts = [_wrap("report", blocks["report"]), BENCH_HEADING, _wrap("bench", blocks.get("bench") or NO_BENCH)]
         if blocks.get("timing"):
             parts.append(_wrap("timing", blocks["timing"]))
         return "\n\n".join(parts) + "\n"
-    if _region(existing, "report") is None:
-        raise ValueError("no generated region in the existing file: put the markers around its generated part, or write to a new file")
+    check(existing)
     text = existing
     for name, body in blocks.items():
         span = _region(text, name)
         if span is None:
             if body is not None:
-                text = text.rstrip("\n") + "\n\n" + _wrap(name, body) + "\n"
+                before = [r for r in (_region(text, n) for n in REGIONS[:REGIONS.index(name)]) if r is not None]
+                anchor = max(end for _, end in before)  # the "report" region is always there (check)
+                text = text[:anchor] + "\n\n" + _wrap(name, body) + (text[anchor:] or "\n")
             continue
         start, end = span
         if body is not None:
@@ -655,10 +668,12 @@ def main() -> None:
     parser.add_argument("--no-robustness", action="store_true", help="skip the perturbed replays (about 6 times faster)")
     parser.add_argument("--timing", action="store_true", help="add the processing time per match (not deterministic)")
     args = parser.parse_args()
+    existing = args.out.read_text(encoding="utf-8") if args.out and args.out.exists() else None
+    if existing is not None:
+        check(existing)  # before the evaluation, which takes minutes: a file without markers is refused at once and left as it is
     report = evaluate(range(args.start, args.start + args.seeds), demo=not args.no_demo, robustness=not args.no_robustness, bench_dir=args.bench)
     if args.out:
-        existing = args.out.read_text(encoding="utf-8") if args.out.exists() else None
-        md = splice(existing, render_blocks(report, timing=args.timing))  # before any write: a file without markers is left as it is
+        md = splice(existing, render_blocks(report, timing=args.timing))
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(md, encoding="utf-8", newline="\n")
     else:
