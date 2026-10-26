@@ -14,6 +14,8 @@
     "foundryMaxTokens": { "value": "${FOUNDRY_MAX_TOKENS=5000}" },
     "foundryRecapReasoningEffort": { "value": "${FOUNDRY_RECAP_REASONING_EFFORT=low}" },
     "foundryRecapMaxTokens": { "value": "${FOUNDRY_RECAP_MAX_TOKENS=6000}" },
+    "foundryAnalystModel": { "value": "${FOUNDRY_ANALYST_MODEL=gpt-5-mini}" },
+    "foundryAnalystReasoningEffort": { "value": "${FOUNDRY_ANALYST_REASONING_EFFORT=low}" },
     "workerExtraArgs": { "value": "${WORKER_EXTRA_ARGS=}" },
     "workerMinReplicas": { "value": "${WORKER_MIN_REPLICAS=0}" },
     "webAuthClientId": { "value": "${WEB_AUTH_CLIENT_ID=}" },

@@ -25,6 +25,8 @@ param foundryReasoningEffort string = 'medium'
 param foundryMaxTokens string = '5000'
 param foundryRecapReasoningEffort string = 'low'
 param foundryRecapMaxTokens string = '6000'
+param foundryAnalystModel string = 'gpt-5-mini'
+param foundryAnalystReasoningEffort string = 'low'
 
 @description('Role granted to the worker on the Foundry account. Default: Foundry User (formerly Azure AI User), the role Microsoft documents for calling models through a Foundry project.')
 param foundryRoleId string = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
@@ -487,6 +489,15 @@ var workerEnv = [
   {
     name: 'FOUNDRY_RECAP_MAX_TOKENS'
     value: foundryRecapMaxTokens
+  }
+  {
+    // read only with --analyst foundry (src/worker/analysis.py)
+    name: 'FOUNDRY_ANALYST_MODEL'
+    value: foundryAnalystModel
+  }
+  {
+    name: 'FOUNDRY_ANALYST_REASONING_EFFORT'
+    value: foundryAnalystReasoningEffort
   }
   {
     // Appended to the worker command by src/worker/Dockerfile

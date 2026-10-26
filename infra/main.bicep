@@ -30,6 +30,8 @@ param foundryReasoningEffort string = 'medium'
 param foundryMaxTokens string = '5000'
 param foundryRecapReasoningEffort string = 'low'
 param foundryRecapMaxTokens string = '6000'
+param foundryAnalystModel string = 'gpt-5-mini'
+param foundryAnalystReasoningEffort string = 'low'
 
 @description('Extra worker arguments, for example --auto-approve in judging mode.')
 param workerExtraArgs string = ''
@@ -79,6 +81,8 @@ module resources 'resources.bicep' = {
     foundryMaxTokens: foundryMaxTokens
     foundryRecapReasoningEffort: foundryRecapReasoningEffort
     foundryRecapMaxTokens: foundryRecapMaxTokens
+    foundryAnalystModel: foundryAnalystModel
+    foundryAnalystReasoningEffort: foundryAnalystReasoningEffort
     workerExtraArgs: workerExtraArgs
     workerMinReplicas: workerMinReplicas
     webAuthClientId: webAuthClientId

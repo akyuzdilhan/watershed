@@ -65,3 +65,7 @@ Each card prints `analyst <writer>, verified <bool>, <status>: <the English note
 - The frames come from the generator, not from tracking: even with the stricter count, the shape is regular and the nearest defender always closes down.
 - The threat share is a simple surface (the xG of a shot from a location), not a fitted expected-threat model.
 - A right number can still carry a wrong reading ("had taken over" for a share that moved from 28% to 63%); the notes are for the control room, and a human reads them before anything is said.
+
+## Model
+
+In Azure the Analyst calls gpt-5-mini at low effort (`FOUNDRY_ANALYST_MODEL`, `FOUNDRY_ANALYST_REASONING_EFFORT`, set by `infra/main.parameters.json`), the Writer and the recap gpt-5.4-nano. On the demo match on 26/10, with 20 calls at most, gpt-5.4-nano had 2 of 10 notes verified, the rest refused (too many numbers, comparisons the wrong way, a player other than the shooter finishing) and written by the template; gpt-5-mini had 7 of 10, with 15 calls.
