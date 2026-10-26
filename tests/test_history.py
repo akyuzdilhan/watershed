@@ -46,21 +46,22 @@ def test_save_and_load(h, tmp_path):
     assert loaded.count("goal") == h.count("goal")
     pid = h.demo_ids["home-20"]
     assert loaded.player(pid) == h.player(pid)
-    assert loaded.head_to_head("Rovers", "United") == h.head_to_head("Rovers", "United")
+    assert loaded.head_to_head("Varleigh", "Yarnford") == h.head_to_head("Varleigh", "Yarnford")
 
 
-def test_api_shapes(h):
+def test_api_shapes(h, demo_info):
     assert h.seasons() == ["2021/22", "2022/23", "2023/24", "2024/25", "2025/26"]
-    club = h.club("Rovers")
+    club = h.club("Varleigh")
     assert set(club) == {"name", "founded_season", "seasons_in_league", "titles", "best_finish"}
     assert club["founded_season"][4] == "/" and 0 <= club["seasons_in_league"] <= SEASONS
     with pytest.raises(KeyError):
         h.club("Nowhere Town")
-    m = h.matches(lambda m: m["home"] == "Rovers")[0]
+    m = h.matches(lambda m: m["home"] == "Varleigh")[0]
     assert {"id", "season", "matchday", "home", "away", "home_goals", "away_goals", "half_time", "goals", "substitutions", "cards", "lineups"} <= set(m)
     p = h.player(h.demo_ids["home-20"])
     assert set(p) == {"id", "name", "position", "born", "clubs", "goals", "appearances", "sub_appearances"}
-    assert p["name"] == "Dorian Lightfoot" and p["position"] == "ST" and p["clubs"][-1] == {"season": "2025/26", "club": "Rovers"}
+    sub = next(q["name"] for q in demo_info["teams"]["home"]["bench"] if q["id"] == "home-20")
+    assert p["name"] == sub and p["position"] == "ST" and p["clubs"][-1] == {"season": "2025/26", "club": "Varleigh"}
     assert 0 <= p["sub_appearances"] <= p["appearances"]
     with pytest.raises(KeyError):
         h.player("P999999")
@@ -74,13 +75,13 @@ def test_api_shapes(h):
 
 
 def test_head_to_head_newest_first(h):
-    rows = h.head_to_head("Rovers", "United")
-    assert rows and rows == h.head_to_head("United", "Rovers")
+    rows = h.head_to_head("Varleigh", "Yarnford")
+    assert rows and rows == h.head_to_head("Yarnford", "Varleigh")
     assert {"season", "matchday", "home", "away", "home_goals", "away_goals", "half_time"} == set(rows[0])
     order = [(h.seasons().index(r["season"]), r["matchday"]) for r in rows]
     assert order == sorted(order, reverse=True)
-    assert all({r["home"], r["away"]} == {"Rovers", "United"} for r in rows)
-    n = h.count("match", lambda m: {m["home"], m["away"]} == {"Rovers", "United"})
+    assert all({r["home"], r["away"]} == {"Varleigh", "Yarnford"} for r in rows)
+    n = h.count("match", lambda m: {m["home"], m["away"]} == {"Varleigh", "Yarnford"})
     assert len(rows) == n
 
 
@@ -98,7 +99,7 @@ def test_promotion_and_relegation(h):
     last = h.seasons()[-1]
     next_season = {r["club"] for r in h.table(last) if r["rank"] <= 17} | {r["club"] for r in h.table(last, tier=2) if r["rank"] <= 3}
     assert next_season == set(CLUBS), "the season after the history is the one of League.create(seed)"
-    assert {"Rovers", "United"} <= set(h.clubs(last))
+    assert {"Varleigh", "Yarnford"} <= set(h.clubs(last))
 
 
 def test_tables_match_the_scores(h):
@@ -176,13 +177,13 @@ def test_count_and_last_agree(h):
 
 def test_link_demo(h, demo_info):
     squads = demo_squads()
-    assert [p.name for p in squads["Rovers"]] == [p["name"] for p in demo_info["teams"]["home"]["starting"] + demo_info["teams"]["home"]["bench"]]
+    assert [p.name for p in squads["Varleigh"]] == [p["name"] for p in demo_info["teams"]["home"]["starting"] + demo_info["teams"]["home"]["bench"]]
     link = link_demo(h, demo_info)
     assert len(link) == 40 and all(link.values())
     assert link == h.demo_ids
     last = h.seasons()[-1]
     for key, pid in link.items():
-        club = "Rovers" if key.startswith("home") else "United"
+        club = "Varleigh" if key.startswith("home") else "Yarnford"
         p = h.player(pid)
         assert p["clubs"][-1] == {"season": last, "club": club}
         assert h.find_players(p["name"], last) == [pid]
@@ -206,8 +207,8 @@ def test_fifty_seasons():
     assert 1 <= f["sub_braces_per_season"] <= 6 and f["sub_hat_tricks_total"] <= 20
     assert 1 <= f["comebacks_from_two_down_per_season"] <= 6 and 5 <= f["late_winners_per_season"] <= 25
     assert 30 <= f["red_cards_per_season"] <= 70
-    rovers, united = h50.club("Rovers"), h50.club("United")
-    assert rovers["seasons_in_league"] >= 20 and united["seasons_in_league"] >= 20 and rovers["titles"] + united["titles"] >= 1
+    varleigh, yarnford = h50.club("Varleigh"), h50.club("Yarnford")
+    assert varleigh["seasons_in_league"] >= 20 and yarnford["seasons_in_league"] >= 20 and varleigh["titles"] + yarnford["titles"] >= 1
     # careers: a debut around 18, the last season by 37
     first = {}
     for p, s in zip(h50.a["ps_player"].tolist(), h50.a["ps_season"].tolist()):

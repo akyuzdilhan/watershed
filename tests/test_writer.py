@@ -8,7 +8,7 @@ from worker.duo import fill
 from worker.writer import (CARD_KIND_WORDS, EM_DASH, EXAMPLE_FACTS, EXAMPLE_REPLY, LANGUAGE_RULES, STRUCTURAL_RULES, TEMPLATES, WRITER_INSTRUCTIONS, TemplateWriter,
                            card_facts, draft, no_em_dash, numbers_in, style_issues, template_values, verify, verify_reply)
 
-TEAMS = {"home": "Rovers", "away": "United"}
+TEAMS = {"home": "Varleigh", "away": "Yarnford"}
 MOMENT_FACTS = {
     "goal": {"team_wp_before_pct": 30, "team_wp_after_pct": 54},
     "save": {"xg_pct": 20, "team_wp_before_pct": 81, "team_wp_if_goal_pct": 24},
@@ -22,8 +22,8 @@ def make_card(moment="goal", side="home", facts=None):
             "player": {"name": "Elio Ingleby"}, "score_before": {"home": 0, "away": 2}, "facts": facts or MOMENT_FACTS[moment]}
 
 
-GOAL_FACTS, _ = card_facts(make_card(), TEAMS)  # Rovers goal: rovers_wp_before_pct 30, rovers_wp_after_pct 54, swing_pts 24
-BEFORE, AFTER, SWING = ({"value": 30, "source_field": "rovers_wp_before_pct"}, {"value": 54, "source_field": "rovers_wp_after_pct"},
+GOAL_FACTS, _ = card_facts(make_card(), TEAMS)  # Varleigh goal: varleigh_wp_before_pct 30, varleigh_wp_after_pct 54, swing_pts 24
+BEFORE, AFTER, SWING = ({"value": 30, "source_field": "varleigh_wp_before_pct"}, {"value": 54, "source_field": "varleigh_wp_after_pct"},
                         {"value": 24, "source_field": "swing_pts"})
 GOAL_CLAIMS = [BEFORE, AFTER, SWING]
 
@@ -36,21 +36,21 @@ def rules(headline, why, lang, claims=GOAL_CLAIMS, facts=GOAL_FACTS):
 # --- each rule, good and bad, in each language ------------------------------------------------------
 
 GOOD = {
-    "en": ("Ingleby scores for Rovers", "Rovers go from 30% to 54% to win, up 24 points."),
-    "fr": ("Ingleby marque pour Rovers", "Rovers passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux."),
-    "es": ("Gol de Ingleby para el Rovers", "El Rovers pasa del 30% al 54% de opciones de ganar: 24 puntos más."),
+    "en": ("Ingleby scores for Varleigh", "Varleigh go from 30% to 54% to win, up 24 points."),
+    "fr": ("Ingleby marque pour Varleigh", "Varleigh passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux."),
+    "es": ("Gol de Ingleby para el Varleigh", "El Varleigh pasa del 30% al 54% de opciones de ganar: 24 puntos más."),
 }
 
 BAD = [  # (lang, headline, why, rule that must fail)
-    ("fr", "Ingleby marque pour Rovers", "Rovers passe de 30 % à 54 % : swing de 24 points.", "forbidden_word"),
-    ("fr", "Ingleby marque pour Rovers", "Rovers prend le momentum, de 30 % à 54 %, soit 24 points.", "forbidden_word"),
-    ("es", "Gol de Ingleby para el Rovers", "El Rovers pasa del 30% al 54%: un swing de 24 puntos.", "forbidden_word"),
-    ("es", "Gol de Ingleby para el Rovers", "Momentum del Rovers, del 30% al 54%: 24 puntos más.", "forbidden_word"),
-    ("fr", "Ingleby relance l'United", "Rovers passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
-    ("fr", "Ingleby marque pour le Rovers", "Rovers passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
-    ("fr", "Ingleby punit la défense d'United", "Rovers passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
-    ("fr", "Ingleby, l’homme du Rovers", "Rovers passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
-    ("fr", "Ingleby marque", "Les chances des Rovers passent de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
+    ("fr", "Ingleby marque pour Varleigh", "Varleigh passe de 30 % à 54 % : swing de 24 points.", "forbidden_word"),
+    ("fr", "Ingleby marque pour Varleigh", "Varleigh prend le momentum, de 30 % à 54 %, soit 24 points.", "forbidden_word"),
+    ("es", "Gol de Ingleby para el Varleigh", "El Varleigh pasa del 30% al 54%: un swing de 24 puntos.", "forbidden_word"),
+    ("es", "Gol de Ingleby para el Varleigh", "Momentum del Varleigh, del 30% al 54%: 24 puntos más.", "forbidden_word"),
+    ("fr", "Ingleby relance l'Yarnford", "Varleigh passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
+    ("fr", "Ingleby marque pour le Varleigh", "Varleigh passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
+    ("fr", "Ingleby punit la défense d'Yarnford", "Varleigh passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
+    ("fr", "Ingleby, l’homme du Varleigh", "Varleigh passe de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
+    ("fr", "Ingleby marque", "Les chances des Varleigh passent de 30 % à 54 %, soit 24 points de mieux.", "article_before_team"),
     ("en", "Ingleby scores", "Win chance jumped after the goal.", "probability_without_team"),
     ("en", "Ingleby scores", "The goal lifts their chances of winning.", "probability_without_team"),
     ("fr", "Ingleby marque", "Le but fait bondir les chances.", "probability_without_team"),
@@ -58,18 +58,18 @@ BAD = [  # (lang, headline, why, rule that must fail)
     ("en", "Ingleby scores", "The goal takes them from 30% to 54%, up 24 points.", "probability_number_without_team"),
     ("fr", "Ingleby marque", "Le but les fait passer de 30 % à 54 %, soit 24 points.", "probability_number_without_team"),
     ("es", "Gol de Ingleby", "El gol los lleva del 30% al 54%: 24 puntos más.", "probability_number_without_team"),
-    ("en", "Ingleby scores for Rovers", "Rovers go from 30% to 54% to win: a +24-point swing.", "signed_number"),
-    ("fr", "Ingleby marque pour Rovers", "Rovers passe de 30 % à 54 % de chances de gagner : +24 points.", "signed_number"),
-    ("es", "Gol de Ingleby para el Rovers", "El Rovers, con un +24 en puntos de diferencia, llega al 54%.", "signed_number"),
-    ("en", "Ingleby scores for Rovers", "Rovers go from 30% to 54% to win, a jump of 24.", "points_unit_missing"),
-    ("fr", "Ingleby marque pour Rovers", "Rovers passe de 30 % à 54 % de chances de gagner, un bond de 24.", "points_unit_missing"),
-    ("es", "Gol de Ingleby para el Rovers", "El Rovers pasa del 30% al 54% de opciones de ganar: sube 24.", "points_unit_missing"),
-    ("en", "Ingleby scores for Rovers", "Rovers now have 54 points of win probability, up 24 points.", "points_not_from_pts_field"),
-    ("fr", "Ingleby marque pour Rovers", "Rovers atteint 54 points de probabilité, soit 24 points de mieux.", "points_not_from_pts_field"),
-    ("es", "Gol de Ingleby para el Rovers", "El Rovers llega a 54 puntos de probabilidad: 24 puntos más.", "points_not_from_pts_field"),
-    ("en", "52' Ingleby scores for Rovers", GOOD["en"][1], "headline_starts_with_number"),
-    ("fr", "52' : Ingleby marque pour Rovers", GOOD["fr"][1], "headline_starts_with_number"),
-    ("es", "52' Gol de Ingleby para el Rovers", GOOD["es"][1], "headline_starts_with_number"),
+    ("en", "Ingleby scores for Varleigh", "Varleigh go from 30% to 54% to win: a +24-point swing.", "signed_number"),
+    ("fr", "Ingleby marque pour Varleigh", "Varleigh passe de 30 % à 54 % de chances de gagner : +24 points.", "signed_number"),
+    ("es", "Gol de Ingleby para el Varleigh", "El Varleigh, con un +24 en puntos de diferencia, llega al 54%.", "signed_number"),
+    ("en", "Ingleby scores for Varleigh", "Varleigh go from 30% to 54% to win, a jump of 24.", "points_unit_missing"),
+    ("fr", "Ingleby marque pour Varleigh", "Varleigh passe de 30 % à 54 % de chances de gagner, un bond de 24.", "points_unit_missing"),
+    ("es", "Gol de Ingleby para el Varleigh", "El Varleigh pasa del 30% al 54% de opciones de ganar: sube 24.", "points_unit_missing"),
+    ("en", "Ingleby scores for Varleigh", "Varleigh now have 54 points of win probability, up 24 points.", "points_not_from_pts_field"),
+    ("fr", "Ingleby marque pour Varleigh", "Varleigh atteint 54 points de probabilité, soit 24 points de mieux.", "points_not_from_pts_field"),
+    ("es", "Gol de Ingleby para el Varleigh", "El Varleigh llega a 54 puntos de probabilidad: 24 puntos más.", "points_not_from_pts_field"),
+    ("en", "52' Ingleby scores for Varleigh", GOOD["en"][1], "headline_starts_with_number"),
+    ("fr", "52' : Ingleby marque pour Varleigh", GOOD["fr"][1], "headline_starts_with_number"),
+    ("es", "52' Gol de Ingleby para el Varleigh", GOOD["es"][1], "headline_starts_with_number"),
 ]
 
 
@@ -85,34 +85,34 @@ def test_bad_examples_fail_their_rule(lang, headline, why, rule):
 
 
 def test_swing_is_plain_english_but_forbidden_in_french_and_spanish():
-    assert "forbidden_word" not in rules("Ingleby scores for Rovers", "Rovers go from 30% to 54% to win: a swing of 24 points.", "en")[0]
+    assert "forbidden_word" not in rules("Ingleby scores for Varleigh", "Varleigh go from 30% to 54% to win: a swing of 24 points.", "en")[0]
 
 
 def test_club_names_without_article_pass_in_french():
-    for headline in ("Ingleby marque pour United", "Ingleby punit United", "Le gardien de Rovers s'incline", "Ingleby face à United"):
+    for headline in ("Ingleby marque pour Yarnford", "Ingleby punit Yarnford", "Le gardien de Varleigh s'incline", "Ingleby face à Yarnford"):
         assert "article_before_team" not in rules(headline, GOOD["fr"][1], "fr")[0]
 
 
 def test_spanish_keeps_its_article_before_a_club():
-    assert rules("Gol de Ingleby para el Rovers", "El Rovers pasa del 30% al 54% de opciones de ganar: 24 puntos más.", "es") == (set(), set())
+    assert rules("Gol de Ingleby para el Varleigh", "El Varleigh pasa del 30% al 54% de opciones de ganar: 24 puntos más.", "es") == (set(), set())
 
 
 def test_decimal_percentage_fails_in_every_language():
-    facts = dict(GOAL_FACTS, rovers_wp_after_pct=54.5)
-    for lang, why in (("en", "Rovers now have 54.5% to win."), ("fr", "Rovers passe à 54,5 % de chances de gagner."), ("es", "El Rovers sube al 54,5% de opciones.")):
-        assert "decimal_percent" in rules("Ingleby scores", why, lang, [{"value": 54.5, "source_field": "rovers_wp_after_pct"}], facts)[0]
+    facts = dict(GOAL_FACTS, varleigh_wp_after_pct=54.5)
+    for lang, why in (("en", "Varleigh now have 54.5% to win."), ("fr", "Varleigh passe à 54,5 % de chances de gagner."), ("es", "El Varleigh sube al 54,5% de opciones.")):
+        assert "decimal_percent" in rules("Ingleby scores", why, lang, [{"value": 54.5, "source_field": "varleigh_wp_after_pct"}], facts)[0]
 
 
 def test_warnings_do_not_fail():
     cases = [
-        ("en", "Rovers level at 52'", GOOD["en"][1], "minute_in_headline"),
+        ("en", "Varleigh level at 52'", GOOD["en"][1], "minute_in_headline"),
         ("fr", "Ingleby marque à la 52e minute", GOOD["fr"][1], "minute_in_headline"),
         ("es", "Gol de Ingleby en el minuto 52", GOOD["es"][1], "minute_in_headline"),
-        ("en", "Ingleby scores", "Rovers' win chance goes from 30% to 54%, up 24 points.", "jargon"),
-        ("fr", "Ingleby marque pour Rovers", "Rovers passe de 30% à 54% de chances de gagner, soit 24 points de mieux.", "percent_without_space"),
-        ("fr", "Quel goal de Ingleby pour Rovers", GOOD["fr"][1], "anglicism"),
-        ("es", "Gol de Ingleby para el Rovers", "El Rovers pasa del 30% al 54% de opciones de ganar, 24 en puntos de diferencia.", "clumsy_phrase"),
-        ("en", "Elio Ingleby scores a wonderful goal for Rovers today", GOOD["en"][1], "too_long"),
+        ("en", "Ingleby scores", "Varleigh's win chance goes from 30% to 54%, up 24 points.", "jargon"),
+        ("fr", "Ingleby marque pour Varleigh", "Varleigh passe de 30% à 54% de chances de gagner, soit 24 points de mieux.", "percent_without_space"),
+        ("fr", "Quel goal de Ingleby pour Varleigh", GOOD["fr"][1], "anglicism"),
+        ("es", "Gol de Ingleby para el Varleigh", "El Varleigh pasa del 30% al 54% de opciones de ganar, 24 en puntos de diferencia.", "clumsy_phrase"),
+        ("en", "Elio Ingleby scores a wonderful goal for Varleigh today", GOOD["en"][1], "too_long"),
     ]
     for lang, headline, why, rule in cases:
         errors, warnings = rules(headline, why, lang)
@@ -145,20 +145,20 @@ def test_style_error_fails_verification_and_warning_does_not(lang):
 
 def test_the_live_run_examples_now_fail():
     cases = [
-        ("fr", "Ingleby relance Rovers", "Le but fait bondir les chances : swing de 24 points.", [SWING]),
-        ("fr", "Ingleby punit l'United", "Rovers passe de 30 % à 54 %, soit 24 points de mieux.", GOAL_CLAIMS),
+        ("fr", "Ingleby relance Varleigh", "Le but fait bondir les chances : swing de 24 points.", [SWING]),
+        ("fr", "Ingleby punit l'Yarnford", "Varleigh passe de 30 % à 54 %, soit 24 points de mieux.", GOAL_CLAIMS),
         ("en", "Ingleby scores", "Win chance jumped to 54%: a +24-point swing.", [AFTER, SWING]),
-        ("es", "Gol de Ingleby", "El Rovers llega al 54%, con un +24 en puntos de diferencia.", [AFTER, SWING]),
-        ("en", "52' Rovers pull one back", GOOD["en"][1], GOAL_CLAIMS + [{"value": 52, "source_field": "minute"}]),
+        ("es", "Gol de Ingleby", "El Varleigh llega al 54%, con un +24 en puntos de diferencia.", [AFTER, SWING]),
+        ("en", "52' Varleigh pull one back", GOOD["en"][1], GOAL_CLAIMS + [{"value": 52, "source_field": "minute"}]),
     ]
     for lang, headline, why, claims in cases:
         assert not verify(reply(lang, headline, why, claims), [lang], GOAL_FACTS)[1]["verified"], (lang, headline, why)
 
 
 def test_number_checks_are_unchanged():
-    _, report = verify(reply("en", "Ingleby scores for Rovers", "Rovers go from 30% to 61% to win, up 24 points."), ["en"], GOAL_FACTS)
+    _, report = verify(reply("en", "Ingleby scores for Varleigh", "Varleigh go from 30% to 61% to win, up 24 points."), ["en"], GOAL_FACTS)
     assert report["cards"][0]["unclaimed_numbers"] == [61.0] and not report["verified"]
-    _, report = verify(reply("en", "Ingleby scores for Rovers", "Rovers go from 30% to 54% to win, up 24%."), ["en"], GOAL_FACTS)
+    _, report = verify(reply("en", "Ingleby scores for Varleigh", "Varleigh go from 30% to 54% to win, up 24%."), ["en"], GOAL_FACTS)
     assert report["cards"][0]["wrong_unit"] == [24.0] and not report["verified"]
 
 
@@ -213,7 +213,7 @@ class FakeWriter:
 
 
 def test_a_style_failure_is_retried_with_feedback():
-    bad = reply("fr", "Ingleby punit l'United", GOOD["fr"][1])
+    bad = reply("fr", "Ingleby punit l'Yarnford", GOOD["fr"][1])
     good = reply("fr", *GOOD["fr"])
     writer = FakeWriter([bad, good])
     d = asyncio.run(draft(make_card(), TEAMS, writer, ["fr"]))
@@ -229,31 +229,31 @@ def test_two_style_failures_fall_back_to_the_template():
 
 # --- on-air rules -------------------------------------------------------------------------------------
 
-SAVE_FACTS, _ = card_facts(make_card("save"), TEAMS)  # Rovers save: rovers_wp_after_save_pct 81, rovers_wp_if_goal_pct 24, save_value_pts 57
-SAVE_CLAIMS = [{"value": 81, "source_field": "rovers_wp_after_save_pct"}, {"value": 24, "source_field": "rovers_wp_if_goal_pct"}]
+SAVE_FACTS, _ = card_facts(make_card("save"), TEAMS)  # Varleigh save: varleigh_wp_after_save_pct 81, varleigh_wp_if_goal_pct 24, save_value_pts 57
+SAVE_CLAIMS = [{"value": 81, "source_field": "varleigh_wp_after_save_pct"}, {"value": 24, "source_field": "varleigh_wp_if_goal_pct"}]
 
 
 @pytest.mark.parametrize("lang,why,starts", [
-    ("en", "The save lifts Rovers from 24% to 81% to win.", True),
-    ("en", "Rovers stay on 81% to win instead of 24% had it gone in.", False),
-    ("fr", "L'arrêt fait passer Rovers de 24 % à 81 % de chances de gagner.", True),
-    ("fr", "Rovers reste à 81 % de chances de gagner, contre 24 % si le tir était entré.", False),
-    ("fr", "Rovers reste à 81 % de chances de gagner au lieu de 24 %.", False),
-    ("es", "La parada lleva al Rovers del 24% al 81% de opciones de ganar.", True),
-    ("es", "El Rovers sigue en el 81% de opciones de ganar, frente al 24% si hubiera entrado.", False),
-    ("es", "El Rovers sigue en el 81% de opciones de ganar en lugar del 24%.", False),
-    ("fr", "Rovers reste à 81 % de chances de gagner ; elles auraient été de 24 % si le tir était entré.", False),
-    ("es", "El Rovers sigue en el 81% de opciones de ganar; estuvo a un paso del 24%.", False),
-    ("en", "Rovers stay on 81% to win, a goal away from 24%.", False),
+    ("en", "The save lifts Varleigh from 24% to 81% to win.", True),
+    ("en", "Varleigh stay on 81% to win instead of 24% had it gone in.", False),
+    ("fr", "L'arrêt fait passer Varleigh de 24 % à 81 % de chances de gagner.", True),
+    ("fr", "Varleigh reste à 81 % de chances de gagner, contre 24 % si le tir était entré.", False),
+    ("fr", "Varleigh reste à 81 % de chances de gagner au lieu de 24 %.", False),
+    ("es", "La parada lleva al Varleigh del 24% al 81% de opciones de ganar.", True),
+    ("es", "El Varleigh sigue en el 81% de opciones de ganar, frente al 24% si hubiera entrado.", False),
+    ("es", "El Varleigh sigue en el 81% de opciones de ganar en lugar del 24%.", False),
+    ("fr", "Varleigh reste à 81 % de chances de gagner ; elles auraient été de 24 % si le tir était entré.", False),
+    ("es", "El Varleigh sigue en el 81% de opciones de ganar; estuvo a un paso del 24%.", False),
+    ("en", "Varleigh stay on 81% to win, a goal away from 24%.", False),
 ])
 def test_a_value_if_goal_is_never_a_starting_point(lang, why, starts):
-    errors, _ = rules("Rovers", why, lang, SAVE_CLAIMS, SAVE_FACTS)
+    errors, _ = rules("Varleigh", why, lang, SAVE_CLAIMS, SAVE_FACTS)
     assert ("if_goal_as_start" in errors) == starts, (why, errors)
 
 
 def test_a_save_told_from_its_value_if_goal_is_retried():
-    bad = reply("en", "Big save for Rovers", "The save lifts Rovers from 24% to 81% to win.", SAVE_CLAIMS)
-    good = reply("en", "Big save for Rovers", "Rovers stay on 81% to win instead of 24% had it gone in.", SAVE_CLAIMS)
+    bad = reply("en", "Big save for Varleigh", "The save lifts Varleigh from 24% to 81% to win.", SAVE_CLAIMS)
+    good = reply("en", "Big save for Varleigh", "Varleigh stay on 81% to win instead of 24% had it gone in.", SAVE_CLAIMS)
     writer = FakeWriter([bad, good])
     d = asyncio.run(draft(make_card("save"), TEAMS, writer, ["en"]))
     assert d.writer == "fake" and d.attempts == 2 and d.report["verified"] and "if_goal_as_start" in writer.notes[1]
@@ -261,36 +261,36 @@ def test_a_save_told_from_its_value_if_goal_is_retried():
 
 def test_the_em_dash_is_refused_in_a_text_and_normalised_in_a_reply():
     scorer = make_card()["player"]["name"]
-    assert "em_dash" in rules(f"{scorer} scores for Rovers", f"Rovers go from 30% to 54% to win {EM_DASH} up 24 points.", "en")[0]
-    assert no_em_dash(f"Rovers lead {EM_DASH} and how!") == "Rovers lead, and how!" and no_em_dash(f"Level! {EM_DASH} Rovers are back.") == "Level! Rovers are back."
-    model = json.dumps({"texts": [{"headline": f"{scorer} scores for Rovers", "why": f"Rovers go from 30% to 54% to win {EM_DASH} up 24 points.", "lang": "en", "claims": GOAL_CLAIMS}],
+    assert "em_dash" in rules(f"{scorer} scores for Varleigh", f"Varleigh go from 30% to 54% to win {EM_DASH} up 24 points.", "en")[0]
+    assert no_em_dash(f"Varleigh lead {EM_DASH} and how!") == "Varleigh lead, and how!" and no_em_dash(f"Level! {EM_DASH} Varleigh are back.") == "Level! Varleigh are back."
+    model = json.dumps({"texts": [{"headline": f"{scorer} scores for Varleigh", "why": f"Varleigh go from 30% to 54% to win {EM_DASH} up 24 points.", "lang": "en", "claims": GOAL_CLAIMS}],
                         "duo": [{"speaker": "wren", "lang": "en", "line": f"{scorer} {EM_DASH} what a goal!", "claims": []},
-                                {"speaker": "joss", "lang": "en", "line": "That goal is worth 24 points to Rovers.", "claims": [SWING]}]})
+                                {"speaker": "joss", "lang": "en", "line": "That goal is worth 24 points to Varleigh.", "claims": [SWING]}]})
     texts, lines, report = verify_reply(model, ["en"], GOAL_FACTS, duo=True)
-    assert report["verified"] and texts[0]["why"] == "Rovers go from 30% to 54% to win, up 24 points." and lines[0]["line"] == f"{scorer}, what a goal!"
+    assert report["verified"] and texts[0]["why"] == "Varleigh go from 30% to 54% to win, up 24 points." and lines[0]["line"] == f"{scorer}, what a goal!"
 
 
 @pytest.mark.parametrize("lang,why", [
-    ("en", "Rovers take 24 points with that goal, up to 54% to win."),
-    ("en", "Rovers gain 24 points: 54% to win now."),
-    ("fr", "En silence, Rovers vient de prendre 24 points : 54 % de chances de gagner."),
-    ("fr", "Rovers gagne 24 points et passe à 54 % de chances de gagner."),
-    ("es", "Sin hacer ruido, el Rovers acaba de ganar 24 puntos: 54% de opciones de ganar."),
-    ("es", "El Rovers suma 24 puntos y llega al 54% de opciones de ganar."),
-    ("en", "Rovers win 24 points with that goal, up to 54% to win."),
-    ("en", "Rovers pick up 24 points: 54% to win now."),
-    ("en", "Honours even, and Rovers take a point."),
-    ("fr", "Rovers empoche 24 points et passe à 54 % de chances de gagner."),
-    ("fr", "Match nul, et Rovers prend un point."),
-    ("es", "El Rovers consigue 24 puntos y llega al 54% de opciones de ganar."),
-    ("es", "Empate, y el Rovers saca un punto."),
+    ("en", "Varleigh take 24 points with that goal, up to 54% to win."),
+    ("en", "Varleigh gain 24 points: 54% to win now."),
+    ("fr", "En silence, Varleigh vient de prendre 24 points : 54 % de chances de gagner."),
+    ("fr", "Varleigh gagne 24 points et passe à 54 % de chances de gagner."),
+    ("es", "Sin hacer ruido, el Varleigh acaba de ganar 24 puntos: 54% de opciones de ganar."),
+    ("es", "El Varleigh suma 24 puntos y llega al 54% de opciones de ganar."),
+    ("en", "Varleigh win 24 points with that goal, up to 54% to win."),
+    ("en", "Varleigh pick up 24 points: 54% to win now."),
+    ("en", "Honours even, and Varleigh take a point."),
+    ("fr", "Varleigh empoche 24 points et passe à 54 % de chances de gagner."),
+    ("fr", "Match nul, et Varleigh prend un point."),
+    ("es", "El Varleigh consigue 24 puntos y llega al 54% de opciones de ganar."),
+    ("es", "Empate, y el Varleigh saca un punto."),
 ])
 def test_points_never_go_with_a_verb_of_league_points(lang, why):
-    assert "league_points_verb" in rules("Rovers", why, lang)[0], why
+    assert "league_points_verb" in rules("Varleigh", why, lang)[0], why
 
 
 @pytest.mark.parametrize("lang,why", [
-    ("en", "Rovers scored 5 from chances worth 1.3 expected goals: about one match in 101 goes that way."),
+    ("en", "Varleigh scored 5 from chances worth 1.3 expected goals: about one match in 101 goes that way."),
     ("en", "A brace off the bench: this league sees about 3 a season."),
     ("en", "It ranks first, 228 times rarer than the next fact."),
     ("en", "That is 14.2 bits of surprise."),
@@ -305,14 +305,14 @@ def test_points_never_go_with_a_verb_of_league_points(lang, why):
     ("es", "Nunca en 19.000 partidos."),
 ])
 def test_league_wide_rates_ratios_match_counts_and_bits_stay_off_air(lang, why):
-    assert "league_rate" in rules("Rovers", why, lang)[0], why
+    assert "league_rate" in rules("Varleigh", why, lang)[0], why
 
 
 def test_a_rarity_told_in_seasons_for_the_team_or_the_player_passes():
-    for lang, why in (("en", "Rovers had not won from 2 goals down since 2019/20, 7 seasons ago."), ("en", "Only the 6th hat-trick by a substitute in 50 seasons."),
-                      ("en", "Never, Wren. Not once in 50 seasons had Rovers won from 2 goals down."),
-                      ("fr", "Rovers n'avait plus gagné après avoir été mené de 2 buts depuis 2019/20, il y a 7 saisons."), ("es", "Primer póker de un suplente en 50 temporadas de liga.")):
-        assert "league_rate" not in rules("Rovers", why, lang)[0], why
+    for lang, why in (("en", "Varleigh had not won from 2 goals down since 2019/20, 7 seasons ago."), ("en", "Only the 6th hat-trick by a substitute in 50 seasons."),
+                      ("en", "Never, Wren. Not once in 50 seasons had Varleigh won from 2 goals down."),
+                      ("fr", "Varleigh n'avait plus gagné après avoir été mené de 2 buts depuis 2019/20, il y a 7 saisons."), ("es", "Primer póker de un suplente en 50 temporadas de liga.")):
+        assert "league_rate" not in rules("Varleigh", why, lang)[0], why
 
 
 def test_thousands_are_read_as_one_number():
@@ -328,16 +328,16 @@ def test_instructions_carry_the_on_air_rules():
 
 
 def test_league_table_points_never_reach_the_writer():
-    season = {"facts": {"score_now": "Rovers 1-2 United", "rovers_rank_if_score_holds": 16, "rovers_points_if_score_holds": 31, "rovers_relegation_change_since_kickoff_pts": 9},
-              "meanings": {"score_now": "score", "rovers_rank_if_score_holds": "rank", "rovers_points_if_score_holds": "league points", "rovers_relegation_change_since_kickoff_pts": "change"}}
+    season = {"facts": {"score_now": "Varleigh 1-2 Yarnford", "varleigh_rank_if_score_holds": 16, "varleigh_points_if_score_holds": 31, "varleigh_relegation_change_since_kickoff_pts": 9},
+              "meanings": {"score_now": "score", "varleigh_rank_if_score_holds": "rank", "varleigh_points_if_score_holds": "league points", "varleigh_relegation_change_since_kickoff_pts": "change"}}
     facts, meanings = card_facts(dict(make_card(), season_context=season), TEAMS)
-    assert facts["season_rovers_rank_if_score_holds"] == 16 and facts["season_rovers_relegation_change_since_kickoff_pts"] == 9
+    assert facts["season_varleigh_rank_if_score_holds"] == 16 and facts["season_varleigh_relegation_change_since_kickoff_pts"] == 9
     assert not [k for k in list(facts) + list(meanings) if "points" in k.split("_")]
 
 
 # --- red cards ------------------------------------------------------------------------------------------
 
-RED_CLAIMS = [{"value": 55, "source_field": "united_wp_before_pct"}, {"value": 40, "source_field": "united_wp_after_pct"}]
+RED_CLAIMS = [{"value": 55, "source_field": "yarnford_wp_before_pct"}, {"value": 40, "source_field": "yarnford_wp_after_pct"}]
 
 
 @pytest.mark.parametrize("kind,fact", [("second_yellow", "second_yellow"), ("red", "straight_red"), (None, None)])
@@ -368,9 +368,9 @@ def test_the_verifier_refuses_an_unnamed_player_and_a_card_kind_the_feed_did_not
     card = make_card("red_card", "away")
     player = card["player"]["name"]
     facts, _ = card_facts(card, TEAMS)
-    unnamed = verify(reply("en", "United down to ten", "The red card costs United: from 55% to 40% to win.", RED_CLAIMS), ["en"], facts)[1]
+    unnamed = verify(reply("en", "Yarnford down to ten", "The red card costs Yarnford: from 55% to 40% to win.", RED_CLAIMS), ["en"], facts)[1]
     assert not unnamed["verified"] and "player_not_named" in {e["rule"] for e in unnamed["cards"][0]["style_errors"]}
-    second = reply("en", f"Second yellow for {player}", "United go from 55% to 40% to win.", RED_CLAIMS)
+    second = reply("en", f"Second yellow for {player}", "Yarnford go from 55% to 40% to win.", RED_CLAIMS)
     for kind, ok in ((None, False), ("red", False), ("second_yellow", True)):
         facts, _ = card_facts(dict(card, **({"card_kind": kind} if kind else {})), TEAMS)
         report = verify(second, ["en"], facts)[1]

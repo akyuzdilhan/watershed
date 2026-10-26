@@ -16,16 +16,16 @@
         "play_direction": "left_right",
         "start_time": "2026-10-24T14:00:00.000Z",
         "end_time": "2026-10-24T14:48:38.940Z",
-        "left_team_id": "rovers",
-        "right_team_id": "united"
+        "left_team_id": "varleigh",
+        "right_team_id": "yarnford"
       },
       {
         "period": "second_half",
         "play_direction": "right_left",
         "start_time": "2026-10-24T15:03:38.940Z",
         "end_time": "2026-10-24T15:59:10.120Z",
-        "left_team_id": "united",
-        "right_team_id": "rovers"
+        "left_team_id": "yarnford",
+        "right_team_id": "varleigh"
       }
     ],
     "whistles": [
@@ -53,332 +53,332 @@
   },
   "teams": {
     "home": {
-      "id": "rovers",
+      "id": "varleigh",
       "players": [
         {
           "id": "home_1",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 1,
           "is_starter": true,
-          "first_name": "Umberto",
-          "last_name": "Valtonen"
+          "first_name": "Valdemar",
+          "last_name": "McGrory"
         },
         {
           "id": "home_2",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 2,
           "is_starter": true,
-          "first_name": "Bastien",
-          "last_name": "Hepworth"
+          "first_name": "Loui",
+          "last_name": "Pugh"
         },
         {
           "id": "home_5",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 5,
           "is_starter": true,
-          "first_name": "Caius",
-          "last_name": "Varga"
+          "first_name": "Andrew",
+          "last_name": "Fletcher"
         },
         {
           "id": "home_4",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 4,
           "is_starter": true,
-          "first_name": "Silas",
-          "last_name": "Achterberg"
+          "first_name": "Tomé",
+          "last_name": "Abrahamsson"
         },
         {
           "id": "home_3",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 3,
           "is_starter": true,
-          "first_name": "Gideon",
-          "last_name": "Jagger"
+          "first_name": "Brett",
+          "last_name": "Rivero"
         },
         {
           "id": "home_6",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 6,
           "is_starter": true,
-          "first_name": "Nevan",
-          "last_name": "Varga"
+          "first_name": "Rune",
+          "last_name": "Ford"
         },
         {
           "id": "home_8",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 8,
           "is_starter": true,
-          "first_name": "Ivo",
-          "last_name": "Selwood"
+          "first_name": "Paul",
+          "last_name": "Dunleavy"
         },
         {
           "id": "home_10",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 10,
           "is_starter": true,
-          "first_name": "Wendell",
-          "last_name": "Moravec"
+          "first_name": "Joaquim",
+          "last_name": "Kosznik"
         },
         {
           "id": "home_7",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 7,
           "is_starter": true,
-          "first_name": "Yanis",
-          "last_name": "Ackroyd"
+          "first_name": "Joseph",
+          "last_name": "Żuchowicz"
         },
         {
           "id": "home_9",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 9,
           "is_starter": true,
-          "first_name": "Hugo",
-          "last_name": "Uribe"
+          "first_name": "Oliwier",
+          "last_name": "McGlinchey"
         },
         {
           "id": "home_11",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 11,
           "is_starter": true,
-          "first_name": "Wendell",
-          "last_name": "Pennick"
+          "first_name": "Jeremías",
+          "last_name": "Davies"
         },
         {
           "id": "home_13",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 13,
           "is_starter": false,
-          "first_name": "Piers",
-          "last_name": "Uribe"
+          "first_name": "Severino",
+          "last_name": "McAloon"
         },
         {
           "id": "home_12",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 12,
           "is_starter": false,
-          "first_name": "Vito",
-          "last_name": "Calloway"
+          "first_name": "Jake",
+          "last_name": "Aroca"
         },
         {
           "id": "home_15",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 15,
           "is_starter": false,
-          "first_name": "Valen",
-          "last_name": "Jaramillo"
+          "first_name": "Werner",
+          "last_name": "Jourdan"
         },
         {
           "id": "home_16",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 16,
           "is_starter": false,
-          "first_name": "Nevan",
-          "last_name": "Valtonen"
+          "first_name": "Sabas",
+          "last_name": "McKernon"
         },
         {
           "id": "home_18",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 18,
           "is_starter": false,
-          "first_name": "Matteo",
-          "last_name": "Lindqvist"
+          "first_name": "Enzo",
+          "last_name": "Knowles"
         },
         {
           "id": "home_21",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 21,
           "is_starter": false,
-          "first_name": "Wilmer",
-          "last_name": "Achterberg"
+          "first_name": "Zachary",
+          "last_name": "Ahmad"
         },
         {
           "id": "home_17",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 17,
           "is_starter": false,
-          "first_name": "Valen",
-          "last_name": "Blackwood"
+          "first_name": "Warren",
+          "last_name": "Nielsen"
         },
         {
           "id": "home_19",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 19,
           "is_starter": false,
-          "first_name": "Ivo",
-          "last_name": "Castellan"
+          "first_name": "Pavel",
+          "last_name": "Hall"
         },
         {
           "id": "home_20",
-          "team_id": "rovers",
+          "team_id": "varleigh",
           "jersey_number": 20,
           "is_starter": false,
-          "first_name": "Dorian",
-          "last_name": "Lightfoot"
+          "first_name": "Marijn",
+          "last_name": "Scarpetta"
         }
       ]
     },
     "away": {
-      "id": "united",
+      "id": "yarnford",
       "players": [
         {
           "id": "away_1",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 1,
           "is_starter": true,
-          "first_name": "Zeke",
-          "last_name": "Thackeray"
+          "first_name": "Keelan",
+          "last_name": "Ehlert"
         },
         {
           "id": "away_2",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 2,
           "is_starter": true,
-          "first_name": "Ilan",
-          "last_name": "Moravec"
+          "first_name": "Conchur",
+          "last_name": "Kristiansson"
         },
         {
           "id": "away_5",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 5,
           "is_starter": true,
-          "first_name": "Hugo",
-          "last_name": "Wojcik"
+          "first_name": "Otto",
+          "last_name": "Meyer"
         },
         {
           "id": "away_6",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 6,
           "is_starter": true,
-          "first_name": "Wendell",
-          "last_name": "Garside"
+          "first_name": "Jesper",
+          "last_name": "Björk"
         },
         {
           "id": "away_3",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 3,
           "is_starter": true,
-          "first_name": "Ivo",
-          "last_name": "Moravec"
+          "first_name": "Pete",
+          "last_name": "Kristensen"
         },
         {
           "id": "away_4",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 4,
           "is_starter": true,
-          "first_name": "Emeric",
-          "last_name": "Tavares"
+          "first_name": "Max",
+          "last_name": "Martinez"
         },
         {
           "id": "away_8",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 8,
           "is_starter": true,
-          "first_name": "Florin",
-          "last_name": "Delacroix"
+          "first_name": "Mohammed",
+          "last_name": "Haynes"
         },
         {
           "id": "away_7",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 7,
           "is_starter": true,
-          "first_name": "Kester",
-          "last_name": "Kettering"
+          "first_name": "Dominic",
+          "last_name": "Carter"
         },
         {
           "id": "away_10",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 10,
           "is_starter": true,
-          "first_name": "Tobin",
-          "last_name": "Delacroix"
+          "first_name": "Honoré",
+          "last_name": "Haro"
         },
         {
           "id": "away_11",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 11,
           "is_starter": true,
-          "first_name": "Soren",
-          "last_name": "Szabo"
+          "first_name": "Hayden",
+          "last_name": "Mannion"
         },
         {
           "id": "away_9",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 9,
           "is_starter": true,
-          "first_name": "Vito",
-          "last_name": "Valtonen"
+          "first_name": "Jakub",
+          "last_name": "Méndez"
         },
         {
           "id": "away_13",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 13,
           "is_starter": false,
-          "first_name": "Umberto",
-          "last_name": "Kettering"
+          "first_name": "Vidar",
+          "last_name": "Cartwright"
         },
         {
           "id": "away_12",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 12,
           "is_starter": false,
-          "first_name": "Remy",
-          "last_name": "Ravensworth"
+          "first_name": "Gordon",
+          "last_name": "Doohan"
         },
         {
           "id": "away_15",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 15,
           "is_starter": false,
-          "first_name": "Nevan",
-          "last_name": "Garside"
+          "first_name": "Salvador",
+          "last_name": "Bolkesteijn"
         },
         {
           "id": "away_16",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 16,
           "is_starter": false,
-          "first_name": "Umberto",
-          "last_name": "Pennick"
+          "first_name": "Verner",
+          "last_name": "Field"
         },
         {
           "id": "away_18",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 18,
           "is_starter": false,
-          "first_name": "Aldo",
-          "last_name": "Varga"
+          "first_name": "Alain",
+          "last_name": "Johnsen"
         },
         {
           "id": "away_21",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 21,
           "is_starter": false,
-          "first_name": "Elio",
-          "last_name": "Zielinski"
+          "first_name": "Assar",
+          "last_name": "Morley"
         },
         {
           "id": "away_17",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 17,
           "is_starter": false,
-          "first_name": "Oskar",
-          "last_name": "Mossley"
+          "first_name": "Sean",
+          "last_name": "Shah"
         },
         {
           "id": "away_19",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 19,
           "is_starter": false,
-          "first_name": "Dorian",
-          "last_name": "Shacklock"
+          "first_name": "Marcin",
+          "last_name": "Tamayo"
         },
         {
           "id": "away_20",
-          "team_id": "united",
+          "team_id": "yarnford",
           "jersey_number": 20,
           "is_starter": false,
-          "first_name": "Nils",
-          "last_name": "Kettering"
+          "first_name": "Eugène",
+          "last_name": "Carnotte"
         }
       ]
     }

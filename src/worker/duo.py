@@ -49,13 +49,13 @@ PERSONAS: dict[str, Persona] = {
         voices={
             "en": Voice(vocabulary=("here we go", "what a moment", "lifeline", "turned on its head", "the noise", "they are not done"),
                         tics=("Hold on to your seats!", "Write it down!", "Oh, the drama of it!"),
-                        sample="Level! And every Rovers heart in the ground skips a beat!"),
+                        sample="Level! And every Varleigh heart in the ground skips a beat!"),
             "fr": Voice(vocabulary=("c'est parti", "quel moment", "bouée de sauvetage", "tout bascule", "le bruit du stade", "pas encore morts"),
                         tics=(f"Accrochez vos ceintures{NB}!", f"Notez-le quelque part{NB}!", f"Quel scénario{NB}!"),
                         sample=f"Égalisation{NB}! Tout le stade se réveille{NB}!"),
             "es": Voice(vocabulary=("allá vamos", "qué momento", "salvavidas", "se da la vuelta", "el rugido de la grada", "no están muertos"),
                         tics=("¡Agárrense fuerte!", "¡Apúntenlo!", "¡Qué guion!"),
-                        sample="¡Empata el Rovers y el estadio despierta!"),
+                        sample="¡Empata el Varleigh y el estadio despierta!"),
         }),
     "joss": Persona(
         id="joss", name="Joss Ferrier", short="Joss", role="co-commentator: the eye for detail and numbers",
@@ -67,13 +67,13 @@ PERSONAS: dict[str, Persona] = {
         voices={
             "en": Voice(vocabulary=("look at", "the detail", "put a number on it", "worth", "quietly", "the line"),
                         tics=("Look at the line.", "Small detail, big consequence.", "Numbers don't celebrate, but that one might."),
-                        sample="Put a number on it: Rovers go from 28% to 79% to win."),
+                        sample="Put a number on it: Varleigh go from 28% to 79% to win."),
             "fr": Voice(vocabulary=("regardez", "le détail", "mettons un chiffre dessus", "ça vaut", "l'air de rien", "la ligne"),
                         tics=("Regardez la ligne.", "Petit détail, grosses conséquences.", "Les chiffres ne célèbrent pas, mais celui-là, peut-être."),
-                        sample=f"Mettons un chiffre dessus{NB}: Rovers passe de 28{NB}% à 79{NB}% de chances de gagner."),
+                        sample=f"Mettons un chiffre dessus{NB}: Varleigh passe de 28{NB}% à 79{NB}% de chances de gagner."),
             "es": Voice(vocabulary=("miren", "el detalle", "pongámosle número", "vale", "sin hacer ruido", "la línea"),
                         tics=("Miren la línea.", "Pequeño detalle, gran consecuencia.", "Los números no celebran, pero ese quizá sí."),
-                        sample="Pongámosle número: el Rovers pasa del 28% al 79% de opciones de ganar."),
+                        sample="Pongámosle número: el Varleigh pasa del 28% al 79% de opciones de ganar."),
         }),
 }
 HEART, EYE = "wren", "joss"
@@ -116,7 +116,7 @@ def count_words(lang: str, n: int | None) -> dict:
 
 
 def fr_de(name: str) -> str:
-    """French "de" before a name: "d'Ivo Ellery", "de Dorian Lightfoot"."""
+    """French "de" before a name: "d'Ivo Ellery", "de Marijn Scarpetta"."""
     return f"d'{name}" if name[:1].upper() in "AEIOUYÉÈÂÎH" else f"de {name}"
 
 
@@ -521,7 +521,7 @@ class PhraseMemory:
         self.docs: dict[str, list[tuple[str, str, str]]] = {}  # doc id -> [(lang, kind, text)], kind "headline", "why" or "duo"
         self.versions: dict[str, int] = {}  # doc id -> version of what `docs` holds for it
         self.names: set[str] = set()
-        self.ruled_out: set[str] = set()  # score lines ("Rovers 3-2 United") of goals VAR took away: the next goal at that score is the one that counts
+        self.ruled_out: set[str] = set()  # score lines ("Varleigh 3-2 Yarnford") of goals VAR took away: the next goal at that score is the one that counts
 
     def _items(self, exclude: str | None = None):
         for doc_id, items in self.docs.items():

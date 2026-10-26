@@ -14,7 +14,7 @@ from league.table import pin, ranks, round_robin, standings
 
 MATCHDAYS = 2 * (N_CLUBS - 1)
 PRIOR_NOISE = 0.15  # standard deviation of the public prior around the truth, log scale, on attack and on defence
-DEMO_MATCHDAY = 30  # the matchday of Rovers v United, the demo match
+DEMO_MATCHDAY = 30  # the matchday of Varleigh v Yarnford, the demo match
 N_SIMS = 4000  # Monte Carlo seasons: a probability near 50 % has a standard error under 1 point
 TOP, RELEGATED = 4, 3
 

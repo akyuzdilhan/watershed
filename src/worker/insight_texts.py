@@ -2,7 +2,7 @@
 
 The generic lines of `writer.INSIGHT_TEMPLATES` stay for the kinds not covered here. Each number is a placeholder named after its fact field, so `duo.fill` claims it against that field and the Verifier checks it.
 
-What a viewer can picture: the feat named for who did it ("the first four-goal haul by a substitute in 50 seasons"), and a team's own landmark in seasons ("United's first away defeat after leading at half-time since 2020/21"). League-wide rates, match counts, ratios and bits ("once in 83", "about 3 a season", "228 times rarer", "0 in 19,000") never go on air or into a duo line: they stay for the producer in the console, in `rarity.basis` and `why_first`, and `writer.on_air` keeps them out of what the model sees.
+What a viewer can picture: the feat named for who did it ("the first four-goal haul by a substitute in 50 seasons"), and a team's own landmark in seasons ("Yarnford's first away defeat after leading at half-time since 2020/21"). League-wide rates, match counts, ratios and bits ("once in 83", "about 3 a season", "228 times rarer", "0 in 19,000") never go on air or into a duo line: they stay for the producer in the console, in `rarity.basis` and `why_first`, and `writer.on_air` keeps them out of what the model sees.
 
 Each fact can be told several times in a match (a brace, then a hat-trick, then the stat of the match at full time), so every case has at least two duo lines: the per-match memory never lets the same line be said twice.
 """
@@ -306,7 +306,7 @@ def values(facts: dict, lang: str) -> tuple[dict, dict]:
             vals[k] = v
         if isinstance(v, (int, float)) or any(c.isdigit() for c in str(v)):
             fields[k] = k
-    for side in ("home", "away"):  # storyline facts are keyed by club slug (rovers_rank): give them a side alias, ranks as ordinals
+    for side in ("home", "away"):  # storyline facts are keyed by club slug (varleigh_rank): give them a side alias, ranks as ordinals
         club = facts.get(f"{side}_club")
         if not isinstance(club, str):
             continue

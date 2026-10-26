@@ -10,7 +10,7 @@ from worker.insight_history import HistoryView, comeback_stage
 from worker.insight_rarity import bits, laplace, poisson_sf, value
 from worker.pipeline import JsonFileSink, MemorySink, Pipeline, ThreadedSink
 
-CLUBS = ["Rovers", "United"] + [f"Club {c}" for c in "ABCDEFGHIJKLMNOPQR"]
+CLUBS = ["Varleigh", "Yarnford"] + [f"Club {c}" for c in "ABCDEFGHIJKLMNOPQR"]
 
 
 class FakeHistory:
@@ -143,7 +143,7 @@ def test_history_view_reads_the_contract_api(history):
     view = HistoryView(history)
     assert view.n == 12 * 380 and view.first_season == "1976/77" and view.current_season == "1988/89"
     assert all(f.goals_of("home") == sum(1 for g in f.goals if g.side == "home") for f in view.features[:200])
-    assert view.runs()["current"]["Rovers"]["unbeaten"] >= 0
+    assert view.runs()["current"]["Varleigh"]["unbeaten"] >= 0
 
 
 def test_demo_substitute_scores_four_never_before(demo_run, demo):
@@ -175,14 +175,14 @@ def test_demo_comeback_from_two_down(demo_run):
     _, docs = demo_run
     won = docs["comeback-home-2-3"]
     hf = won["headline_facts"]
-    assert won["status"] == "proposed" and (hf["team"], hf["deficit_goals"], hf["trailing_score"], hf["stage"], hf["score"]) == ("Rovers", 2, "0-2", "won", "5-2")
+    assert won["status"] == "proposed" and (hf["team"], hf["deficit_goals"], hf["trailing_score"], hf["stage"], hf["score"]) == ("Varleigh", 2, "0-2", "won", "5-2")
     assert 0 < hf["history_count"] < hf["history_opportunities"]
     assert 0.005 < won["rarity"]["p"] < 0.3  # sensible: a comeback from two down is rare, not unheard of
     assert won["rarity"]["basis"].startswith("teams 2 or more goals down that won: ")
     for stage in ("2-1", "2-2"):
         assert docs[f"comeback-home-{stage}"]["status"] == "superseded"
     lost = docs["ht-lead-lost-away-2"]
-    assert (lost["headline_facts"]["team"], lost["headline_facts"]["half_time_score"], lost["headline_facts"]["stage"]) == ("United", "0-2", "lost")
+    assert (lost["headline_facts"]["team"], lost["headline_facts"]["half_time_score"], lost["headline_facts"]["stage"]) == ("Yarnford", "0-2", "lost")
 
 
 def test_voided_goals_are_never_counted(demo_run, demo):
@@ -283,7 +283,7 @@ def test_unscripted_matches(seed, history):
 # --- what holds at the current score, and while VAR checks a goal --------------------------------------
 
 def test_a_lost_half_time_lead_is_told_only_while_the_team_trails(demo, history):
-    """United lead at the break. The fact is told while they trail, withdrawn each time they are level again (the 63' goal ruled out, then their own goal until VAR rules it out), told again when they trail, and replaced by the defeat at full time."""
+    """Yarnford lead at the break. The fact is told while they trail, withdrawn each time they are level again (the 63' goal ruled out, then their own goal until VAR rules it out), told again when they trail, and replaced by the defeat at full time."""
     stream, truth = demo
     pipeline = Pipeline(sink=MemorySink(), history=history)
     for m in stream:
@@ -293,13 +293,13 @@ def test_a_lost_half_time_lead_is_told_only_while_the_team_trails(demo, history)
     doc = pipeline.engines["demo-0007"].docs["ht-lead-lost-away-1"]
     assert [h["action"] for h in doc["history"]] == ["proposed", "superseded", "revived", "superseded", "revived", "superseded"]
     causes = [e["cause"] for e in pipeline.sink.audit if e["card_id"] == doc["id"] and e["action"] == "superseded"]
-    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United's equaliser, then lost at full time
+    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, Yarnford's equaliser, then lost at full time
     equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
     assert equaliser not in doc["evidence"] and doc["superseded_by"] == "insight-demo-0007-ht-lead-lost-away-2"
 
 
 def test_a_comeback_is_told_at_the_current_score(demo, history):
-    """Rovers come back from 0-2 down and lead. "Now ahead" is withdrawn when the 63' goal is ruled out and while United are level (their goal, until VAR rules it out), told again each time Rovers lead, and replaced by the win at full time."""
+    """Varleigh come back from 0-2 down and lead. "Now ahead" is withdrawn when the 63' goal is ruled out and while Yarnford are level (their goal, until VAR rules it out), told again each time Varleigh lead, and replaced by the win at full time."""
     stream, truth = demo
     pipeline = Pipeline(sink=MemorySink(), history=history)
     for m in stream:
@@ -309,7 +309,7 @@ def test_a_comeback_is_told_at_the_current_score(demo, history):
     doc = pipeline.engines["demo-0007"].docs["comeback-home-2-2"]
     assert [h["action"] for h in doc["history"]] == ["proposed", "superseded", "revived", "superseded", "revived", "superseded"]
     causes = [e["cause"] for e in pipeline.sink.audit if e["card_id"] == doc["id"] and e["action"] == "superseded"]
-    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, United level, then won at full time
+    assert causes == ["goal ruled out", "no longer true", "updated"]  # the 63' goal voided, Yarnford level, then won at full time
     equaliser = next(g["event_id"] for g in truth["goals"] if g["team"] == "away" and not g["counts"])
     assert equaliser not in doc["evidence"] and doc["headline_facts"]["score"] == "3-2" and doc["superseded_by"] == "insight-demo-0007-comeback-home-2-3"
 
@@ -321,7 +321,7 @@ def craft(template: dict, seq: int, emitted_at_s: float, minute: int, **changes)
 
 
 def test_facts_that_rest_on_the_score_are_under_review_while_a_goal_is_checked(demo, history):
-    """The demo until United go down to ten, then two goals of our own: United score with ten men (3-3), Rovers go 4-3 and VAR checks that goal. The fact on United's goal with ten men shows the score: it is under review, though it does not count the Rovers goal; United's brace does not rest on it."""
+    """The demo until Yarnford go down to ten, then two goals of our own: Yarnford score with ten men (3-3), Varleigh go 4-3 and VAR checks that goal. The fact on Yarnford's goal with ten men shows the score: it is under review, though it does not count the Varleigh goal; Yarnford's brace does not rest on it."""
     stream, truth = demo
     red = next(m for m in stream if m["type"] == "action" and m.get("card") in ("red", "second_yellow"))
     kept = [m for m in stream if m["seq"] <= red["seq"]]

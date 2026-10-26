@@ -41,7 +41,8 @@ def player_names(info: dict) -> dict:
     return {p["id"]: f"#{p['shirt']} {p['name']}" for team in info["teams"].values() for p in team["starting"] + team["bench"]}
 
 
-def export(replay: Path, moment_key: str, out: Path, truth_path: Path | None = None, theme: str = "dark", inline_js: bool = False) -> list[Path]:
+def export(replay: Path, moment_key: str, out: Path, truth_path: Path | None = None, theme: str = "dark", inline_js: bool = False, show_margin: bool = True) -> list[Path]:
+    """`show_margin=False` draws the offside figures without the margin, for anything public (docs/img)."""
     truth_path = truth_path or replay.with_name(replay.name.split(".")[0] + ".truth.json")
     truth = json.loads(truth_path.read_text(encoding="utf-8"))
     moment = next((m for m in truth["moments"] if m["key"] == moment_key), None)
@@ -56,8 +57,8 @@ def export(replay: Path, moment_key: str, out: Path, truth_path: Path | None = N
     offside_ids = [o["event_id"] for o in truth.get("offsides", []) if o["event_id"] in moment["affected_event_ids"]]
     if offside_ids:
         pass_action = by_id[offside_ids[0]]
-        figures[f"{moment_key}-offside"] = offside_figure(pass_action, True, home, away, theme, names=names)
-        figures[f"{moment_key}-offside-zoom"] = offside_figure(pass_action, True, home, away, theme, zoom=7, names=names)
+        figures[f"{moment_key}-offside"] = offside_figure(pass_action, True, home, away, theme, names=names, show_margin=show_margin)
+        figures[f"{moment_key}-offside-zoom"] = offside_figure(pass_action, True, home, away, theme, zoom=7, names=names, show_margin=show_margin)
     figures[f"{moment_key}-buildup"] = sequence_figure(buildup(actions, moment["event_id"]), home, away, theme, names=names)
     can_png = importlib.util.find_spec("kaleido") is not None
     written = []
@@ -82,8 +83,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--truth", type=Path)
     ap.add_argument("--theme", choices=["dark", "light"], default="dark")
     ap.add_argument("--inline-js", action="store_true", help="embed plotly.js instead of loading it from the CDN")
+    ap.add_argument("--no-margin", action="store_true", help="leave the offside margin out of the figures (for a public page)")
     args = ap.parse_args(argv)
-    for path in export(args.replay, args.moment, args.out, args.truth, args.theme, args.inline_js):
+    for path in export(args.replay, args.moment, args.out, args.truth, args.theme, args.inline_js, show_margin=not args.no_margin):
         print(path)
 
 

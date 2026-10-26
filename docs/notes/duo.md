@@ -29,15 +29,15 @@ Each persona also has a vocabulary list and a sample line per language. `persona
 | Condition | Lines | True when |
 |---|---|---|
 | `{if_home}`, `{if_away}` | "this place has woken up", "tout le stade se réveille", "el estadio despierta", the noise or roar of the stadium; for an away goal, the away end ("le parcage visiteur", "la afición visitante") | the scoring team plays at home (or away) |
-| `{if_new_scorer}` | "Rovers pull further clear, X the man this time!" | it is the scorer's first goal of the match and his team already had one: the previous goal was someone else's |
+| `{if_new_scorer}` | "Varleigh pull further clear, X the man this time!" | it is the scorer's first goal of the match and his team already had one: the previous goal was someone else's |
 | `{if_tilt}` | "You can feel it, Joss. The whole match just tilted." and translations | the goal moved its team's chance of winning by more than 20 points (`TILT_PTS`) |
 | `{if_small_margin}`, `{if_big_margin}` | "Small margins: N points kept", "Quietly huge: that save is worth N points" | the save is worth under 15 points (`SMALL_MARGIN_PTS`), or 15 and more |
-| `{if_big_chance}` | "Quietly huge, that one: a goal would have put Rovers on N% to win" | the miss cost 15 points or more |
+| `{if_big_chance}` | "Quietly huge, that one: a goal would have put Varleigh on N% to win" | the miss cost 15 points or more |
 | `{if_deflection}` | "The goal now goes to X, after a deflection." | the card says the correction was a deflection (`rewrite_cause`) |
 
 - **A goal ruled out, then the next one.** When VAR voids a goal card, the desk records `ruled_out` and writes `duo_ruling` from templates only (no model call for a retraction): the reason, and for offside the call, tight ("by a whisker", "d'un rien", "por muy poco") or clear, from the worker's `var_decision` or else from the margin. The margin itself stays with the producer. The memory keeps the score the goal would have made: the next goal at that score opens with "This time it counts!" ("Cette fois, ça compte !", "¡Esta vez sí vale!") instead of a goal line.
-- **A goal credited to another player.** When a rewritten card names the previous scorer (`previous_player`, set by the worker on version 2 or later), `card_facts` gives `previous_scorer` and the duo tells the correction ("Correction on that goal: it goes to X, not Y.", "Nothing changes for United but the name on the scoresheet.") instead of announcing the goal again.
-- **A red card.** With `card_kind` (`second_yellow` or `red`, set by the worker), Wren says how the player was sent off ("Second yellow for X, and that is red! United are down to ten.", "Straight red for X!"); without it, the generic lines. Every red card headline names the player.
+- **A goal credited to another player.** When a rewritten card names the previous scorer (`previous_player`, set by the worker on version 2 or later), `card_facts` gives `previous_scorer` and the duo tells the correction ("Correction on that goal: it goes to X, not Y.", "Nothing changes for Yarnford but the name on the scoresheet.") instead of announcing the goal again.
+- **A red card.** With `card_kind` (`second_yellow` or `red`, set by the worker), Wren says how the player was sent off ("Second yellow for X, and that is red! Yarnford are down to ten.", "Straight red for X!"); without it, the generic lines. Every red card headline names the player.
 
 ## Anti-repetition (`PhraseMemory`)
 
@@ -59,47 +59,47 @@ Measured with the template writer:
 
 ## Product decisions
 
-- **(a) Goals ruled out in the recap.** `recap.analyse` reads `disallowed_goals` from the retracted goal cards (`ruled_out` from the desk, or `var_decision` from the worker), or `build_recap(..., disallowed=[...])`, and `recap_facts` exposes `disallowed_<i>_minute/_team/_player/_reason/_offside_call`. Templates: "VAR ruled out Dorian Lightfoot's goal at 63' (offside by a whisker) and Vito Valtonen's goal at 69' (handball)." and in the analyst text "VAR: 63' (offside by a whisker), 69' (handball)." The margin is not a recap fact: frames are 30 cm apart at sprint speed, so a number would be false precision. `verify_recap` still fails a retracted minute in a sentence that does not say VAR or ruled out.
+- **(a) Goals ruled out in the recap.** `recap.analyse` reads `disallowed_goals` from the retracted goal cards (`ruled_out` from the desk, or `var_decision` from the worker), or `build_recap(..., disallowed=[...])`, and `recap_facts` exposes `disallowed_<i>_minute/_team/_player/_reason/_offside_call`. Templates: "VAR ruled out Marijn Scarpetta's goal at 63' (offside by a whisker) and Jakub Méndez's goal at 69' (handball)." and in the analyst text "VAR: 63' (offside by a whisker), 69' (handball)." The margin is not a recap fact: frames are 30 cm apart at sprint speed, so a number would be false precision. `verify_recap` still fails a retracted minute in a sentence that does not say VAR or ruled out.
 - **(b) One meaning for "points".** "Points" on air is only a gap between two chances, in percentage points, from a `_pts` field. `value_pts` (the ranking key) and league table points are never facts for a text, and no line says take, gain, prendre, gagner, ganar or sumar N points: the Verifier refuses it (`league_points_verb`). "Quietly huge" and its translations are kept for saves and chances. A draw in the fan text is "honours even", never "a point".
-- **(c) A goal with no stake.** `low_stake(card)`: a goal moving its team's chance of winning by less than 2 points. `card_facts` then drops every probability field and adds `stake: low`, `team_goals_after`, `scorer_match_goals`, so a probability cannot even be claimed; the templates write a milestone ("Wendell Moravec adds the fifth", "it is goal number five for Rovers today"). The desk sets `on_air_priority: low` (88' in the demo, 99% to 99%).
-- **(d) Rarity on air.** A rarity is told in seasons, for the team or the player ("7 seasons since Rovers last won from 2 goals down, Wren"). League-wide rates, match counts, ratios and bits ("about one match in 101", "about 3 a season", "228 times rarer") stay in the console for the producer (`rarity.basis`, `why_first`): the templates never write them, the model never gets them (`writer.on_air`), and the Verifier refuses them (`league_rate`), while a landmark in seasons ("not once in 50 seasons had Rovers done it") passes.
+- **(c) A goal with no stake.** `low_stake(card)`: a goal moving its team's chance of winning by less than 2 points. `card_facts` then drops every probability field and adds `stake: low`, `team_goals_after`, `scorer_match_goals`, so a probability cannot even be claimed; the templates write a milestone ("Joaquim Kosznik adds the fifth", "it is goal number five for Varleigh today"). The desk sets `on_air_priority: low` (88' in the demo, 99% to 99%).
+- **(d) Rarity on air.** A rarity is told in seasons, for the team or the player ("7 seasons since Varleigh last won from 2 goals down, Wren"). League-wide rates, match counts, ratios and bits ("about one match in 101", "about 3 a season", "228 times rarer") stay in the console for the producer (`rarity.basis`, `why_first`): the templates never write them, the model never gets them (`writer.on_air`), and the Verifier refuses them (`league_rate`), while a landmark in seasons ("not once in 50 seasons had Varleigh done it") passes.
 
 ## Sample exchanges (template writer, demo match with the league history, red card kind and previous scorer set as the worker sets them)
 
-**63', Lightfoot's goal, then ruled out at 64' (offside, a tight call).**
+**63', Scarpetta's goal, then ruled out at 64' (offside, a tight call).**
 
 | | en | fr | es |
 |---|---|---|---|
-| Wren (goal) | Hold on to your seats! In front! Dorian Lightfoot puts Rovers ahead and the bench is on its feet! | Notez-le quelque part ! Dorian Lightfoot trouve l'ouverture, et Rovers prend les commandes ! | ¡Apúntenlo! ¡Por delante! ¡Dorian Lightfoot adelanta al Rovers! |
-| Joss | Look at the jump: 49 points in one kick, and Rovers are on 78% to win. | Ce but vaut 49 points pour Rovers, qui passe de 29 % à 78 % de chances de gagner. | Pongámosle número: el Rovers pasa del 29% al 78% de opciones de ganar. |
-| Wren (VAR) | No! Oh no. It's gone. VAR has taken it away from Dorian Lightfoot. | Et c'est refusé. La VAR annule, et Rovers n'en revient pas. | El VAR dice que no. El gol de Dorian Lightfoot no sube al marcador. |
+| Wren (goal) | Hold on to your seats! In front! Marijn Scarpetta puts Varleigh ahead and the bench is on its feet! | Notez-le quelque part ! Marijn Scarpetta trouve l'ouverture, et Varleigh prend les commandes ! | ¡Apúntenlo! ¡Por delante! ¡Marijn Scarpetta adelanta al Varleigh! |
+| Joss | Look at the jump: 49 points in one kick, and Varleigh are on 78% to win. | Ce but vaut 49 points pour Varleigh, qui passe de 29 % à 78 % de chances de gagner. | Pongámosle número: el Varleigh pasa del 29% al 78% de opciones de ganar. |
+| Wren (VAR) | No! Oh no. It's gone. VAR has taken it away from Marijn Scarpetta. | Et c'est refusé. La VAR annule, et Varleigh n'en revient pas. | El VAR dice que no. El gol de Marijn Scarpetta no sube al marcador. |
 | Joss | Look at the line. Offside by a whisker, judged at the moment of the pass. | Regardez la ligne. Hors-jeu d'un rien au départ du ballon. C'est dire si c'était serré. | Miren la línea. Fuera de juego por muy poco, en el momento del pase. |
 | Wren | A whisker, Joss. That is all it took. | Si peu, Joss. Toute une célébration, pour un rien. | Tan poco, Joss. Toda una celebración, por nada. |
 
-**66', the goal at the score VAR took away.** en "Write it down! This time it counts! Dorian Lightfoot for Rovers!", fr "Quel scénario ! Encore, et cette fois, ça compte ! Dorian Lightfoot pour Rovers !", es "¡Qué guion! ¡Esta vez sí vale! ¡Dorian Lightfoot para el Rovers!". The season answer that follows is not the one said at 63'.
+**66', the goal at the score VAR took away.** en "Write it down! This time it counts! Marijn Scarpetta for Varleigh!", fr "Quel scénario ! Encore, et cette fois, ça compte ! Marijn Scarpetta pour Varleigh !", es "¡Qué guion! ¡Esta vez sí vale! ¡Marijn Scarpetta para el Varleigh!". The season answer that follows is not the one said at 63'.
 
-**31', the goal credited to a team-mate after a deflection.** en "Correction on that goal: it goes to Kester Kettering, not Tobin Delacroix." / "Nothing changes for United but the name on the scoresheet."; fr "Changement de buteur : ce but est désormais attribué à Kester Kettering."; es "Corrección en ese gol: es para Kester Kettering, no para Tobin Delacroix."
+**31', the goal credited to a team-mate after a deflection.** en "Correction on that goal: it goes to Dominic Carter, not Honoré Haro." / "Nothing changes for Yarnford but the name on the scoresheet."; fr "Changement de buteur : ce but est désormais attribué à Dominic Carter."; es "Corrección en ese gol: es para Dominic Carter, no para Honoré Haro."
 
-**78', the second yellow.** Headlines "Hugo Wojcik off after a second yellow", "Deuxième avertissement pour Hugo Wojcik", "Hugo Wojcik, expulsado por doble amarilla"; Wren "Hugo Wojcik is booked again, and off he goes. United down to ten."
+**78', the second yellow.** Headlines "Otto Meyer off after a second yellow", "Deuxième avertissement pour Otto Meyer", "Otto Meyer, expulsado por doble amarilla"; Wren "Otto Meyer is booked again, and off he goes. Yarnford down to ten."
 
-**The substitute's four goals (Lightfoot, on at half-time).**
+**The substitute's four goals (Scarpetta, on at half-time).**
 
 | | en | fr | es |
 |---|---|---|---|
-| 52' Wren | Game on? Dorian Lightfoot pulls one back for Rovers! | Une lueur pour Rovers, et elle vient de Dorian Lightfoot ! | ¿Hay partido? ¡Dorian Lightfoot recorta para el Rovers! |
-| 57' Wren | Dorian Lightfoot! Rovers are level, and this place has woken up! | Tout est à refaire ! Dorian Lightfoot égalise pour Rovers ! | ¡Todo por hacer otra vez! ¡Dorian Lightfoot empata para el Rovers! |
-| 57' brace (insight) | A brace for Dorian Lightfoot! And he only came on at 46'! / 2 goals off the bench, Wren. Not a bad way to come on. | | |
-| 66' hat-trick (insight) | Dorian Lightfoot again! Joss, has a substitute ever done this? / The 6th in 50 seasons, Wren. The last one was Silas Thackeray, in 2021/22. | | |
-| 83' Joss | Dorian Lightfoot, his fourth goal of the match. Write that one in pen. | Dorian Lightfoot, son quatrième but du match. Ça s'écrit à l'encre. | El cuarto de Dorian Lightfoot. Me quedo sin comparaciones, Wren. |
-| Stat of the match | Joss, how will Dorian Lightfoot's night be remembered? / A first in 50 seasons, Wren: no substitute had ever scored 4 in this league. | | |
+| 52' Wren | Game on? Marijn Scarpetta pulls one back for Varleigh! | Une lueur pour Varleigh, et elle vient de Marijn Scarpetta ! | ¿Hay partido? ¡Marijn Scarpetta recorta para el Varleigh! |
+| 57' Wren | Marijn Scarpetta! Varleigh are level, and this place has woken up! | Tout est à refaire ! Marijn Scarpetta égalise pour Varleigh ! | ¡Todo por hacer otra vez! ¡Marijn Scarpetta empata para el Varleigh! |
+| 57' brace (insight) | A brace for Marijn Scarpetta! And he only came on at 46'! / 2 goals off the bench, Wren. Not a bad way to come on. | | |
+| 66' hat-trick (insight) | Marijn Scarpetta again! Joss, has a substitute ever done this? / The 6th in 50 seasons, Wren. The last one was Tomé Ehlert, in 2021/22. | | |
+| 83' Joss | Marijn Scarpetta, his fourth goal of the match. Write that one in pen. | Marijn Scarpetta, son quatrième but du match. Ça s'écrit à l'encre. | El cuarto de Marijn Scarpetta. Me quedo sin comparaciones, Wren. |
+| Stat of the match | Joss, how will Marijn Scarpetta's night be remembered? / A first in 50 seasons, Wren: no substitute had ever scored 4 in this league. | | |
 
-The 88' goal (5-2, no stake): "And another! Wendell Moravec joins the party for Rovers." / "Nothing changes in the result, but it is goal number five for Rovers today."
+The 88' goal (5-2, no stake): "And another! Joaquim Kosznik joins the party for Varleigh." / "Nothing changes in the result, but it is goal number five for Varleigh today."
 
 ## What a native speaker should review
 
-- **French.** Tutoiement between the two ("Je te crois sur parole", "Laisse-les savourer"); "La VAR" (feminine, usage in France) against "le VAR"; "Rovers était à" (club as singular, as in the card templates); "le parcage visiteur exulte"; "L'air de rien, cet arrêt vaut 57 points"; "Hors-jeu d'un rien au départ du ballon"; "Encore, et cette fois, ça compte !"; "ballon du match est réservé" for a hat-trick; "Souvenez-vous où vous étiez"; "Ça s'écrit à l'encre"; masculine agreement in "On disait Rovers perdu", "Réduit à dix".
+- **French.** Tutoiement between the two ("Je te crois sur parole", "Laisse-les savourer"); "La VAR" (feminine, usage in France) against "le VAR"; "Varleigh était à" (club as singular, as in the card templates); "le parcage visiteur exulte"; "L'air de rien, cet arrêt vaut 57 points"; "Hors-jeu d'un rien au départ du ballon"; "Encore, et cette fois, ça compte !"; "ballon du match est réservé" for a hat-trick; "Souvenez-vous où vous étiez"; "Ça s'écrit à l'encre"; masculine agreement in "On disait Varleigh perdu", "Réduit à dix".
 - **Spanish.** "Pongámosle número", "Como exportero" (one word), "¡Agárrense fuerte!" (ustedes, Spain vs Latin America), "la afición visitante enloquece", "¡Esta vez sí vale!", "el balón del partido ya tiene dueño" for a hat-trick, "¿qué tan rara es una noche así?" (Latin American; "cómo de rara" in Spain). Spanish stays labelled machine-translated on air.
-- **English.** "noses in front", "the match ball is spoken for", "Write that one in pen" (British idioms, on purpose); "they said Rovers were gone" (plural club); "Quietly huge" for a big save.
+- **English.** "noses in front", "the match ball is spoken for", "Write that one in pen" (British idioms, on purpose); "they said Varleigh were gone" (plural club); "Quietly huge" for a big save.
 - **All.** Whether Wren's tic on top of an exclamation ("Hold on to your seats! In front! ...") is too much in one line; whether a required line closed with the score and minute ("3-2 at 66'.") reads well when a match runs out of variants.
 
 ## What is imperfect

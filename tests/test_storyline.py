@@ -12,12 +12,12 @@ class FakeHistory:
     """The read API of `league.history.History` (docs/contracts.md), on a handful of matches."""
 
     SEASONS = ["2023/24", "2024/25", "2025/26"]
-    CLUBS = {"Rovers": {"name": "Rovers", "founded_season": "1976/77", "seasons_in_league": 50, "titles": 2, "best_finish": 1},
-             "United": {"name": "United", "founded_season": "1976/77", "seasons_in_league": 41, "titles": 0, "best_finish": 3}}
+    CLUBS = {"Varleigh": {"name": "Varleigh", "founded_season": "1976/77", "seasons_in_league": 50, "titles": 2, "best_finish": 1},
+             "Yarnford": {"name": "Yarnford", "founded_season": "1976/77", "seasons_in_league": 41, "titles": 0, "best_finish": 3}}
     PLAYERS = {
-        "P000001": {"id": "P000001", "name": "Aldo Brenner", "position": "FW", "born": 1998, "clubs": [{"season": "2025/26", "club": "Rovers"}],
+        "P000001": {"id": "P000001", "name": "Aldo Brenner", "position": "FW", "born": 1998, "clubs": [{"season": "2025/26", "club": "Varleigh"}],
                     "goals": 98, "appearances": 210, "sub_appearances": 12},
-        "P000002": {"id": "P000002", "name": "Corin Vale", "position": "MF", "born": 1994, "clubs": [{"season": "2025/26", "club": "United"}],
+        "P000002": {"id": "P000002", "name": "Corin Vale", "position": "MF", "born": 1994, "clubs": [{"season": "2025/26", "club": "Yarnford"}],
                     "goals": 31, "appearances": 299, "sub_appearances": 40},
         "P000003": {"id": "P000003", "name": "Edgar Moss", "position": "FW", "born": 1999, "clubs": [{"season": "2025/26", "club": "Dunholt"}],
                     "goals": 49, "appearances": 120, "sub_appearances": 5},
@@ -28,11 +28,11 @@ class FakeHistory:
             return {"season": season, "matchday": md, "home": home, "away": away, "home_goals": hg, "away_goals": ag, "half_time": [0, 0],
                     "scorers": [{"player_id": p, "club": c, "minute": 10 + k} for k, (p, c) in enumerate(scorers)]}
         self._matches = [
-            m("2023/24", 5, "Rovers", "United", 4, 0), m("2023/24", 24, "United", "Rovers", 1, 1),
-            m("2024/25", 8, "United", "Rovers", 3, 1), m("2024/25", 27, "Rovers", "United", 2, 2),
-            m("2025/26", 3, "Rovers", "Dunholt", 3, 1, [("P000001", "Rovers"), ("P000001", "Rovers"), ("P000003", "Rovers"), ("P000009", "Dunholt")]),
-            m("2025/26", 9, "Rovers", "United", 1, 2, [("P000001", "Rovers"), ("P000002", "United"), ("P000002", "United")]),
-            m("2025/26", 28, "United", "Rovers", 0, 0),
+            m("2023/24", 5, "Varleigh", "Yarnford", 4, 0), m("2023/24", 24, "Yarnford", "Varleigh", 1, 1),
+            m("2024/25", 8, "Yarnford", "Varleigh", 3, 1), m("2024/25", 27, "Varleigh", "Yarnford", 2, 2),
+            m("2025/26", 3, "Varleigh", "Dunholt", 3, 1, [("P000001", "Varleigh"), ("P000001", "Varleigh"), ("P000003", "Varleigh"), ("P000009", "Dunholt")]),
+            m("2025/26", 9, "Varleigh", "Yarnford", 1, 2, [("P000001", "Varleigh"), ("P000002", "Yarnford"), ("P000002", "Yarnford")]),
+            m("2025/26", 28, "Yarnford", "Varleigh", 0, 0),
         ]
 
     def seasons(self):
@@ -76,11 +76,11 @@ def chance(doc, club, kind):
 def test_document_follows_the_contract(plain):
     assert plain["id"] == "storyline-demo-0007" and plain["type"] == "storyline" and plain["match_id"] == "demo-0007"
     f = plain["facts"]
-    assert (f["rovers_rank"], f["united_rank"], f["rovers_points"], f["united_points"]) == (17, 18, 29, 28)
-    assert plain["focus"] == {"Rovers": "relegation", "United": "relegation"}
+    assert (f["varleigh_rank"], f["yarnford_rank"], f["varleigh_points"], f["yarnford_points"]) == (17, 18, 29, 28)
+    assert plain["focus"] == {"Varleigh": "relegation", "Yarnford": "relegation"}
     assert set(f) == set(plain["field_meanings"]), "every fact has a meaning and nothing else"
     assert [len(x) for x in plain["form"].values()] == [5, 5]
-    assert f["rovers_form"] == "".join(x["result"] for x in plain["form"]["Rovers"])
+    assert f["varleigh_form"] == "".join(x["result"] for x in plain["form"]["Varleigh"])
 
 
 def test_deterministic():
@@ -91,7 +91,7 @@ def test_deterministic():
 
 def test_stakes_bounded_and_ordered(plain):
     f = plain["facts"]
-    for club in ("Rovers", "United"):
+    for club in ("Varleigh", "Yarnford"):
         s = sl.slug(club)
         for e in sl.EVENTS:
             values = [f[f"{s}_{e}_chance{k}_pct"] for k in ("", "_if_win", "_if_draw", "_if_loss")]
@@ -99,17 +99,17 @@ def test_stakes_bounded_and_ordered(plain):
         win, draw, loss, now = (chance(plain, club, k) for k in ("if_win_", "if_draw_", "if_loss_", ""))
         assert win <= draw <= loss and win <= now <= loss, "staying up: if win >= now >= if loss"
         assert f[f"{s}_relegation_stake_pts"] == loss - win
-    assert f["rovers_points_if_win"] == f["rovers_points"] + 3
+    assert f["varleigh_points_if_win"] == f["varleigh_points"] + 3
 
 
 def test_chances_match_match_importance():
     league = sl.league_for(9, 30)
-    mi = match_importance(league, "Rovers", "United", 29, SIMS)
-    win = sl.chances(league, "Rovers", "United", 29, (1, 0), SIMS)
-    loss = sl.chances(league, "Rovers", "United", 29, (0, 1), SIMS)
+    mi = match_importance(league, "Varleigh", "Yarnford", 29, SIMS)
+    win = sl.chances(league, "Varleigh", "Yarnford", 29, (1, 0), SIMS)
+    loss = sl.chances(league, "Varleigh", "Yarnford", 29, (0, 1), SIMS)
     for e in sl.EVENTS:
-        assert win["Rovers"][e] == mi["Rovers"][f"{e}_if_win"] and loss["United"][e] == mi["United"][f"{e}_if_win"]
-        assert loss["Rovers"][e] == mi["Rovers"][f"{e}_if_loss"]
+        assert win["Varleigh"][e] == mi["Varleigh"][f"{e}_if_win"] and loss["Yarnford"][e] == mi["Yarnford"][f"{e}_if_win"]
+        assert loss["Varleigh"][e] == mi["Varleigh"][f"{e}_if_loss"]
 
 
 def test_threads_reference_only_storyline_facts(plain, rich):
@@ -143,19 +143,19 @@ def test_without_history(plain):
 def test_with_fake_history(rich):
     f = rich["facts"]
     assert f["history_through"] == "2025/26"
-    assert (f["h2h_meetings"], f["h2h_rovers_wins"], f["h2h_draws"], f["h2h_united_wins"]) == (6, 1, 3, 2)
-    assert f["h2h_last_meeting"] == "2025/26: United 0-0 Rovers"
-    assert f["h2h_biggest_rovers_win"] == "2023/24: Rovers 4-0 United"
-    assert f["h2h_biggest_united_win"] == "2024/25: United 3-1 Rovers", "same margin as 2025/26 Rovers 1-2 United: the widest, then the most recent"
-    assert (f["rovers_titles"], f["united_best_finish"]) == (2, 3)
+    assert (f["h2h_meetings"], f["h2h_varleigh_wins"], f["h2h_draws"], f["h2h_yarnford_wins"]) == (6, 1, 3, 2)
+    assert f["h2h_last_meeting"] == "2025/26: Yarnford 0-0 Varleigh"
+    assert f["h2h_biggest_varleigh_win"] == "2023/24: Varleigh 4-0 Yarnford"
+    assert f["h2h_biggest_yarnford_win"] == "2024/25: Yarnford 3-1 Varleigh", "same margin as 2025/26 Varleigh 1-2 Yarnford: the widest, then the most recent"
+    assert (f["varleigh_titles"], f["yarnford_best_finish"]) == (2, 3)
     watch = {p["name"]: p for p in rich["players_to_watch"]}
-    assert set(watch) == {"Aldo Brenner", "Corin Vale"}, "Edgar Moss scored for Rovers but has left"
+    assert set(watch) == {"Aldo Brenner", "Corin Vale"}, "Edgar Moss scored for Varleigh but has left"
     assert watch["Aldo Brenner"]["top_scorer"] and watch["Aldo Brenner"]["season_goals"] == 3
     assert watch["Aldo Brenner"]["milestone"] == {"kind": "goals", "current": 98, "target": 100, "needed": 2}
     assert watch["Corin Vale"]["milestone"]["kind"] == "appearances" and watch["Corin Vale"]["milestone"]["target"] == 300
     keys = {t["key"] for t in rich["threads"]}
-    assert "rovers_player1_milestone" in keys or "united_player1_milestone" in keys
-    assert f["rovers_player1_name"] == "Aldo Brenner" and f["rovers_player1_milestone"] == "100 goals"
+    assert "varleigh_player1_milestone" in keys or "yarnford_player1_milestone" in keys
+    assert f["varleigh_player1_name"] == "Aldo Brenner" and f["varleigh_player1_milestone"] == "100 goals"
 
 
 def live(doc, h, a, final=False):
@@ -164,24 +164,24 @@ def live(doc, h, a, final=False):
 
 def test_live_context_moves_with_the_score(plain):
     level, ahead, behind = live(plain, 0, 0)[0], live(plain, 1, 0)[0], live(plain, 0, 1)[0]
-    for k in ("rovers_relegation_chance_if_score_holds_pct",):
+    for k in ("varleigh_relegation_chance_if_score_holds_pct",):
         assert ahead[k] <= level[k] <= behind[k]
-    k = "united_relegation_chance_if_score_holds_pct"
+    k = "yarnford_relegation_chance_if_score_holds_pct"
     assert behind[k] <= level[k] <= ahead[k]
-    assert ahead["rovers_rank_if_score_holds"] <= level["rovers_rank_if_score_holds"] <= behind["rovers_rank_if_score_holds"]
-    assert live(plain, 2, 0)[0]["rovers_relegation_chance_if_score_holds_pct"] <= ahead["rovers_relegation_chance_if_score_holds_pct"]
-    assert level["rovers_relegation_chance_if_rovers_score_next_pct"] == ahead["rovers_relegation_chance_if_score_holds_pct"]
-    assert level["united_relegation_chance_if_united_score_next_pct"] == behind["united_relegation_chance_if_score_holds_pct"]
-    # seed 9: a United win swaps the two clubs across the drop line
-    assert behind["united_leaves_drop_zone_if_score_holds"] and behind["rovers_enters_drop_zone_if_score_holds"]
-    assert behind["united_relegation_change_direction"] == "down" and behind["rovers_relegation_change_direction"] == "up"
-    assert ahead["rovers_relegation_chance_if_score_holds_pct"] == plain["facts"]["rovers_relegation_chance_if_win_pct"]
+    assert ahead["varleigh_rank_if_score_holds"] <= level["varleigh_rank_if_score_holds"] <= behind["varleigh_rank_if_score_holds"]
+    assert live(plain, 2, 0)[0]["varleigh_relegation_chance_if_score_holds_pct"] <= ahead["varleigh_relegation_chance_if_score_holds_pct"]
+    assert level["varleigh_relegation_chance_if_varleigh_score_next_pct"] == ahead["varleigh_relegation_chance_if_score_holds_pct"]
+    assert level["yarnford_relegation_chance_if_yarnford_score_next_pct"] == behind["yarnford_relegation_chance_if_score_holds_pct"]
+    # seed 9: a Yarnford win swaps the two clubs across the drop line
+    assert behind["yarnford_leaves_drop_zone_if_score_holds"] and behind["varleigh_enters_drop_zone_if_score_holds"]
+    assert behind["yarnford_relegation_change_direction"] == "down" and behind["varleigh_relegation_change_direction"] == "up"
+    assert ahead["varleigh_relegation_chance_if_score_holds_pct"] == plain["facts"]["varleigh_relegation_chance_if_win_pct"]
 
 
 def test_live_context_fields_and_cache(plain):
     league = sl.league_for(9, 30)
     facts, meanings = live(plain, 3, 2)
-    assert set(facts) == set(meanings) and facts["score_now"] == "Rovers 3-2 United"
+    assert set(facts) == set(meanings) and facts["score_now"] == "Varleigh 3-2 Yarnford"
     cached = len(sl._CHANCES[league])
     assert live(plain, 3, 2) == (facts, meanings) and len(sl._CHANCES[league]) == cached, "a score is simulated once"
     final = live(plain, 3, 2, final=True)[0]
@@ -190,12 +190,12 @@ def test_live_context_fields_and_cache(plain):
 
 def test_post_match(plain):
     facts, meanings = sl.post_match(plain, 5, 2)
-    assert set(facts) == set(meanings) and facts["final_score"] == "Rovers 5-2 United"
-    assert facts["rovers_rank_before"] == 17 and facts["rovers_points_after"] == 32 and facts["united_points_after"] == 28
-    assert facts["rovers_relegation_chance_after_pct"] < facts["rovers_relegation_chance_before_pct"]
-    assert facts["rovers_relegation_change_direction"] == "down" and facts["united_relegation_change_direction"] == "up"
-    assert facts["rovers_relegation_chance_after_pct"] == live(plain, 5, 2, final=True)[0]["rovers_relegation_chance_if_score_holds_pct"]
-    assert 1 <= facts["rovers_rank_after_matchday"] <= 20
+    assert set(facts) == set(meanings) and facts["final_score"] == "Varleigh 5-2 Yarnford"
+    assert facts["varleigh_rank_before"] == 17 and facts["varleigh_points_after"] == 32 and facts["yarnford_points_after"] == 28
+    assert facts["varleigh_relegation_chance_after_pct"] < facts["varleigh_relegation_chance_before_pct"]
+    assert facts["varleigh_relegation_change_direction"] == "down" and facts["yarnford_relegation_change_direction"] == "up"
+    assert facts["varleigh_relegation_chance_after_pct"] == live(plain, 5, 2, final=True)[0]["varleigh_relegation_chance_if_score_holds_pct"]
+    assert 1 <= facts["varleigh_rank_after_matchday"] <= 20
 
 
 def test_cli(tmp_path):
@@ -241,7 +241,7 @@ def test_recap_says_what_the_result_changed_in_the_table(desk_run):
     recap = build_recap(cards, state, storyline=json.loads((desk_run / "storyline.json").read_text(encoding="utf-8")))
     assert recap["verification"]["verified"]
     texts = {t["lang"]: t["recap"] for t in recap["texts"]}
-    assert "Rovers move from 17th to" in texts["en"] and "risque de descente" in texts["fr"]  # the winner's season, rank and chance
+    assert "Varleigh move from 17th to" in texts["en"] and "risque de descente" in texts["fr"]  # the winner's season, rank and chance
     assert build_recap(cards, state)["facts"].keys().isdisjoint({k for k in recap["facts"] if k.startswith("season_")})
 
 
@@ -264,7 +264,7 @@ def test_the_worker_writes_the_recap_the_cli_would_write(desk_run, tmp_path, mon
 def test_goal_cards_tell_the_table_only_when_it_changes(desk_run):
     cards = sorted(json.loads((desk_run / "cards.json").read_text(encoding="utf-8")), key=lambda c: c["clock_s"])
     said = {c["minute_label"]: [l["line"] for l in c.get("duo", []) if l["lang"] == "en" and l["line"].startswith("If it stays")] for c in cards if c["moment"] == "goal"}
-    assert said["14'"] == ["If it stays 0-1, Rovers drop into the drop zone, down to 18th."]
+    assert said["14'"] == ["If it stays 0-1, Varleigh drop into the drop zone, down to 18th."]
     assert said["31'"] == [] and said["52'"] == []  # still in the drop zone: nothing new
     assert said["57'"] and "climb out of the drop zone" in said["57'"][0]  # against the score before the goal, not kick-off
     assert said["66'"] and "14th" in said["66'"][0]  # the 63' goal was ruled out, so 66' says it again

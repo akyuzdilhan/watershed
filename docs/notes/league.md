@@ -6,7 +6,7 @@ A light league simulated at score level (N1): 20 fictional clubs, one score per 
 
 | Piece | Choice |
 |---|---|
-| Clubs | Rovers and United (the demo clubs) plus 18 invented names, none sharing a word with a current Premier League club (`league/clubs.py`) |
+| Clubs | Varleigh and Yarnford (the demo clubs) plus 18 invented names, none sharing a word with a current Premier League club (`league/clubs.py`) |
 | Strengths | Log scale: home rate = exp(mu + h + attack[home] + defence[away]), away rate = exp(mu + attack[away] + defence[home]); a high defence concedes more |
 | Distribution | Bivariate normal on (attack quality, defensive solidity), sigma 0.30 each, correlation 0.8 |
 | Elite tier (option) | The two strongest clubs (attack plus solidity) gain 0.13 on both, the others drawn with sigma 0.28 |
@@ -46,22 +46,22 @@ The normal setting reproduces the earlier local simulation (88.3, 30.3, 18.5, 24
 
 ## Coupling with the demo match (A3)
 
-`league.demo_fixture(seed, matchday)` pins Rovers (home) v United on `matchday`, by swapping two rounds of the calendar (strengths and every result stay the same), and returns:
+`league.demo_fixture(seed, matchday)` pins Varleigh (home) v Yarnford on `matchday`, by swapping two rounds of the calendar (strengths and every result stay the same), and returns:
 
 - `expected_goals`: from the true strengths, for `generator.generate_match`;
 - `prior_expected_goals`: from the observer after the previous matchday, for the win-probability model (`match_info`). The model never reads the generator's truth, so a match does not confirm its own prior;
 - `context`: ranks, points, played, points gaps, and for each club and each event (title, top4, relegation) `*_chance_pct`, `*_chance_if_win_pct`, `*_chance_if_loss_pct` and `*_stake_pct_points`, as integers, with `field_meanings`.
 
-Nothing is wired yet: the generator and the demo match are unchanged (1.5 and 1.2). `python -m league demo --seed 1 --matchday 30` shows what the league would give. On seed 1, Rovers are 16th (28 points), United 3rd (57), true expected goals 0.98 and 1.79, which does not fit a 5-2 home win. Seeds that would fit the demo better on matchday 30 (1,000 simulations):
+Nothing is wired yet: the generator and the demo match are unchanged (1.5 and 1.2). `python -m league demo --seed 1 --matchday 30` shows what the league would give. On seed 1, Varleigh are 16th (28 points), Yarnford 3rd (57), true expected goals 0.98 and 1.79, which does not fit a 5-2 home win. Seeds that would fit the demo better on matchday 30 (1,000 simulations):
 
-| Seed | Rovers | United | Expected goals (truth) | Prior (observer) | Largest stakes |
+| Seed | Varleigh | Yarnford | Expected goals (truth) | Prior (observer) | Largest stakes |
 |---|---|---|---|---|---|
-| 9 | 17th, 29 pts | 18th, 28 pts | 1.45 - 1.07 | 1.55 - 1.04 | relegation: -16 points for Rovers, -25 for United |
-| 22 | 15th, 33 pts | 17th, 26 pts | 1.48 - 1.14 | 1.62 - 1.08 | relegation: -27 points for United |
-| 16 | 7th, 47 pts | 1st, 59 pts | 1.26 - 1.37 | 1.14 - 1.37 | title: +26 points for United; top four: +19 for Rovers |
-| 30 | 3rd, 55 pts | 6th, 49 pts | 1.69 - 1.38 | 1.20 - 1.11 | top four: +23 for Rovers, +31 for United |
+| 9 | 17th, 29 pts | 18th, 28 pts | 1.45 - 1.07 | 1.55 - 1.04 | relegation: -16 points for Varleigh, -25 for Yarnford |
+| 22 | 15th, 33 pts | 17th, 26 pts | 1.48 - 1.14 | 1.62 - 1.08 | relegation: -27 points for Yarnford |
+| 16 | 7th, 47 pts | 1st, 59 pts | 1.26 - 1.37 | 1.14 - 1.37 | title: +26 points for Yarnford; top four: +19 for Varleigh |
+| 30 | 3rd, 55 pts | 6th, 49 pts | 1.69 - 1.38 | 1.20 - 1.11 | top four: +23 for Varleigh, +31 for Yarnford |
 
-Seed 9 is a relegation six-pointer with expected goals close to the demo's 1.5 and 1.2. After the match, `league.with_result("Rovers", "United", 5, 2)` puts the generated score into the season.
+Seed 9 is a relegation six-pointer with expected goals close to the demo's 1.5 and 1.2. After the match, `league.with_result("Varleigh", "Yarnford", 5, 2)` puts the generated score into the season.
 
 ## How to run
 

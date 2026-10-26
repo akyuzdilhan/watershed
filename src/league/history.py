@@ -17,7 +17,7 @@ import numpy as np
 from generator.teams import make_teams
 from league.history_clubs import POOL, simulate_clubs, season_label
 from league.history_matches import CARD_NAMES, FULL, INJURY_MATCHES, P_INJURY, RED, SECOND_YELLOW, MatchPlayer, formation_for, minute_label, minute_of, pick_lineup, substitution_rules
-from league.history_players import ROLES, Careers, demo_careers
+from league.history_players import KEY_GRID, ROLES, Careers, demo_careers
 
 FORMAT_VERSION = 1
 DEMO_SEED = 7  # generator.generate_match(7, "demo")
@@ -45,6 +45,31 @@ def demo_squads(demo_seed: int = DEMO_SEED) -> dict[str, list]:
     return {home.name: home.squad, away.name: away.squad}
 
 
+class _GridReader:
+    """Stands in for the random generator of `make_teams` and reads each name draw on KEY_GRID as well, from the same state."""
+
+    def __init__(self, seed: int) -> None:
+        self.rng = np.random.default_rng(seed)
+        self.draws: list[int] = []
+
+    def random(self) -> float:
+        return self.rng.random()
+
+    def choice(self, n: int) -> int:
+        probe = np.random.default_rng()
+        probe.bit_generator.state = self.rng.bit_generator.state
+        self.draws.append(int(probe.choice(KEY_GRID[len(self.draws) % 2])))  # first name, then surname
+        return self.rng.choice(n)
+
+
+def demo_keys(demo_seed: int = DEMO_SEED) -> dict[str, tuple[int, int]]:
+    """The KEY_GRID key of each demo player (`home-20` -> (first, surname)): his two name draws in `make_teams`, read on the grid."""
+    reader = _GridReader(demo_seed)
+    home, away, _ = make_teams(reader, 1.5, 1.2)
+    d = reader.draws
+    return {p.id: (d[2 * i], d[2 * i + 1]) for i, p in enumerate(home.squad + away.squad)}
+
+
 def generate(seed: int = 9, n_seasons: int = 50, demo_seed: int = DEMO_SEED) -> "History":
     """Simulate the history of `seed`: `n_seasons` seasons ending in 2025/26."""
     layer = simulate_clubs(seed, n_seasons)
@@ -52,7 +77,7 @@ def generate(seed: int = 9, n_seasons: int = 50, demo_seed: int = DEMO_SEED) -> 
     spec = {}
     for club, squad in demo_squads(demo_seed).items():
         spec[layer.names.index(club)] = [(p.id, p.name, p.role, i < 11) for i, p in enumerate(squad)]
-    careers = Careers(_seeded(seed, 7679), years, layer.q, demo_careers(_seeded(seed, 7680), years, POOL, spec))
+    careers = Careers(_seeded(seed, 7679), years, layer.q, demo_careers(_seeded(seed, 7680), years, POOL, spec), names=_seeded(seed, 7682), demo_keys=demo_keys(demo_seed))
     rng = _seeded(seed, 7681)
     people = careers.people
     player = MatchPlayer(rng, people.role, careers.ratings, people.finishing, people.temper)

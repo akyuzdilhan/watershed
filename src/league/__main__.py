@@ -3,7 +3,7 @@
 Usage:
     python -m league --seed 1 --calibrate 1000           # means over 1,000 independent seasons, against real orders of magnitude
     python -m league table --seed 1 --matchday 30        # the table after 30 matchdays, with the observer's chances
-    python -m league demo --seed 1 --matchday 30         # expected goals and card context for Rovers v United on matchday 30
+    python -m league demo --seed 1 --matchday 30         # expected goals and card context for Varleigh v Yarnford on matchday 30
     python -m league history --seed 9 --seasons 50 --out data/history   # 50 seasons of fictional history in data/history/9/
 """
 
@@ -50,7 +50,7 @@ def print_history(seed: int, n_seasons: int, out: str) -> None:
     for row in history.champions():
         titles[row["club"]] = titles.get(row["club"], 0) + 1
     print("  titles: " + ", ".join(f"{club} {n}" for club, n in sorted(titles.items(), key=lambda x: -x[1])))
-    for club in ("Rovers", "United"):
+    for club in ("Varleigh", "Yarnford"):
         print(f"  {club}: {history.club(club)}")
     freq = frequencies(history)
     print("  per season: " + ", ".join(f"{k.removesuffix('_per_season')} {v:.2f}" for k, v in freq.items() if k.endswith("_per_season")))

@@ -42,12 +42,12 @@ from typing_extensions import Never
 MOMENTS = {
     "demo-0007-v2-a01299": {
         "minute": 72,
-        "score": "Rovers 3-2 United",
-        "event": "Rovers goalkeeper save",
+        "score": "Varleigh 3-2 Yarnford",
+        "event": "Varleigh goalkeeper save",
         "shot_xg": 0.204,
-        "rovers_wp_before_shot": 0.6965,
-        "rovers_wp_after_save": 0.8125,
-        "rovers_wp_if_goal": 0.2436,
+        "varleigh_wp_before_shot": 0.6965,
+        "varleigh_wp_after_save": 0.8125,
+        "varleigh_wp_if_goal": 0.2436,
     }
 }
 
@@ -56,10 +56,10 @@ FIELD_MEANINGS = {
     "score": "score at the time of the event",
     "event": "what happened",
     "shot_xg_pct": "chance the shot had of being a goal (expected goals), in %",
-    "rovers_wp_before_shot_pct": "Rovers' chance of winning the match just before the shot, in %",
-    "rovers_wp_after_save_pct": "Rovers' chance of winning the match after the save, in %",
-    "rovers_wp_if_goal_pct": "Rovers' chance of winning the match if the shot had gone in, in %",
-    "save_value_pts": "what the save was worth: rovers_wp_after_save_pct minus rovers_wp_if_goal_pct, in percentage points",
+    "varleigh_wp_before_shot_pct": "Varleigh's chance of winning the match just before the shot, in %",
+    "varleigh_wp_after_save_pct": "Varleigh's chance of winning the match after the save, in %",
+    "varleigh_wp_if_goal_pct": "Varleigh's chance of winning the match if the shot had gone in, in %",
+    "save_value_pts": "what the save was worth: varleigh_wp_after_save_pct minus varleigh_wp_if_goal_pct, in percentage points",
 }
 
 # Each case is one request to the card desk. Traps check that nothing is invented.
@@ -89,7 +89,7 @@ claims lists every number written in headline or why, with the field it comes fr
 Example for another moment, facts {"minute": 81, "score": "City 0-0 Town", "event": "Town goalkeeper save", "town_wp_after_save_pct": 22, "town_wp_if_goal_pct": 9, "save_value_pts": 13}, languages ["en", "es"]:
 [{"headline": "Town keeper keeps them alive", "why": "The save kept Town at 22% to win instead of 9% if it had gone in: worth 13 points.", "lang": "en", "claims": [{"value": 22, "source_field": "town_wp_after_save_pct"}, {"value": 9, "source_field": "town_wp_if_goal_pct"}, {"value": 13, "source_field": "save_value_pts"}]}, {"headline": "El portero del Town lo mantiene vivo", "why": "La parada dejó al Town con un 22% de ganar, frente al 9% si entraba: vale 13 puntos.", "lang": "es", "claims": [{"value": 22, "source_field": "town_wp_after_save_pct"}, {"value": 9, "source_field": "town_wp_if_goal_pct"}, {"value": 13, "source_field": "save_value_pts"}]}]"""
 
-KNOWN_NAMES = {"Rovers", "United"}
+KNOWN_NAMES = {"Varleigh", "Yarnford"}
 TOOL_CALLS: list[dict] = []
 
 
@@ -100,10 +100,10 @@ def card_facts(raw: dict) -> dict:
         "score": raw["score"],
         "event": raw["event"],
         "shot_xg_pct": round(raw["shot_xg"] * 100),
-        "rovers_wp_before_shot_pct": round(raw["rovers_wp_before_shot"] * 100),
-        "rovers_wp_after_save_pct": round(raw["rovers_wp_after_save"] * 100),
-        "rovers_wp_if_goal_pct": round(raw["rovers_wp_if_goal"] * 100),
-        "save_value_pts": round((raw["rovers_wp_after_save"] - raw["rovers_wp_if_goal"]) * 100),
+        "varleigh_wp_before_shot_pct": round(raw["varleigh_wp_before_shot"] * 100),
+        "varleigh_wp_after_save_pct": round(raw["varleigh_wp_after_save"] * 100),
+        "varleigh_wp_if_goal_pct": round(raw["varleigh_wp_if_goal"] * 100),
+        "save_value_pts": round((raw["varleigh_wp_after_save"] - raw["varleigh_wp_if_goal"]) * 100),
     }
 
 
@@ -161,19 +161,19 @@ class StubWriter(Executor):
     @handler
     async def on_request(self, request: AgentExecutorRequest, ctx: WorkflowContext[Draft]) -> None:
         claims = [
-            {"value": 81, "source_field": "rovers_wp_after_save_pct"},
-            {"value": 24, "source_field": "rovers_wp_if_goal_pct"},
+            {"value": 81, "source_field": "varleigh_wp_after_save_pct"},
+            {"value": 24, "source_field": "varleigh_wp_if_goal_pct"},
             {"value": 57, "source_field": "save_value_pts"},
         ]
         why = {
-            "en": "The save kept Rovers at 81% to win instead of 24% if it had gone in: worth 57 points.",
-            "es": "La parada dejó a los Rovers con un 81% de ganar, frente al 24% si entraba: vale 57 puntos.",
-            "fr": "L'arrêt laisse Rovers à 81 % de victoire, contre 24 % si le tir était entré : 57 points.",
+            "en": "The save kept Varleigh at 81% to win instead of 24% if it had gone in: worth 57 points.",
+            "es": "La parada dejó a los Varleigh con un 81% de ganar, frente al 24% si entraba: vale 57 puntos.",
+            "fr": "L'arrêt laisse Varleigh à 81 % de victoire, contre 24 % si le tir était entré : 57 points.",
         }
         if "producer_note" in self.case:
-            why["en"] = "Shooter: not available. The save kept Rovers at 81% to win instead of 24%: worth 57 points."
+            why["en"] = "Shooter: not available. The save kept Varleigh at 81% to win instead of 24%: worth 57 points."
         cards = [
-            {"headline": "Rovers keeper keeps the comeback alive", "why": why[lang], "lang": lang, "claims": claims}
+            {"headline": "Varleigh keeper keeps the comeback alive", "why": why[lang], "lang": lang, "claims": claims}
             for lang in self.case["languages"]
         ]
         await ctx.send_message(Draft(json.dumps(cards, ensure_ascii=False)))

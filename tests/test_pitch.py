@@ -50,7 +50,7 @@ def test_a_frame_builds_for_every_action_kind(match):
         kinds.setdefault((a["action_type"], a["result"]), a)
     assert len(kinds) > 20
     for a in kinds.values():
-        fig = pitch.frame_figure(a, "Rovers", "United", theme="light")
+        fig = pitch.frame_figure(a, "Varleigh", "Yarnford", theme="light")
         players = fig.data[pitch.TRACE_HOME].x + fig.data[pitch.TRACE_AWAY].x
         assert len(players) == len(a["freeze_frame"])
         assert len(fig.data[pitch.TRACE_ACTOR].x) == 1
@@ -84,7 +84,7 @@ def test_offside_margin_matches_the_frame(match, zoom):
     assert truth["offsides"]
     for o in truth["offsides"]:
         pass_action = by_id[o["event_id"]]
-        fig = pitch.offside_figure(pass_action, True, "Rovers", "United", zoom=zoom)
+        fig = pitch.offside_figure(pass_action, True, "Varleigh", "Yarnford", zoom=zoom)
         meta = fig.layout.meta["offside"]
         frame = pass_action["freeze_frame"]
         defenders = sorted((p["location"][0] for p in frame if not p["teammate"]), reverse=True)
@@ -108,7 +108,7 @@ def test_offside_of_the_63rd_minute_without_the_correction(match):
     raw = {k: v for k, v in pass_action.items() if k != "offside"}  # the version on air before VAR
     g = pitch.offside_geometry(raw)
     assert g["runner_id"] == "home-20" and not g["official"] and g["margin_m"] == pytest.approx(0.2)
-    assert "0.25 m" in pitch.offside_figure(pass_action, home_name="Rovers", away_name="United").layout.title.text
+    assert "0.25 m" in pitch.offside_figure(pass_action, home_name="Varleigh", away_name="Yarnford").layout.title.text
 
 
 def test_sequence_frames_animate_the_buildup(match):
@@ -116,11 +116,11 @@ def test_sequence_frames_animate_the_buildup(match):
     goal = next(m for m in truth["moments"] if m["key"] == "goal-63")
     seq = pitch.buildup(actions, goal["event_id"])
     assert 5 <= len(seq) <= 8 and seq[-1]["event_id"] == goal["event_id"]
-    frames = pitch.sequence_frames(seq, "Rovers", "United")
+    frames = pitch.sequence_frames(seq, "Varleigh", "Yarnford")
     assert len(frames) == len(seq) and all(len(f.data) == 5 for f in frames)
     ids = [set(f.data[pitch.TRACE_HOME].ids) for f in frames]
     assert all(i == ids[0] for i in ids)
-    fig = pitch.sequence_figure(seq, "Rovers", "United")
+    fig = pitch.sequence_figure(seq, "Varleigh", "Yarnford")
     assert len(fig.frames) == len(seq) and fig.layout.sliders[0].steps
 
 

@@ -1,8 +1,10 @@
-"""Players, teams and line-ups. Every name is drawn from fictional pools: no real club, player or referee."""
+"""Players, teams and line-ups. Names are drawn from the frozen pools of `generator.names` (first names and surnames taken from Faker's lists) and the clubs are invented: no real club, player or referee."""
 
 from dataclasses import dataclass, field
 
 import numpy as np
+
+from generator.names import FIRST_NAMES, SURNAMES
 
 # Formation slots: role, then the slot position in the team's own frame with the ball on the centre spot, in possession (ip) and out of possession (oop). Shape moves them with the ball.
 FORMATIONS: dict[str, list[tuple[str, float, float, float, float]]] = {
@@ -23,19 +25,6 @@ GROUP = {"GK": "GK", "RB": "DEF", "CB": "DEF", "LB": "DEF", "DM": "MID", "CM": "
 # How often a role takes the team's shots, relative to a striker.
 SHOOTING = {"GK": 0.0, "RB": 0.12, "LB": 0.12, "CB": 0.2, "DM": 0.2, "CM": 0.35, "AM": 0.6, "RW": 0.7, "LW": 0.7, "ST": 1.0}
 
-FIRST_NAMES = [
-    "Aldo", "Bram", "Caius", "Dario", "Elio", "Fabian", "Gideon", "Hollis", "Ilan", "Jory", "Kester", "Lior", "Matteo", "Nils", "Orrin", "Pavel",
-    "Quill", "Remy", "Soren", "Tobin", "Ulric", "Vito", "Wendell", "Xavi", "Yanis", "Zeke", "Anselm", "Bastien", "Corin", "Dorian", "Emeric", "Florin",
-    "Galen", "Hugo", "Ivo", "Jasper", "Kian", "Leandro", "Milo", "Nevan", "Oskar", "Piers", "Rafe", "Silas", "Teodor", "Umberto", "Valen", "Wilmer",
-]
-SURNAMES = [
-    "Achterberg", "Banfield", "Calloway", "Dunmore", "Ellery", "Fairhurst", "Garside", "Halloran", "Ingleby", "Jessop", "Kettering", "Lomax",
-    "Marlowe", "Netherton", "Ormsby", "Pennick", "Quarmby", "Ravensworth", "Selwood", "Thackeray", "Underhill", "Varga", "Wetherall", "Yardley",
-    "Ambrosi", "Bellweather", "Castellan", "Delacroix", "Esterhazy", "Fennimore", "Gallardo", "Hartigan", "Iversen", "Jaramillo", "Kowalczyk", "Lindqvist",
-    "Moravec", "Novak", "Okonjo", "Petrakis", "Quintero", "Rasmussen", "Szabo", "Tavares", "Uribe", "Valtonen", "Wojcik", "Zielinski",
-    "Abernethy", "Blackwood", "Coldwell", "Drummond", "Eastwood", "Fothergill", "Greenhalgh", "Hepworth", "Illingworth", "Jagger", "Kirkbride", "Lightfoot",
-    "Mossley", "Northcott", "Oakenfold", "Pickering", "Ramsbottom", "Shacklock", "Tetley", "Uttley", "Venables", "Whitworth", "Yewdall", "Ackroyd",
-]
 
 
 @dataclass(frozen=True)
@@ -124,16 +113,28 @@ class Lineup:
         self.sent_off.add(player.id)
 
 
-def _squad(rng: np.random.Generator, side: str, formation: str, used: set[str]) -> list[Player]:
+PROBE = 101  # prime, coprime with the pool sizes: on a name already taken, the next candidate is PROBE places further in the pool
+
+
+def _pick(rng: np.random.Generator, pool: tuple[str, ...], taken: set[str]) -> str:
+    """One name of `pool` not in `taken`, which it joins. A single draw whatever the collisions, so the rest of the match does not depend on them."""
+    i = int(rng.choice(len(pool)))
+    for _ in range(len(pool)):
+        if pool[i] not in taken:
+            taken.add(pool[i])
+            return pool[i]
+        i = (i + PROBE) % len(pool)
+    raise ValueError("name pool exhausted")
+
+
+def _squad(rng: np.random.Generator, side: str, formation: str, surnames: set[str]) -> list[Player]:
+    """A starting eleven and its bench: first names unique in the squad, surnames unique in `surnames` (both squads and the referee)."""
     roles = [slot[0] for slot in FORMATIONS[formation]]
     entries = list(zip(SHIRTS[formation], roles)) + BENCH
+    first_names: set[str] = set()
     squad = []
     for shirt, role in entries:
-        while True:
-            name = f"{rng.choice(FIRST_NAMES)} {rng.choice(SURNAMES)}"
-            if name not in used:
-                used.add(name)
-                break
+        name = f"{_pick(rng, FIRST_NAMES, first_names)} {_pick(rng, SURNAMES, surnames)}"
         left = (role in ("LB", "LW") and rng.random() < 0.7) or rng.random() < 0.18
         foot = "left" if left else "right"
         squad.append(Player(id=f"{side}-{shirt}", side=side, shirt=int(shirt), name=name, role=role, foot=foot))
@@ -141,9 +142,9 @@ def _squad(rng: np.random.Generator, side: str, formation: str, used: set[str]) 
 
 
 def make_teams(rng: np.random.Generator, home_xg: float, away_xg: float) -> tuple[Team, Team, str]:
-    """The two teams of a fixture and a fictional referee name."""
-    used: set[str] = set()
-    home = Team("home", "Rovers", "4-3-3", home_xg, _squad(rng, "home", "4-3-3", used))
-    away = Team("away", "United", "4-2-3-1", away_xg, _squad(rng, "away", "4-2-3-1", used))
-    referee = next(name for name in (f"{rng.choice(FIRST_NAMES)} {rng.choice(SURNAMES)}" for _ in range(100)) if name not in used)
+    """The two teams of a fixture and a fictional referee name. No surname appears twice among the 40 players and the referee."""
+    surnames: set[str] = set()
+    home = Team("home", "Varleigh", "4-3-3", home_xg, _squad(rng, "home", "4-3-3", surnames))
+    away = Team("away", "Yarnford", "4-2-3-1", away_xg, _squad(rng, "away", "4-2-3-1", surnames))
+    referee = f"{_pick(rng, FIRST_NAMES, set())} {_pick(rng, SURNAMES, surnames)}"
     return home, away, referee

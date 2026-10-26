@@ -53,7 +53,7 @@ def _sig(*parts) -> str:
 # --- readable labels ------------------------------------------------------------------------------
 
 def readable(key: str | None) -> str:
-    """A key as words: "rovers_wp_before_pct" reads "Rovers win probability before (%)", "rewrite_requested" "Rewrite requested"."""
+    """A key as words: "varleigh_wp_before_pct" reads "Varleigh win probability before (%)", "rewrite_requested" "Rewrite requested"."""
     words = [WORDS.get(w.lower(), w) for w in re.split(r"[-_\s]+", str(key or "").strip()) if w]
     text = " ".join(words)
     return text[:1].upper() + text[1:]

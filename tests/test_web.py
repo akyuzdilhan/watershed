@@ -79,7 +79,7 @@ def test_file_store_reads_the_desk_written_by_the_worker(desk):
     assert len(cards) == 11
     assert [c["value_pts"] for c in cards] == sorted((c["value_pts"] for c in cards), reverse=True)
     state = desk.state(MATCH)
-    assert state["teams"] == {"home": "Rovers", "away": "United"} and len(state["wp_timeline"]) > 1000
+    assert state["teams"] == {"home": "Varleigh", "away": "Yarnford"} and len(state["wp_timeline"]) > 1000
     assert any(e["action"] == "retracted" for e in desk.audit(MATCH))
 
 
@@ -123,7 +123,7 @@ def test_a_retracted_card_cannot_go_on_air(desk):
 
 def test_an_edit_with_an_invented_number_is_refused(desk):
     card = card_at(desk, "57'")
-    message, done = console.decide("approve-edited", MATCH, card["id"], "producer-1", {"en": {"why": "Rovers go from 8% to 33% to win."}})
+    message, done = console.decide("approve-edited", MATCH, card["id"], "producer-1", {"en": {"why": "Varleigh go from 8% to 33% to win."}})
     assert not done and "33" in message and "Verifier" in message
     assert card_at(desk, "57'")["status"] == "pending"
 
@@ -131,7 +131,7 @@ def test_an_edit_with_an_invented_number_is_refused(desk):
 def test_an_edit_that_keeps_the_facts_goes_on_air(desk):
     card = card_at(desk, "57'")
     headline = f"{card['player']['name'].split()[-1]} again!"
-    message, done = console.decide("approve-edited", MATCH, card["id"], "producer-1", {"en": {"headline": headline, "why": "Rovers jump from 8% to 32% to win."}})
+    message, done = console.decide("approve-edited", MATCH, card["id"], "producer-1", {"en": {"headline": headline, "why": "Varleigh jump from 8% to 32% to win."}})
     assert done, message
     after = card_at(desk, "57'")
     en = next(t for t in after["texts"] if t["lang"] == "en")
@@ -162,7 +162,7 @@ def test_refresh_lists_the_rundown_and_draws_the_curve(desk):
     assert selected == waiting[0]["id"] and waiting[0]["minute_label"] in texts_in(head)
     assert "Retracted" in texts_in([o["label"] for o in rundown])
     assert len(text_blocks(detail)) == 1 and "English" in texts_in(detail)  # one language at a time, English first
-    assert [t.name for t in fig.data[:3]] == ["Rovers win", "Draw", "United win"]
+    assert [t.name for t in fig.data[:3]] == ["Varleigh win", "Draw", "Yarnford win"]
     assert {t.name for t in fig.data[3:]} == {"Cards", "Retracted cards"}
     assert len(fig.layout.shapes) == 1  # half time
     state = desk.state(MATCH)
@@ -717,7 +717,7 @@ def write_docs(s: store.FileStore, with_texts: bool = True) -> list[dict]:
             d["duo"] = [{"speaker": "Ada", "lang": "en", "line": "Look at that run!", "claims": []}, {"speaker": "Bram", "lang": "en", "line": "A quarter of a metre.", "claims": []}]
     (s.root / MATCH / "insights.json").write_text(json.dumps(docs), encoding="utf-8")
     (s.root / MATCH / "storyline.json").write_text(json.dumps({"id": f"storyline-{MATCH}", "type": "storyline", "match_id": MATCH, "status": "pending",
-                                                               "facts": {"home_position": 4}, "field_meanings": {"home_position": "Rovers table position"},
+                                                               "facts": {"home_position": 4}, "field_meanings": {"home_position": "Varleigh table position"},
                                                                "texts": [{"lang": "en", "headline": "Fourth against sixth", "why": "A top-four duel."}]}), encoding="utf-8")
     return docs
 
@@ -879,7 +879,7 @@ def test_readable_labels_for_fact_types_fields_and_audit_actions(desk):
     assert console.fact_label("stat-of-the-match") == "Stat of the match" and console.fact_label("xg-ft-home-5") == "Full-time xG"
     assert console.fact_label("run-unbeaten-home") == "Unbeaten run" and console.fact_label("run-demo-0007-v2-a01178") == "Run behind the line"
     assert console.fact_label("streak") == "Streak" and console.fact_label("brand-new-thing-home-3") == "Brand new thing"
-    assert console.field_label("rovers_wp_before_pct") == "Rovers win probability before (%)" and console.field_label("swing_pts") == "Swing (points)"
+    assert console.field_label("varleigh_wp_before_pct") == "Varleigh win probability before (%)" and console.field_label("swing_pts") == "Swing (points)"
     assert console.field_label("shot_xg_pct") == "Shot xG (%)" and console.action_label("rewrite_requested") == "Rewrite requested"
     ruled = card_at(desk, "63'")
     history = texts_in(find(console.detail(ruled, desk.audit(MATCH)), lambda c: getattr(c, "className", "") == "history"))

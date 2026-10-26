@@ -452,7 +452,7 @@ RECAP_INSTRUCTIONS = """You write the post-match texts of a football broadcast.
 
 Facts: call the get_recap_facts tool with the match_id to get the facts and the meaning of each field. Use ONLY those facts. Never invent a statistic, name, minute or fact, and never mention a moment that is not in the facts.
 
-Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Lightfoot's goal at 63': offside by a whisker"), in the same sentence as the words VAR or ruled out, with the reason. For an offside, disallowed_*_offside_call says whether it was tight ("offside by a whisker") or clear ("clear offside"): never give a margin. They never count as goals.
+Goals ruled out by VAR are in the facts as disallowed_* fields: mention them in the recap, only as ruled out ("VAR ruled out Scarpetta's goal at 63': offside by a whisker"), in the same sentence as the words VAR or ruled out, with the reason. For an offside, disallowed_*_offside_call says whether it was tight ("offside by a whisker") or clear ("clear offside"): never give a margin. They never count as goals.
 
 Each number has a field name that says what it means: never use a number with another meaning. Probabilities are already percentages: write them with a % sign (34%, never 0.34). Values ending in _pts are gaps between two chances, in percentage points: write them as points. The word points means nothing else, and never goes with a verb of league points (take, gain, win, earn, pick up; French prendre, gagner, empocher; Spanish ganar, sumar, conseguir). A draw is never "a point" (French "un point", Spanish "un punto"): say honours even, match nul, empate. Do not compute any new number. Write every number in digits (4 goals, never "four goals"), and use no proper noun that is not in the facts.
 
@@ -464,7 +464,7 @@ For each requested language write three texts:
 - recap: the match in at most <recap_words> words, neutral, built around the turning point.
 - fan: at most <fan_words> words, emotional, from the point of view of fan_team's supporters.
 - analyst: at most <analyst_words> words, numbers-led, following analyst_team's chance of winning (kick-off, half-time, low point, turning point, biggest moments).
-Write each language natively, with the same facts in every language: French without an article before a club name ("pour Rovers"), Spanish with it ("para el Rovers").
+Write each language natively, with the same facts in every language: French without an article before a club name ("pour Varleigh"), Spanish with it ("para el Varleigh").
 
 Reply with valid JSON only, no other text: a JSON array with one object per requested language:
 {"lang": string, "recap": string, "fan": string, "analyst": string, "claims": [{"value": number, "source_field": string}]}

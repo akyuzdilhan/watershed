@@ -3,13 +3,16 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from generator import generate_match
 from generator.calibration import TARGETS, summarise
 from generator.cdf import write_cdf
 from generator.clock import minute_label
+from generator.names import FIRST_NAMES, SURNAMES
 from generator.publish import replay, schedule
+from generator.teams import make_teams
 from winprob.model import MatchState
 from winprob.skellam import SkellamWinProb
 
@@ -264,3 +267,16 @@ def test_cdf_export_passes_the_official_validator(demo, tmp_path):
     scorers = [g["player_id"] for g in sheet["events"]["goals"]]
     assert scorers.count("home_20") == 4 and "away_7" in scorers, "corrections are applied: the 31' goal belongs to #7, disallowed goals are gone"
     assert [c["type"] for c in sheet["events"]["cards"] if c["player_id"] == "away_5"] == ["yellow_card", "second_yellow_card"]
+
+
+def test_names_are_unique_in_a_match_and_spare_the_commentators():
+    """No surname twice among the 40 players and the referee, no first name twice in a team, on 500 seeds; the pools hold neither commentator's names."""
+    assert not {"Wren", "Calder", "Joss", "Ferrier"} & (set(FIRST_NAMES) | set(SURNAMES))
+    assert not set(FIRST_NAMES) & set(SURNAMES)
+    for seed in range(500):
+        home, away, referee = make_teams(np.random.default_rng(seed), 1.5, 1.2)
+        surnames = [p.name.split(" ")[1] for p in home.squad + away.squad] + [referee.split(" ")[1]]
+        assert len(set(surnames)) == len(surnames), seed
+        for team in (home, away):
+            firsts = [p.name.split(" ")[0] for p in team.squad]
+            assert len(set(firsts)) == len(firsts), seed
