@@ -2,7 +2,7 @@
 
 Only `approved` cards are read: a retracted, rejected or pending card is never cited, and the points of the win-probability curve that belong to a retracted moment are dropped. Goals ruled out by VAR are told as such, with the reason and, for an offside, whether it was tight or clear (`disallowed_goals`, from the worker's `var_decision` or the desk's `ruled_out` on a retracted goal card, or passed explicitly), never as goals and never with the margin. "Points" in a text is only ever a gap between two chances: the card ranking value `value_pts` orders the biggest moments but is never written, and league table points are not facts. The code computes every number (`analyse`, then `recap_facts` with explicit field names, like `card_facts`); the model only writes, and lists in `claims` each number it used with the field it comes from. Each text goes through `writer.verify`, plus checks on length, player names, spelled-out numbers and retracted moments. A failed draft gets one retry, then a fixed template takes over.
 
-The worker writes the recap at the final whistle (`build_recap` or `recap_async`); the command line does the same for a desk already written.
+`recap_async` (or `build_recap`) is meant to be called by the worker at the final whistle; the command line does the same for a desk already written.
 
 Usage:
     python -m worker.recap data/desk/demo-0007 [--writer template|foundry] [--fan-team home|away] [--out file]
