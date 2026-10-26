@@ -150,11 +150,26 @@ def annotation_arrows(fig) -> list:
 def test_shot_map_puts_every_shot_in_its_outcome_and_sets_voided_goals_apart(demo_feed):
     fig = graphics.shot_map(demo_feed)
     by_name = {t.name: t for t in fig.data}
-    assert sum(len(t.x) for t in fig.data) == len(graphics.shots(demo_feed)) == 22
+    outcomes = [t for t in fig.data if t.name != "xG key"]
+    assert sum(len(t.x) for t in outcomes) == len(graphics.shots(demo_feed)) == 22
     assert len(by_name["Goal ruled out (VAR)"].x) == 2 and len(by_name["Goal"].x) == 7
     xgs = [a["shot"]["xg"] for a in demo_feed["actions"] if tactics.counted_goal(a)]
     assert sorted(by_name["Goal"].marker.size) == pytest.approx(sorted(8 + 34 * math.sqrt(xg) for xg in xgs))
-    on_pitch(fig)
+    for trace in outcomes:
+        assert 0 <= min(trace.x) and max(trace.x) <= pitch.LENGTH and 0 <= min(trace.y) and max(trace.y) <= pitch.WIDTH, trace.name
+    key = by_name["xG key"]  # the size key under the pitch, drawn with the shots' own scale
+    assert list(key.marker.size) == [graphics.shot_size(v) for v in graphics.XG_KEY] and all(y < 0 for y in key.y) and key.showlegend is False
+
+
+def test_shot_map_filters_by_team_and_half(demo_feed):
+    every = graphics.shots(demo_feed)
+    for team, half in (("home", None), ("away", None), (None, 1), (None, 2)):
+        fig = graphics.shot_map(demo_feed, team=team, half=half)
+        expected = [a for a in every if (team is None or a["team"] == team) and (half is None or (a["period"] >= 2) == (half == 2))]
+        drawn = sorted(i for t in fig.data if t.name != "xG key" for i in t.ids)
+        assert drawn == sorted(a["event_id"] for a in expected) and fig.layout.meta["shots"] == len(expected), (team, half)
+        headers = [a.text for a in fig.layout.annotations if "shots, xG" in (a.text or "")]
+        assert len(headers) == (1 if team else 2)
 
 
 def test_buildup_arrows_widen_with_the_threat_added(demo_feed):

@@ -82,12 +82,28 @@ def set_pieces(feed: dict) -> list[dict]:
 
 # --- shot map ---------------------------------------------------------------------------------------
 
-def shot_map(feed: dict, theme="dark", width: int | None = 900) -> go.Figure:
+XG_KEY = (0.05, 0.2, 0.5)  # reference circles of the size key under the pitch
+KEY_DEPTH = 9.0  # metres of room under the pitch for the size key
+
+
+def shot_size(xg: float) -> float:
+    """Marker diameter in pixels for a shot of `xg`: the area grows with the xG."""
+    return 8 + 34 * math.sqrt(max(xg, 0.0))
+
+
+def shot_filter(a: dict, team: str | None = None, half: int | None = None) -> bool:
+    """Whether a shot is in the map: of `team` (None: both) and in `half` (1: first half, 2: second half and extra time, None: the match)."""
+    return (team is None or a["team"] == team) and (half is None or (a.get("period", 1) >= 2) == (half == 2))
+
+
+def shot_map(feed: dict, theme="dark", width: int | None = 900, team: str | None = None, half: int | None = None) -> go.Figure:
+    """Every shot, or those of `team` or of one `half`, with a size key under the pitch (xG 0.05, 0.2, 0.5)."""
     t = _t(theme)
     teams = team_names(feed.get("info"))
-    fig = pitch.pitch_figure(theme, width)
+    fig = pitch.pitch_figure(theme, width, y_range=(-pitch.PAD - 1 - KEY_DEPTH, pitch.WIDTH + pitch.PAD + 1))
+    picked = [a for a in shots(feed) if shot_filter(a, team, half)]
     by_outcome: dict[str, list[dict]] = {}
-    for a in shots(feed):
+    for a in picked:
         by_outcome.setdefault(_outcome(a), []).append(a)
     for key, (label, color, symbol, filled) in OUTCOMES.items():
         items = by_outcome.get(key, [])
@@ -96,19 +112,28 @@ def shot_map(feed: dict, theme="dark", width: int | None = 900) -> go.Figure:
         pts = [_to_home(a, a["start_x"], a["start_y"]) for a in items]
         fig.add_trace(go.Scatter(
             x=[p[0] for p in pts], y=[p[1] for p in pts], mode="markers", name=label, ids=[a["event_id"] for a in items],
-            marker={"size": [8 + 34 * math.sqrt(a["shot"]["xg"]) for a in items], "symbol": symbol, "color": color,
+            marker={"size": [shot_size(a["shot"]["xg"]) for a in items], "symbol": symbol, "color": color,
                     "line": {"color": t["paper"] if filled else color, "width": 1.5 if filled else 2.2}, "opacity": 0.95},
             customdata=[[a.get("minute_label", ""), teams[a["team"]], _who(a), a["shot"]["xg"], label + (" (penalty)" if a["action_type"] == "shot_penalty" else " (free kick)" if a["action_type"] == "shot_freekick" else "")] for a in items],
             hovertemplate="%{customdata[0]} %{customdata[1]} %{customdata[2]}<br>xG %{customdata[3]:.2f}, %{customdata[4]}<extra></extra>"))
-    counted = [a for a in shots(feed) if not a.get("voided")]  # a shot VAR ruled out stays drawn but is out of the totals, as in the insight facts
+    key_y = -pitch.PAD - 1 - KEY_DEPTH / 2
+    key_x = [pitch.HALF_X - 6 + 13 * k for k in range(len(XG_KEY))]
+    fig.add_trace(go.Scatter(x=key_x, y=[key_y] * len(XG_KEY), mode="markers+text", name="xG key", text=[f" xG {v:g}" for v in XG_KEY], textposition="middle right",
+                             textfont={"color": t["muted"], "size": 12}, hoverinfo="skip", showlegend=False,
+                             marker={"size": [shot_size(v) for v in XG_KEY], "symbol": "circle-open", "color": t["muted"], "line": {"width": 1.6}}))
+    fig.add_annotation(x=key_x[0] - 3, y=key_y, text="Marker size:", showarrow=False, xanchor="right", font={"color": t["muted"], "size": 12})
+    counted = [a for a in picked if not a.get("voided")]  # a shot VAR ruled out stays drawn but is out of the totals, as in the insight facts
     xg = {s: sum(a["shot"]["xg"] for a in counted if a["team"] == s) for s in ("home", "away")}
     goals = {s: sum(1 for a in counted if a["team"] == s and T.counted_goal(a)) for s in ("home", "away")}
     n = {s: sum(1 for a in counted if a["team"] == s) for s in ("home", "away")}
     for side, x, anchor in (("away", 2, "left"), ("home", pitch.LENGTH - 2, "right")):
-        fig.add_annotation(x=x, y=pitch.WIDTH + 1.2, text=f"<b>{teams[side]}</b> {goals[side]} goals, {n[side]} shots, xG {xg[side]:.2f}", showarrow=False,
-                           xanchor=anchor, yanchor="bottom", font={"color": t[side], "size": 13})
-    fig.update_layout(title_text=_title("Shot map", f"marker size: xG. {teams['home']} attack right, {teams['away']} left"), showlegend=True,
-                      legend={"orientation": "h", "y": -0.02, "x": 0, "yanchor": "top", "font": {"color": t["text"]}, "itemsizing": "constant"})
+        if team in (None, side):
+            fig.add_annotation(x=x, y=pitch.WIDTH + 1.2, text=f"<b>{teams[side]}</b> {goals[side]} goals, {n[side]} shots, xG {xg[side]:.2f}", showarrow=False,
+                               xanchor=anchor, yanchor="bottom", font={"color": t[side], "size": 13})
+    scope = teams[team] if team else "First half" if half == 1 else "Second half" if half == 2 else "Both teams"
+    fig.update_layout(title_text=_title("Shot map", f"{scope}. Bigger marker, better chance (xG). {teams['home']} attack right, {teams['away']} left"), showlegend=True,
+                      legend={"orientation": "h", "y": -0.01, "x": 0, "yanchor": "top", "font": {"color": t["text"]}, "itemsizing": "constant"},
+                      meta={"filter": {"team": team, "half": half}, "shots": len(picked)})
     if width:
         fig.update_layout(height=fig.layout.height + 40, margin={"b": 50})
     return fig

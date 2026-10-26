@@ -182,6 +182,9 @@ def graphic_items(feed: dict, kind: str) -> list[dict]:
     names = player_names(feed.get("info"))
     teams = team_names(feed.get("info"))
     who = lambda pid: names.get(pid, pid)  # noqa: E731
+    if kind == "shots":
+        return [{"value": "all", "label": "Both teams"}, *({"value": s, "label": teams[s]} for s in ("home", "away")),
+                {"value": "h1", "label": "First half"}, {"value": "h2", "label": "Second half"}]
     if kind == "buildups":
         return [{"value": a["event_id"], "label": f"{a.get('minute_label', '')} {teams[a['team']]} {'goal' if T.any_goal(a) else 'chance'}" + (" (ruled out)" if a.get("voided") else "")
                  + f", {G._who(a)}, xG {a['shot']['xg']:.2f}"} for a in G.moments(feed)]
@@ -208,7 +211,9 @@ def graphic_items(feed: dict, kind: str) -> list[dict]:
 def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict] | None = None) -> go.Figure:
     """The figure of a graphic; a run is drawn without its offside margin, for everyone."""
     if kind == "shots":
-        return _sized(G.shot_map(feed, THEME, None), 600)
+        team = item if item in ("home", "away") else None
+        half = {"h1": 1, "h2": 2}.get(item or "")
+        return _sized(G.shot_map(feed, THEME, None, team=team, half=half), 620)
     if kind == "momentum":
         return _sized(G.momentum_figure(feed, timeline, THEME, width=None), 600 if timeline else 380)
     if not item:

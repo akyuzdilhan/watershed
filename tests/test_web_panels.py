@@ -287,6 +287,15 @@ def test_the_shot_map_totals_leave_out_the_shots_var_ruled_out(demo_feed):
         assert math.isclose(sum(p["xg"] for p in series[side]), sum(a["shot"]["xg"] for a in shots if a["team"] == side and not a.get("voided")), abs_tol=0.01)
 
 
+def test_the_shot_map_picker_offers_teams_and_halves(demo_feed):
+    teams = matchfeed.team_names(demo_feed["info"])
+    items = panels.graphic_items(demo_feed, "shots")
+    assert [o["value"] for o in items] == ["all", "home", "away", "h1", "h2"] and [o["label"] for o in items][:3] == ["Both teams", teams["home"], teams["away"]]
+    assert panels.graphic_figure(demo_feed, "shots", "away").layout.meta["filter"] == {"team": "away", "half": None}
+    assert panels.graphic_figure(demo_feed, "shots", "h2").layout.meta["filter"] == {"team": None, "half": 2}
+    assert panels.graphic_figure(demo_feed, "shots", None).layout.meta["filter"] == {"team": None, "half": None}
+
+
 def test_the_former_pressing_figure_is_named_for_what_it_counts(demo_feed):
     fig = graphics.pressing_figure(demo_feed)
     assert fig.layout.title.text.startswith("<b>Opponents near the ball</b>") and f"within {tactics.PRESS_RADIUS_M:g} m of the opponent on the ball" in fig.layout.title.text
