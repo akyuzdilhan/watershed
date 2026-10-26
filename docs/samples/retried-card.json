@@ -1,0 +1,235 @@
+{
+ "id": "card-demo-0007-v2-a01300",
+ "type": "card",
+ "match_id": "demo-0007",
+ "event_id": "demo-0007-v2-a01300",
+ "shot_event_id": "demo-0007-v2-a01299",
+ "moment": "save",
+ "status": "approved",
+ "version": 1,
+ "under_review": false,
+ "minute_label": "72'",
+ "clock_s": 4295.8,
+ "team": "home",
+ "team_name": "Varleigh",
+ "player": {
+  "id": "home-1",
+  "shirt": 1,
+  "name": "Valdemar McGrory"
+ },
+ "score_before": {
+  "home": 3,
+  "away": 2
+ },
+ "value_pts": 12,
+ "facts": {
+  "xg_pct": 20,
+  "team_wp_before_pct": 81,
+  "team_wp_if_goal_pct": 24,
+  "draw_before_pct": 16,
+  "draw_if_goal_pct": 57
+ },
+ "on_air_priority": "normal",
+ "texts": [
+  {
+   "headline": "Valdemar McGrory keeps Varleigh ahead",
+   "why": "McGrory's save left Varleigh with 81% to win instead of 24%, up 57 points.",
+   "lang": "en",
+   "claims": [
+    {
+     "value": 81,
+     "source_field": "varleigh_wp_after_save_pct"
+    },
+    {
+     "value": 24,
+     "source_field": "varleigh_wp_if_goal_pct"
+    },
+    {
+     "value": 57,
+     "source_field": "save_value_pts"
+    }
+   ]
+  },
+  {
+   "headline": "Valdemar McGrory maintient Varleigh devant",
+   "why": "Sur l'arrêt de Valdemar McGrory, Varleigh a 81 % de chances de gagner, contre 24 % en cas de but, soit 57 points de mieux.",
+   "lang": "fr",
+   "claims": [
+    {
+     "value": 81,
+     "source_field": "varleigh_wp_after_save_pct"
+    },
+    {
+     "value": 24,
+     "source_field": "varleigh_wp_if_goal_pct"
+    },
+    {
+     "value": 57,
+     "source_field": "save_value_pts"
+    }
+   ]
+  },
+  {
+   "headline": "Valdemar McGrory mantiene al Varleigh",
+   "why": "Con la atajada de Valdemar McGrory, el Varleigh tiene un 81% de opciones de ganar, frente al 24% si hubiera entrado: 57 puntos más.",
+   "lang": "es",
+   "claims": [
+    {
+     "value": 81,
+     "source_field": "varleigh_wp_after_save_pct"
+    },
+    {
+     "value": 24,
+     "source_field": "varleigh_wp_if_goal_pct"
+    },
+    {
+     "value": 57,
+     "source_field": "save_value_pts"
+    }
+   ]
+  }
+ ],
+ "duo": [
+  {
+   "speaker": "wren",
+   "lang": "en",
+   "line": "What a stop, Valdemar McGrory! Yarnford's moment fizzles out, and Varleigh stay in control.",
+   "claims": []
+  },
+  {
+   "speaker": "joss",
+   "lang": "en",
+   "line": "Varleigh are at 81% to win instead of 24%, up 57 points from that save.",
+   "claims": [
+    {
+     "value": 81,
+     "source_field": "varleigh_wp_after_save_pct"
+    },
+    {
+     "value": 24,
+     "source_field": "varleigh_wp_if_goal_pct"
+    },
+    {
+     "value": 57,
+     "source_field": "save_value_pts"
+    }
+   ]
+  },
+  {
+   "speaker": "wren",
+   "lang": "fr",
+   "line": "Quelle parade, Valdemar McGrory ! Là, Yarnford ne passe pas, Varleigh garde l’avantage.",
+   "claims": []
+  },
+  {
+   "speaker": "joss",
+   "lang": "fr",
+   "line": "Varleigh est à 81 % de chances de gagner, contre 24 % en cas de but, soit 57 points de mieux.",
+   "claims": [
+    {
+     "value": 81,
+     "source_field": "varleigh_wp_after_save_pct"
+    },
+    {
+     "value": 24,
+     "source_field": "varleigh_wp_if_goal_pct"
+    },
+    {
+     "value": 57,
+     "source_field": "save_value_pts"
+    }
+   ]
+  },
+  {
+   "speaker": "wren",
+   "lang": "es",
+   "line": "¡Vaya atajada! Valdemar McGrory frena a Yarnford y el Varleigh respira.",
+   "claims": []
+  },
+  {
+   "speaker": "joss",
+   "lang": "es",
+   "line": "El Varleigh tiene un 81% de opciones de ganar, frente al 24% si hubiera entrado: 57 puntos más.",
+   "claims": [
+    {
+     "value": 81,
+     "source_field": "varleigh_wp_after_save_pct"
+    },
+    {
+     "value": 24,
+     "source_field": "varleigh_wp_if_goal_pct"
+    },
+    {
+     "value": 57,
+     "source_field": "save_value_pts"
+    }
+   ]
+  }
+ ],
+ "machine_translated": [
+  "es"
+ ],
+ "writer": "gpt-5.4-nano",
+ "duo_writer": "gpt-5.4-nano",
+ "verification": {
+  "verified": true,
+  "attempts": 2,
+  "attempts_log": [
+   {
+    "attempt": 1,
+    "writer": "gpt-5.4-nano",
+    "verified": false,
+    "rejected": [
+     "en: if_goal_as_start: from 24%",
+     "fr: if_goal_as_start: de 24 %",
+     "es: if_goal_as_start: del 24%",
+     "duo en joss: if_goal_as_start: from 24%",
+     "duo fr joss: if_goal_as_start: de 24 %",
+     "duo es joss: if_goal_as_start: del 24%"
+    ],
+    "finish_reason": "stop",
+    "usage": {
+     "input_tokens": 10684,
+     "output_tokens": 3098,
+     "reasoning_tokens": 2100
+    },
+    "latency_s": 21.133,
+    "error": null
+   },
+   {
+    "attempt": 2,
+    "writer": "gpt-5.4-nano",
+    "verified": true,
+    "rejected": [],
+    "finish_reason": "stop",
+    "usage": {
+     "input_tokens": 10849,
+     "output_tokens": 4230,
+     "reasoning_tokens": 3533
+    },
+    "latency_s": 31.529,
+    "error": null
+   }
+  ],
+  "fallback_reason": null,
+  "repetition_warnings": 6
+ },
+ "writer_config": {
+  "deployment": "gpt-5.4-nano",
+  "effort": "medium",
+  "max_tokens": 5000,
+  "prompt_sha": "3635bc733780"
+ },
+ "history": [
+  {
+   "action": "written",
+   "by": "gpt-5.4-nano",
+   "version": 1
+  },
+  {
+   "action": "approved",
+   "by": "auto-approve",
+   "version": 1
+  }
+ ]
+}

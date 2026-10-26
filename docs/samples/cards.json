@@ -1,0 +1,753 @@
+[
+ {
+  "id": "card-demo-0007-v2-a00979",
+  "type": "card",
+  "match_id": "demo-0007",
+  "event_id": "demo-0007-v2-a00979",
+  "shot_event_id": "demo-0007-v2-a00979",
+  "moment": "goal",
+  "status": "approved",
+  "version": 1,
+  "under_review": false,
+  "minute_label": "52'",
+  "clock_s": 3070,
+  "team": "home",
+  "team_name": "Varleigh",
+  "player": {
+   "id": "home-20",
+   "shirt": 20,
+   "name": "Marijn Scarpetta"
+  },
+  "score_before": {
+   "home": 0,
+   "away": 2
+  },
+  "value_pts": 24,
+  "facts": {
+   "xg_pct": 21,
+   "team_wp_before_pct": 2,
+   "team_wp_after_pct": 10,
+   "draw_before_pct": 8,
+   "draw_after_pct": 24
+  },
+  "scorer_match_goals": 1,
+  "on_air_priority": "normal",
+  "texts": [
+   {
+    "headline": "Marijn Scarpetta pulls Varleigh back",
+    "why": "Varleigh go from 2% to 10% to win, up 8 points, after Marijn Scarpetta pulls one back.",
+    "lang": "en",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 10,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 8,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "headline": "Marijn Scarpetta relance Varleigh",
+    "why": "Varleigh passe de 2 % à 10 % de chances de gagner, soit 8 points de mieux, après le but de Marijn Scarpetta.",
+    "lang": "fr",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 10,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 8,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "headline": "Marijn Scarpetta reactiva al Varleigh",
+    "why": "El Varleigh pasa del 2% al 10% de opciones de ganar: 8 puntos más, tras el gol de Marijn Scarpetta.",
+    "lang": "es",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 10,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 8,
+      "source_field": "swing_pts"
+     }
+    ]
+   }
+  ],
+  "duo": [
+   {
+    "speaker": "wren",
+    "lang": "en",
+    "line": "Marijn Scarpetta has pulled one back for Varleigh, and the home crowd senses momentum.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "en",
+    "line": "Varleigh go from 2% to 10% to win, worth 8 points, with Scarpetta scoring.",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 10,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 8,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "speaker": "wren",
+    "lang": "fr",
+    "line": "Quel but de Marijn Scarpetta ! Varleigh relance le match et tout le stade y croit.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "fr",
+    "line": "Varleigh passe de 2 % à 10 % de chances de gagner, soit 8 points de mieux, grâce à Scarpetta.",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 10,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 8,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "speaker": "wren",
+    "lang": "es",
+    "line": "¡Marijn Scarpetta lo mete! El Varleigh se acerca, y el estadio vuelve a empujar.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "es",
+    "line": "El Varleigh pasa del 2% al 10% de opciones de ganar, 8 puntos más, con el gol de Scarpetta.",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 10,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 8,
+      "source_field": "swing_pts"
+     }
+    ]
+   }
+  ],
+  "machine_translated": [
+   "es"
+  ],
+  "writer": "gpt-5.4-nano",
+  "duo_writer": "gpt-5.4-nano",
+  "verification": {
+   "verified": true,
+   "attempts": 1,
+   "attempts_log": [
+    {
+     "attempt": 1,
+     "writer": "gpt-5.4-nano",
+     "verified": true,
+     "rejected": [],
+     "finish_reason": "stop",
+     "usage": {
+      "input_tokens": 9823,
+      "output_tokens": 2582,
+      "reasoning_tokens": 1588
+     },
+     "latency_s": 22.63,
+     "error": null
+    }
+   ],
+   "fallback_reason": null,
+   "repetition_warnings": 12
+  },
+  "writer_config": {
+   "deployment": "gpt-5.4-nano",
+   "effort": "medium",
+   "max_tokens": 5000,
+   "prompt_sha": "3635bc733780"
+  },
+  "history": [
+   {
+    "action": "written",
+    "by": "gpt-5.4-nano",
+    "version": 1
+   },
+   {
+    "action": "approved",
+    "by": "auto-approve",
+    "version": 1
+   }
+  ]
+ },
+ {
+  "id": "card-demo-0007-v2-a01179",
+  "type": "card",
+  "match_id": "demo-0007",
+  "event_id": "demo-0007-v2-a01179",
+  "shot_event_id": "demo-0007-v2-a01179",
+  "moment": "goal",
+  "status": "retracted",
+  "version": 1,
+  "under_review": false,
+  "minute_label": "63'",
+  "clock_s": 3745,
+  "team": "home",
+  "team_name": "Varleigh",
+  "player": {
+   "id": "home-20",
+   "shirt": 20,
+   "name": "Marijn Scarpetta"
+  },
+  "score_before": {
+   "home": 2,
+   "away": 2
+  },
+  "value_pts": 49,
+  "facts": {
+   "xg_pct": 26,
+   "team_wp_before_pct": 29,
+   "team_wp_after_pct": 78,
+   "draw_before_pct": 49,
+   "draw_after_pct": 18
+  },
+  "season_context": {
+   "facts": {
+    "score_now": "Varleigh 3-2 Yarnford",
+    "varleigh_rank_at_kickoff": 17,
+    "varleigh_rank_if_score_holds": 14,
+    "varleigh_points_if_score_holds": 32,
+    "varleigh_in_drop_zone_at_kickoff": false,
+    "varleigh_in_drop_zone_if_score_holds": false,
+    "varleigh_relegation_chance_at_kickoff_pct": 11,
+    "varleigh_relegation_chance_if_score_holds_pct": 5,
+    "varleigh_relegation_change_since_kickoff_pts": 6,
+    "varleigh_relegation_change_direction": "down",
+    "varleigh_relegation_chance_if_varleigh_score_next_pct": 5,
+    "varleigh_relegation_chance_if_yarnford_score_next_pct": 13,
+    "yarnford_rank_at_kickoff": 18,
+    "yarnford_rank_if_score_holds": 18,
+    "yarnford_points_if_score_holds": 28,
+    "yarnford_in_drop_zone_at_kickoff": true,
+    "yarnford_in_drop_zone_if_score_holds": true,
+    "yarnford_relegation_chance_at_kickoff_pct": 34,
+    "yarnford_relegation_chance_if_score_holds_pct": 43,
+    "yarnford_relegation_change_since_kickoff_pts": 9,
+    "yarnford_relegation_change_direction": "up",
+    "yarnford_relegation_chance_if_varleigh_score_next_pct": 44,
+    "yarnford_relegation_chance_if_yarnford_score_next_pct": 32
+   },
+   "meanings": {
+    "score_now": "the score these facts are computed for",
+    "varleigh_rank_at_kickoff": "Varleigh's league position at kick-off",
+    "varleigh_rank_if_score_holds": "Varleigh's league position if the score holds, this result added to the table at kick-off",
+    "varleigh_points_if_score_holds": "Varleigh's league points if the score holds",
+    "varleigh_in_drop_zone_at_kickoff": "whether Varleigh were in the drop zone at kick-off",
+    "varleigh_in_drop_zone_if_score_holds": "whether Varleigh are in the drop zone if the score holds",
+    "varleigh_relegation_chance_at_kickoff_pct": "Varleigh's chance of being relegated (18th to 20th) at kick-off, in %",
+    "varleigh_relegation_chance_if_score_holds_pct": "Varleigh's chance of being relegated (18th to 20th) if the score holds, in %",
+    "varleigh_relegation_change_since_kickoff_pts": "how far Varleigh's chance of being relegated (18th to 20th) has moved since kick-off, in percentage points (direction in varleigh_relegation_change_direction)",
+    "varleigh_relegation_change_direction": "whether Varleigh's chance of being relegated (18th to 20th) is up, down or unchanged since kick-off",
+    "varleigh_relegation_chance_if_varleigh_score_next_pct": "Varleigh's chance of being relegated (18th to 20th) if Varleigh score the next goal and the score then holds, in %",
+    "varleigh_relegation_chance_if_yarnford_score_next_pct": "Varleigh's chance of being relegated (18th to 20th) if Yarnford score the next goal and the score then holds, in %",
+    "yarnford_rank_at_kickoff": "Yarnford's league position at kick-off",
+    "yarnford_rank_if_score_holds": "Yarnford's league position if the score holds, this result added to the table at kick-off",
+    "yarnford_points_if_score_holds": "Yarnford's league points if the score holds",
+    "yarnford_in_drop_zone_at_kickoff": "whether Yarnford were in the drop zone at kick-off",
+    "yarnford_in_drop_zone_if_score_holds": "whether Yarnford are in the drop zone if the score holds",
+    "yarnford_relegation_chance_at_kickoff_pct": "Yarnford's chance of being relegated (18th to 20th) at kick-off, in %",
+    "yarnford_relegation_chance_if_score_holds_pct": "Yarnford's chance of being relegated (18th to 20th) if the score holds, in %",
+    "yarnford_relegation_change_since_kickoff_pts": "how far Yarnford's chance of being relegated (18th to 20th) has moved since kick-off, in percentage points (direction in yarnford_relegation_change_direction)",
+    "yarnford_relegation_change_direction": "whether Yarnford's chance of being relegated (18th to 20th) is up, down or unchanged since kick-off",
+    "yarnford_relegation_chance_if_varleigh_score_next_pct": "Yarnford's chance of being relegated (18th to 20th) if Varleigh score the next goal and the score then holds, in %",
+    "yarnford_relegation_chance_if_yarnford_score_next_pct": "Yarnford's chance of being relegated (18th to 20th) if Yarnford score the next goal and the score then holds, in %"
+   }
+  },
+  "scorer_match_goals": 3,
+  "on_air_priority": "normal",
+  "texts": [
+   {
+    "headline": "Marijn Scarpetta puts Varleigh ahead",
+    "why": "Scarpetta's finish sends Varleigh from 29% to 78% to win, up 49 points.",
+    "lang": "en",
+    "claims": [
+     {
+      "value": 29,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 78,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 49,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "headline": "Marijn Scarpetta met Varleigh devant",
+    "why": "La finition de Scarpetta fait passer Varleigh de 29 % à 78 % de chances de gagner, soit 49 points de mieux.",
+    "lang": "fr",
+    "claims": [
+     {
+      "value": 29,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 78,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 49,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "headline": "Marijn Scarpetta pone al Varleigh por delante",
+    "why": "La definición de Scarpetta coloca al Varleigh del 29% al 78% en opciones de ganar, 49 puntos más.",
+    "lang": "es",
+    "claims": [
+     {
+      "value": 29,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 78,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 49,
+      "source_field": "swing_pts"
+     }
+    ]
+   }
+  ],
+  "duo": [
+   {
+    "speaker": "wren",
+    "lang": "en",
+    "line": "Marijn Scarpetta turns the screw, and Varleigh finally look in command.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "en",
+    "line": "Varleigh go from 29% to 78% to win after Scarpetta’s go-ahead finish, up 49 points.",
+    "claims": [
+     {
+      "value": 29,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 78,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 49,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "speaker": "wren",
+    "lang": "fr",
+    "line": "Quel but de Marijn Scarpetta, Varleigh prend l’avantage, et on sent que ça pèse sur Yarnford.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "fr",
+    "line": "Après le but, Varleigh passe de 29 % à 78 % de chances de gagner, soit 49 points de mieux.",
+    "claims": [
+     {
+      "value": 29,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 78,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 49,
+      "source_field": "swing_pts"
+     }
+    ]
+   },
+   {
+    "speaker": "wren",
+    "lang": "es",
+    "line": "Marijn Scarpetta lo firma y el Varleigh se pone por delante, con el estadio empujando fuerte.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "es",
+    "line": "Con el gol, el Varleigh pasa del 29% al 78% en opciones de ganar: 49 puntos más.",
+    "claims": [
+     {
+      "value": 29,
+      "source_field": "varleigh_wp_before_pct"
+     },
+     {
+      "value": 78,
+      "source_field": "varleigh_wp_after_pct"
+     },
+     {
+      "value": 49,
+      "source_field": "swing_pts"
+     }
+    ]
+   }
+  ],
+  "machine_translated": [
+   "es"
+  ],
+  "writer": "gpt-5.4-nano",
+  "duo_writer": "gpt-5.4-nano",
+  "verification": {
+   "verified": true,
+   "attempts": 1,
+   "attempts_log": [
+    {
+     "attempt": 1,
+     "writer": "gpt-5.4-nano",
+     "verified": true,
+     "rejected": [],
+     "finish_reason": "stop",
+     "usage": {
+      "input_tokens": 11880,
+      "output_tokens": 2434,
+      "reasoning_tokens": 1775
+     },
+     "latency_s": 18.331,
+     "error": null
+    }
+   ],
+   "fallback_reason": null,
+   "repetition_warnings": 8
+  },
+  "writer_config": {
+   "deployment": "gpt-5.4-nano",
+   "effort": "medium",
+   "max_tokens": 5000,
+   "prompt_sha": "3635bc733780"
+  },
+  "history": [
+   {
+    "action": "written",
+    "by": "gpt-5.4-nano",
+    "version": 1
+   },
+   {
+    "action": "approved",
+    "by": "auto-approve",
+    "version": 1
+   },
+   {
+    "action": "hold",
+    "by": "feed",
+    "version": 1
+   },
+   {
+    "action": "retracted",
+    "by": "feed",
+    "version": 1
+   }
+  ],
+  "var_decision": {
+   "reason": "var_offside",
+   "call": "tight",
+   "margin_m": 0.25
+  },
+  "retracted_on_air": true,
+  "ruled_out": {
+   "reason": "offside",
+   "cause": "var_offside",
+   "minute_label": "64'",
+   "margin_cm": null
+  },
+  "duo_ruling": [
+   {
+    "speaker": "wren",
+    "lang": "en",
+    "line": "No! Oh no. It's gone. VAR has taken it away from Marijn Scarpetta.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "en",
+    "line": "Look at the line. Offside by a whisker, judged at the moment of the pass.",
+    "claims": []
+   },
+   {
+    "speaker": "wren",
+    "lang": "en",
+    "line": "A whisker, Joss. That is all it took.",
+    "claims": []
+   },
+   {
+    "speaker": "wren",
+    "lang": "fr",
+    "line": "Et c'est refusé. La VAR annule, et Varleigh n'en revient pas.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "fr",
+    "line": "Regardez la ligne. Hors-jeu d'un rien au départ du ballon. C'est dire si c'était serré.",
+    "claims": []
+   },
+   {
+    "speaker": "wren",
+    "lang": "fr",
+    "line": "Si peu, Joss. Toute une célébration, pour un rien.",
+    "claims": []
+   },
+   {
+    "speaker": "wren",
+    "lang": "es",
+    "line": "El VAR dice que no. El gol de Marijn Scarpetta no sube al marcador.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "es",
+    "line": "Miren la línea. Fuera de juego por muy poco, en el momento del pase.",
+    "claims": []
+   },
+   {
+    "speaker": "wren",
+    "lang": "es",
+    "line": "Tan poco, Joss. Toda una celebración, por nada.",
+    "claims": []
+   }
+  ]
+ },
+ {
+  "id": "card-demo-0007-v2-a01400",
+  "type": "card",
+  "match_id": "demo-0007",
+  "event_id": "demo-0007-v2-a01400",
+  "shot_event_id": null,
+  "moment": "red_card",
+  "status": "approved",
+  "version": 1,
+  "under_review": false,
+  "minute_label": "78'",
+  "clock_s": 4650,
+  "team": "away",
+  "team_name": "Yarnford",
+  "player": {
+   "id": "away-5",
+   "shirt": 5,
+   "name": "Otto Meyer"
+  },
+  "score_before": {
+   "home": 3,
+   "away": 2
+  },
+  "value_pts": 5,
+  "facts": {
+   "xg_pct": null,
+   "team_wp_before_pct": 2,
+   "team_wp_after_pct": 1,
+   "draw_before_pct": 14,
+   "draw_after_pct": 10
+  },
+  "card_kind": "second_yellow",
+  "on_air_priority": "normal",
+  "texts": [
+   {
+    "headline": "Otto Meyer sent off for second yellow",
+    "why": "Second yellow for Otto Meyer cuts Yarnford's chance to win from 2% to 1%.",
+    "lang": "en",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "yarnford_wp_before_pct"
+     },
+     {
+      "value": 1,
+      "source_field": "yarnford_wp_after_pct"
+     }
+    ]
+   },
+   {
+    "headline": "Otto Meyer exclu pour deuxième jaune",
+    "why": "Le deuxième jaune d'Otto Meyer fait chuter les chances de gagner de Yarnford, de 2 % à 1 %.",
+    "lang": "fr",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "yarnford_wp_before_pct"
+     },
+     {
+      "value": 1,
+      "source_field": "yarnford_wp_after_pct"
+     }
+    ]
+   },
+   {
+    "headline": "Otto Meyer expulsado por segunda amarilla",
+    "why": "La segunda amarilla de Otto Meyer recorta al Yarnford sus opciones de ganar, del 2% al 1%.",
+    "lang": "es",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "yarnford_wp_before_pct"
+     },
+     {
+      "value": 1,
+      "source_field": "yarnford_wp_after_pct"
+     }
+    ]
+   }
+  ],
+  "duo": [
+   {
+    "speaker": "wren",
+    "lang": "en",
+    "line": "That’s the blow, Otto Meyer is off, and Yarnford have to dig in now.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "en",
+    "line": "Yarnford drop from 2% to 1% to win after that second yellow.",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "yarnford_wp_before_pct"
+     },
+     {
+      "value": 1,
+      "source_field": "yarnford_wp_after_pct"
+     }
+    ]
+   },
+   {
+    "speaker": "wren",
+    "lang": "fr",
+    "line": "Deuxième jaune, Otto Meyer est exclu, et Yarnford se retrouve sous pression immédiate.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "fr",
+    "line": "Yarnford passe de 2 % à 1 % de chances de gagner avec cette expulsion.",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "yarnford_wp_before_pct"
+     },
+     {
+      "value": 1,
+      "source_field": "yarnford_wp_after_pct"
+     }
+    ]
+   },
+   {
+    "speaker": "wren",
+    "lang": "es",
+    "line": "Se le complica el partido a Otto Meyer, segunda amarilla y al Yarnford le toca remar.",
+    "claims": []
+   },
+   {
+    "speaker": "joss",
+    "lang": "es",
+    "line": "Al Yarnford se le caen las opciones de ganar del 2% al 1% con esa segunda amarilla.",
+    "claims": [
+     {
+      "value": 2,
+      "source_field": "yarnford_wp_before_pct"
+     },
+     {
+      "value": 1,
+      "source_field": "yarnford_wp_after_pct"
+     }
+    ]
+   }
+  ],
+  "machine_translated": [
+   "es"
+  ],
+  "writer": "gpt-5.4-nano",
+  "duo_writer": "gpt-5.4-nano",
+  "verification": {
+   "verified": true,
+   "attempts": 1,
+   "attempts_log": [
+    {
+     "attempt": 1,
+     "writer": "gpt-5.4-nano",
+     "verified": true,
+     "rejected": [],
+     "finish_reason": "stop",
+     "usage": {
+      "input_tokens": 10767,
+      "output_tokens": 2567,
+      "reasoning_tokens": 1733
+     },
+     "latency_s": 18.847,
+     "error": null
+    }
+   ],
+   "fallback_reason": null,
+   "repetition_warnings": 6
+  },
+  "writer_config": {
+   "deployment": "gpt-5.4-nano",
+   "effort": "medium",
+   "max_tokens": 5000,
+   "prompt_sha": "3635bc733780"
+  },
+  "history": [
+   {
+    "action": "written",
+    "by": "gpt-5.4-nano",
+    "version": 1
+   },
+   {
+    "action": "approved",
+    "by": "auto-approve",
+    "version": 1
+   }
+  ]
+ }
+]

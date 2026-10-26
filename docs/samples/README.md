@@ -1,8 +1,8 @@
 # Samples from a live run
 
-Empty for now. This folder will hold documents copied as they are from the desk of a live run with the Foundry Writer and the production prompt (the pass measured in `docs/evaluation.md`, "Live run, production prompt"), so that a reader can see what the model actually wrote and what the Verifier did with it. Nothing here is written by hand or edited.
+Documents copied as they are from the desk of the reference replay of 26/10/2026 in Azure (demo-0007, gpt-5.4-nano, medium effort for the cards, `prompt_sha` `3635bc733780`), measured in `docs/evaluation.md`, "Live run, production prompt", so that a reader can see what the model actually wrote and what the Verifier did with it. Nothing here is written by hand or edited; Cosmos DB system fields (`_rid`, `_etag`...) are left out. The cards are the 52' goal, the 63' goal retracted after VAR, and the 78' red card; the retried card is the 72' save.
 
-What will go here:
+What is here:
 
 | File | Content |
 |---|---|
