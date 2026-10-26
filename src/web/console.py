@@ -11,6 +11,7 @@ In public mode a visitor who is not signed in gets the same views read only, und
 
 import hashlib
 import json
+import re
 
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
@@ -846,6 +847,81 @@ def _fb_send_cb(_n, match_id, key, verdict, reasons, note):
     return html.Span(message, className="ok" if done else "error"), (None if done else no_update)
 
 
+# --- the story of this match, at the top of the card's column ---------------------------------------
+
+STORY_TITLE = "The story of this match"
+STORY_CHIPS = 3  # insights shown during the match
+
+
+def standing_insights(docs: list[dict]) -> list[dict]:
+    """The insights standing among `docs` (those of the moments up to the minute shown): approved ones, and a superseded one whose successor is not among them yet (a brace before the hat-trick), the most valuable first."""
+    ids = {d.get("id") for d in docs}
+    keep = [d for d in docs if d.get("status") == "approved" or (d.get("status") == "superseded" and d.get("superseded_by") and d["superseded_by"] not in ids)]
+    return sorted(keep, key=lambda d: (-(d.get("value") or 0), d.get("id", "")))
+
+
+def first_sentence(text: str | None) -> str:
+    """The first sentence of a text: up to its first full stop followed by a space, the whole text without one."""
+    text = (text or "").strip()
+    m = re.search(r"[.!?](\s|$)", text)
+    return text[:m.start() + 1] if m else text
+
+
+def story_strip(state: dict | None, docs: list[dict], storyline: dict | None, recap: dict | None, lang: str | None, t: float | None = None) -> tuple[str, list]:
+    """(phase, children) of "The story of this match", in the language picked only: before kick-off and until an insight stands, the storyline's headline (the stakes); during the match the top insights standing at minute `t` (`standing_insights`, rarity in seasons anchored on a team or a player, as the insight says it) as chips that open the insight; at full time the recap's first sentence. `docs` and `state` are as they stood at `t` (a replay shows only what existed then)."""
+    lang = lang if lang in LANG_NAMES else DEFAULT_LANG
+    final = bool((state or {}).get("final")) and t is None
+    if final and recap:
+        text = panels.text_in(recap, lang)
+        sentence = first_sentence((text or {}).get("recap"))
+        if sentence:
+            return "after", [html.Span("Full time", className="story-tag"), html.Span(sentence, className="story-text")]
+    chips = []
+    for d in standing_insights(docs)[:STORY_CHIPS]:
+        text = panels.text_in(d, lang)
+        if text and text.get("headline"):
+            chips.append(html.Button(text["headline"], id={"type": "c-story-chip", "id": d["id"]}, className="story-chip", n_clicks=0, title="Open this insight"))
+    if chips:
+        return "during", [html.Span("So far", className="story-tag"), *chips]
+    text = panels.text_in(storyline, lang)
+    if text and text.get("headline"):
+        return "before", [html.Span("The stakes", className="story-tag"), html.Span(text["headline"], className="story-text")]
+    return "none", []
+
+
+def story(match_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None):
+    """(the strip's children, its style, signature) for the match at minute `t` of a replay (None: as it stands); no_update for all three when nothing changed."""
+    store = store or get_store()
+    if not match_id:
+        return [], {"display": "none"}, None
+    full = store.state(match_id) or {}
+    _, state, _, x_max = replay([], full, [], t)
+    docs = insights_at(store.insights(match_id), full, t)
+    recap = store.recap(match_id) if full.get("final") and x_max is None else None
+    if recap is not None and not panels.same_match(recap, full):
+        recap = None
+    phase, children = story_strip(state, docs, store.storyline(match_id), recap, lang, None if x_max is None else t)
+    sig = _sig(match_id, lang, phase, [c.to_plotly_json() if hasattr(c, "to_plotly_json") else c for c in children])
+    if sig == last_sig:
+        return no_update, no_update, no_update
+    if not children:
+        return [], {"display": "none"}, sig
+    return [html.Span(STORY_TITLE, className="story-title"), *children], {}, sig
+
+
+def _story_cb(_sig, match_id, lang, last_sig, t=None):
+    return story(match_id, lang, last_sig, t=t)
+
+
+# A chip of the story opens its insight under All insights and storyline
+STORY_OPEN = """function(clicks) {
+    var trig = (window.dash_clientside.callback_context.triggered[0] || {});
+    if (!trig.value) { return [window.dash_clientside.no_update, window.dash_clientside.no_update]; }
+    var id = JSON.parse(trig.prop_id.split(".")[0]).id;
+    return ["insights", id];
+}"""
+
+
 # --- layout and wiring ----------------------------------------------------------------------------
 
 def viewer(user: str | None) -> html.Div:
@@ -906,6 +982,7 @@ def layout(user: str | None) -> html.Div:
                                     html.H3("Rundown"), follow_button()], className="col-head"),
                           dcc.Store(id="c-rundown-folded", storage_type="local"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
             html.Section([
+                html.Div(id="c-story", className="story", style={"display": "none"}, **{"aria-live": "polite"}), dcc.Store(id="c-story-sig"),
                 html.Div([html.Div(id="c-head", className="title-main"), lang_switch()], className="title-row"),
                 html.Div([html.Div([html.Button("Publish", id="c-approve", className="btn btn-approve", disabled=True),
                                     html.Button("Publish during VAR check", id="c-approve-var", className="btn btn-approve btn-var", style={"display": "none"},
@@ -1097,6 +1174,10 @@ def register(app) -> None:
     app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-i-message", "children", allow_duplicate=True), Output("c-i-rev", "data", allow_duplicate=True),
                  Input({"type": "fb", "p": ALL, "k": ALL, "v": ALL}, "n_clicks"), Input({"type": "fb-r", "p": ALL, "k": ALL, "r": ALL}, "n_clicks"),
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
+    app.callback(Output("c-story", "children"), Output("c-story", "style"), Output("c-story-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), Input("c-lang", "value"),
+                 State("c-story-sig", "data"), State("c-replay", "data"))(_story_cb)
+    app.clientside_callback(STORY_OPEN, Output("c-view", "value", allow_duplicate=True), Output("c-i-list", "value", allow_duplicate=True),
+                            Input({"type": "c-story-chip", "id": ALL}, "n_clicks"), prevent_initial_call=True)
     app.callback(Output("c-fb-line", "options"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"), State("c-lang", "value"))(_fb_lines_cb)
     app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-fb-note", "value"), Input("c-fb-send", "n_clicks"), State("c-match", "value"), State("c-fb-line", "value"),
                  State("c-fb-verdict", "value"), State("c-fb-reasons", "value"), State("c-fb-note", "value"), prevent_initial_call=True)(_fb_send_cb)

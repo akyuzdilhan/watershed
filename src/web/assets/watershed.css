@@ -239,3 +239,11 @@ body:has(.ov-page) { background: #0b0b0b; }
 .ctx-tabs { display: flex; gap: 4px; margin-bottom: 6px; border-bottom: 0 !important; }
 .ctx-tab.tab, .ctx-tab { background: transparent !important; color: var(--ink-2) !important; border: 1px solid var(--line) !important; border-radius: 6px !important; padding: 3px 10px !important; font-size: 12px; width: auto !important; flex: none !important; }
 .ctx-tab-on.tab--selected, .ctx-tab-on { background: var(--surface-2) !important; color: var(--ink) !important; border-color: var(--ink-2) !important; }
+
+/* The story of this match, at the top of the card's column: the stakes, the insights so far as chips, the recap's first sentence */
+.story { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 0 0 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.story-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; flex-basis: 100%; }
+.story-tag { font-size: 11px; color: var(--var); border: 1px solid var(--var); border-radius: 10px; padding: 1px 8px; font-weight: 600; }
+.story-text { color: var(--ink); font-weight: 600; }
+.story-chip { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; text-align: left; }
+.story-chip:hover { border-color: var(--ink-2); }

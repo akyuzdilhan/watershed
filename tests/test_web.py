@@ -1286,6 +1286,36 @@ def test_the_moment_on_the_pitch_has_tabs_for_the_card_s_tactical_details_withou
     assert not find(panels.moment_block(feed, red), lambda c: type(c).__name__ == "Tabs")
 
 
+def test_the_story_of_this_match_says_the_stakes_then_the_insights_so_far_then_the_recap():
+    storyline = {"texts": [{"lang": "en", "headline": "A relegation battle"}, {"lang": "fr", "headline": "Duel pour le maintien"}]}
+    brace = {"id": "i-2", "status": "superseded", "superseded_by": "i-3", "value": 69, "texts": [{"lang": "en", "headline": "A brace"}, {"lang": "fr", "headline": "Un doublé"}]}
+    treble = {"id": "i-3", "status": "approved", "value": 98, "texts": [{"lang": "en", "headline": "A hat-trick"}, {"lang": "fr", "headline": "Un triplé"}]}
+    comeback = {"id": "i-c", "status": "approved", "value": 50, "texts": [{"lang": "en", "headline": "From 0-2 down"}]}
+    pending = {"id": "i-p", "status": "pending", "value": 99, "texts": [{"lang": "en", "headline": "Not yet on air"}]}
+    recap = {"texts": [{"lang": "en", "recap": "Varleigh won 5-2. VAR ruled out a goal."}, {"lang": "fr", "recap": "Varleigh s'impose 5-2. La VAR annule un but."}]}
+    live = {"final": False}
+    phase, out = console.story_strip(live, [], storyline, None, "fr")
+    assert phase == "before" and "Duel pour le maintien" in texts_in(out) and "A relegation battle" not in texts_in(out)
+    phase, out = console.story_strip(live, [brace, pending], storyline, None, "fr")
+    assert phase == "during" and texts_in(out).count("Un doublé") == 1 and "Not yet on air" not in texts_in(out)  # the brace stands until the hat-trick
+    phase, out = console.story_strip(live, [brace, treble, comeback, pending], storyline, None, "en")
+    chips = [c for c in out if getattr(c, "className", "") == "story-chip"]
+    assert [texts_in(c) for c in chips] == ["A hat-trick", "From 0-2 down"] and chips[0].id == {"type": "c-story-chip", "id": "i-3"}  # superseded: gone
+    phase, out = console.story_strip({"final": True}, [treble], storyline, recap, "fr")
+    assert phase == "after" and texts_in(out).endswith("Varleigh s'impose 5-2.") and "La VAR" not in texts_in(out)
+    assert console.story_strip({"final": True}, [treble], storyline, recap, "fr", t=40.0)[0] == "during"  # a replay: what existed then
+    assert console.first_sentence("No full stop") == "No full stop" and "c-story" in component_ids(console.layout(None)) and "insights" in console.STORY_OPEN
+
+
+def test_the_story_strip_follows_the_replay_minute(feed_desk):
+    write_docs(feed_desk)
+    points, x_of, breaks = console.axis(feed_desk.state(MATCH)["wp_timeline"])
+    children, style, sig = console.story(MATCH, "en", None, feed_desk, t=1.0)
+    assert style == {} and "Fourth against sixth" in texts_in(children)  # before any insight: the stakes
+    assert console.story(MATCH, "en", sig, feed_desk, t=1.0) == (no_update, no_update, no_update)
+    assert console.story(None, "en", None, feed_desk) == ([], {"display": "none"}, None)
+
+
 def test_a_live_pitch_follows_the_replay_and_the_card_s_moment_comes_back_when_paused(feed_desk):
     feed, goal = feed_desk.feed(MATCH), card_at(feed_desk, "63'")
     points, x_of, breaks = console.axis(feed_desk.state(MATCH)["wp_timeline"])
