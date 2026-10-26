@@ -5,7 +5,7 @@ Usage:
     python -m worker --live --cosmos                                                          # Service Bus in, Cosmos DB out
     python -m worker --live --cosmos --forever                                                # keep listening for new matches (container)
     python -m worker data/replay/demo-0007.jsonl.gz --history data/history/1                  # with the insight engine, against the league history
-Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment).
+Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment). With APPLICATIONINSIGHTS_CONNECTION_STRING set, the traces go to Application Insights (worker.telemetry).
 
 With a writer, the desk writes the cards and their duo with it, the insights and the storyline with the templates (unless --insights-writer writer), and at the final whistle the post-match recap (unless --no-recap): with --writer foundry, the recap agent on Foundry. Every model call of a match comes out of one budget of 40 (worker.desk).
 """
@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from generator.publish import load, service_bus_settings
+from worker import telemetry
 from worker.pipeline import MemorySink, Pipeline, ThreadedSink
 from worker.spotter import score_against_truth
 
@@ -82,6 +83,7 @@ def main() -> None:
             writer, recap_writer = FoundryWriter(), RecapWriter()
         desk = Desk(sink, writer, auto_approve=args.auto_approve, recap_writer=recap_writer,
                     insight_writer=TemplateWriter() if args.insights_writer == "template" else None)
+    telemetry.configure()  # after the .env, when one is read above; nothing without APPLICATIONINSIGHTS_CONNECTION_STRING
     history = load_history(args.history) if args.history else None
     storyline_for = None
     if args.league_seed is not None:

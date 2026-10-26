@@ -429,6 +429,11 @@ resource webAuth 'Microsoft.App/containerApps/authConfigs@2025-01-01' = if (easy
 
 var workerEnv = [
   {
+    // Traces of the desk and of the model calls, without their texts (src/worker/telemetry.py)
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: appInsights.properties.ConnectionString
+  }
+  {
     name: 'AZURE_CLIENT_ID'
     value: workerIdentity.properties.clientId
   }
