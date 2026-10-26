@@ -220,6 +220,7 @@ Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth:
 | Reply cut by the token limit (`finish_reason` `length`) | Asked once more with twice the budget; cut again, the template | `model_attempts` |
 | Draft fails the Verifier twice | Template; in auto-approve mode the template card airs, since it only uses checked fields. The recap behaves the same way | `model_attempts`, `Desk.write`, `worker.recap` |
 | 40 model calls used for the match | Every further card, and the recap, use the template | `Desk.write` |
+| Model down: 3 drafts in a row whose model calls all failed | Circuit breaker: the templates write at once for 5 minutes (`fallback_reason` `circuit_open`, audit `model_paused`), so a lasting outage costs no delay per card; then the next draft tries the model again, a failure pauses it again, a reply closes it (`model_resumed`) | `Desk._model_outcome` |
 | Producer tries to approve a retracted card | Refused (`ValueError`) | `Desk.approve` |
 | Producer approves during a VAR check | Allowed; the card is flagged `under_review`. Known limitation | `Desk.approve` |
 | Correction for a moment without a card | Applied to the match state; no card action | `Spotter.process` |

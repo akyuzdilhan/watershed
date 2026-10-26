@@ -1,3 +1,4 @@
+import copy
 import json
 
 import pytest
@@ -19,6 +20,48 @@ def desk_run():
         pipeline.handle(m)
     pipeline.flush()
     return sink, desk, truth
+
+
+class FlakyModel:
+    """A model writer that times out while `down`, else answers something the Verifier refuses: no model call."""
+
+    name = "flaky"
+
+    def __init__(self):
+        self.down, self.calls = True, 0
+
+    async def write_async(self, card, facts, languages, note=None):
+        self.calls += 1
+        if self.down:
+            raise TimeoutError("model down")
+        return "not json"
+
+
+def test_three_model_failures_in_a_row_pause_the_model_for_five_minutes(desk_run):
+    sink, _, _ = desk_run
+    goal = next(c for c in sink.cards.values() if c["moment"] == "goal")
+    now, model, out = [0.0], FlakyModel(), MemorySink()
+    desk = Desk(out, model, clock=lambda: now[0])
+
+    def write(i, at):
+        now[0] = at
+        card = {k: v for k, v in copy.deepcopy(goal).items() if k not in ("history", "status", "texts", "duo", "verification")}
+        return desk.write(dict(card, id=f"c{i}", version=1), {"home": "Varleigh", "away": "Yarnford"})
+
+    for i in range(3):
+        assert write(i, i)["verification"]["fallback_reason"] == "timeout"
+    assert model.calls == 3 and [e for e in out.audit if e["action"] == "model_paused"][0]["card_id"] == "c2"
+    paused = write(3, 301)
+    assert model.calls == 3 and paused["verification"]["fallback_reason"] == "circuit_open" and paused["verification"]["attempts"] == 0
+    assert paused["writer"] == "template" and paused["verification"]["verified"]
+    assert write(4, 303)["verification"]["fallback_reason"] == "timeout" and model.calls == 4  # tried again after 5 minutes, failed: paused again at once
+    assert write(5, 400)["verification"]["fallback_reason"] == "circuit_open" and model.calls == 4
+    model.down = False
+    assert write(6, 604)["verification"]["fallback_reason"] == "verifier" and model.calls == 6  # an answer, even refused, closes the breaker
+    assert [e["action"] for e in out.audit if e["action"].startswith("model_")] == ["model_paused", "model_paused", "model_resumed"]
+    model.down = True
+    assert write(7, 605)["verification"]["fallback_reason"] == "timeout" and write(8, 606)["verification"]["fallback_reason"] == "timeout"
+    assert desk.paused_until is None and model.calls == 8
 
 
 def test_every_card_is_written_in_three_languages_and_verified(desk_run):

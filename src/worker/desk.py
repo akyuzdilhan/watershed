@@ -8,6 +8,8 @@ Who writes what: the cards and their duo by `writer`; the insights and the story
 
 Cost guard: at most `max_calls_per_match` model calls per match (40), shared by every draft the desk sends to a model: a card costs one call, two when the Verifier sends it back, and so does the recap; a rewrite is a new draft. Once the budget is spent, the templates write. Templates cost nothing.
 
+Circuit breaker: after `BREAKER_FAILURES` drafts in a row whose model calls all failed (timeout, 429, network, 5xx, another error; a refused or cut reply is an answer), the desk stops calling the model for `BREAKER_OPEN_S` and the templates write at once (`fallback_reason` `circuit_open`), audited as `model_paused` on the draft that tripped it; then the next draft tries the model again, one more failure pauses it again, a reply closes the breaker (`model_resumed`).
+
 The producers can also judge every sentence (`feedback`: thumbs up or down, reasons, a note). The desk stores it, audits it, and reads the producer profile built from it (`worker.feedback`) before each draft: the Writer prompt gets the control room's preferences, the template writer picks the variants they turned down last.
 """
 
@@ -21,6 +23,7 @@ from worker.writer import LANGUAGES, TemplateWriter, card_facts, draft, draft_in
 ACTION_FIELDS = ("event_id", "message_id", "minute_label", "cause")  # what the desk's audit entry keeps of a card action from the feed
 # Figures of an insight for the producer, never given to a writer: rarity in bits, the matches the history counts, how many times rarer the stat of the
 # match is than the next fact, values on the desk. `one_in` and `history_per_season` are still given: the insight templates quote them (docs/notes/insights.md).
+BREAKER_FAILURES, BREAKER_OPEN_S = 3, 300.0  # consecutive drafts whose model calls all failed, then 5 minutes of templates
 OFF_AIR_FACTS = ("surprisal_bits", "runner_up_surprisal_bits", "history_opportunities", "times_rarer_than_runner_up", "top_value", "runner_up_value")
 
 
@@ -34,8 +37,11 @@ def on_air_view(doc: dict) -> dict:
 
 class Desk:
     def __init__(self, sink, writer=None, auto_approve: bool = False, languages: tuple[str, ...] = LANGUAGES, max_calls_per_match: int = 40,
-                 profile=None, insight_writer=None, recap_writer=None) -> None:
+                 profile=None, insight_writer=None, recap_writer=None, clock=time.monotonic) -> None:
         self.sink = sink
+        self.clock = clock  # the circuit breaker's clock (tests)
+        self.model_failures = 0  # drafts in a row whose model calls all failed
+        self.paused_until: float | None = None  # the breaker is open until then
         self.max_calls_per_match = max_calls_per_match  # cost guard: beyond it, the templates write
         self.calls: dict[str, int] = {}
         self.writer = writer or TemplateWriter()
@@ -92,22 +98,53 @@ class Desk:
     def _calls_left(self, match_id: str) -> int:
         return max(self.max_calls_per_match - self.calls.get(match_id, 0), 0)
 
+    def _paused(self) -> bool:
+        return self.paused_until is not None and self.clock() < self.paused_until
+
+    def _model_outcome(self, doc: dict, log: list[dict], paused: bool, verification: dict) -> None:
+        """The circuit breaker after a draft: `circuit_open` when it skipped the model, else counts the drafts in a row whose model calls all failed and pauses the model after `BREAKER_FAILURES`."""
+        if paused:
+            if verification.get("fallback_reason") == "no_budget":
+                verification["fallback_reason"] = "circuit_open"
+            return
+        if not log:
+            return
+        if all(e.get("error") and not str(e["error"]).startswith("truncated") for e in log):
+            self.model_failures += 1
+            if self.model_failures >= BREAKER_FAILURES:
+                self.paused_until = self.clock() + BREAKER_OPEN_S
+                self._audit(doc, "model_paused", "desk", {"failures": self.model_failures, "seconds": BREAKER_OPEN_S, "error": log[-1]["error"]})
+            return
+        if self.paused_until is not None:
+            self._audit(doc, "model_resumed", "desk", {"failures": self.model_failures})
+        self.model_failures, self.paused_until = 0, None
+
+    def _draft_outcome(self, doc: dict, d, paused: bool) -> None:
+        verification = {"fallback_reason": d.fallback_reason}
+        self._model_outcome(doc, d.attempts_log, paused, verification)
+        d.fallback_reason = verification["fallback_reason"]
+
     def write(self, card: dict, teams: dict[str, str]) -> dict:
         """Writes (or rewrites) a card with its duo and puts it up for approval."""
         if card["moment"] == "goal":
             card["scorer_match_goals"] = self._scorer_goals(card)
         card["on_air_priority"] = "low" if low_stake(card) else "normal"
-        d = self.loop.run_until_complete(draft(card, teams, self.writer, self.languages, calls_left=self._calls_left(card["match_id"]),
+        paused = self._paused()
+        d = self.loop.run_until_complete(draft(card, teams, self.writer, self.languages, calls_left=0 if paused else self._calls_left(card["match_id"]),
                                                memory=self.memory(card["match_id"]), duo=True, **self._preferences(card)))
         self.calls[card["match_id"]] = self.calls.get(card["match_id"], 0) + d.attempts
+        self._draft_outcome(card, d, paused)
         return self._stage(card, d, self.sink.card)
 
     def write_insight(self, doc: dict, teams: dict[str, str]) -> dict:
         """Writes an insight (or the storyline) with the insight writer (the card writer when there is none), through the same Verifier, retry and template path as a card, with the same statuses and audit; the writer and the Verifier see `on_air_view(doc)`."""
         doc.setdefault("version", 1)
-        d = self.loop.run_until_complete(draft_insight(on_air_view(doc), teams, self.insight_writer or self.writer, self.languages, calls_left=self._calls_left(doc["match_id"]),
-                                                       memory=self.memory(doc["match_id"]), duo=True, **self._preferences(doc)))
+        paused = self._paused()
+        d = self.loop.run_until_complete(draft_insight(on_air_view(doc), teams, self.insight_writer or self.writer, self.languages,
+                                                       calls_left=0 if paused else self._calls_left(doc["match_id"]), memory=self.memory(doc["match_id"]), duo=True,
+                                                       **self._preferences(doc)))
         self.calls[doc["match_id"]] = self.calls.get(doc["match_id"], 0) + d.attempts
+        self._draft_outcome(doc, d, paused)
         return self._stage(doc, d, getattr(self.sink, "insight", None) or self.sink.card)
 
     def write_recap(self, cards: list[dict], state: dict, storyline: dict | None = None) -> dict:
@@ -115,8 +152,11 @@ class Desk:
         from worker.recap import recap_async
 
         match_id = state["match_id"]
-        doc = self.loop.run_until_complete(recap_async(cards, state, self.recap_writer, self.languages, calls_left=self._calls_left(match_id), storyline=storyline))
+        paused = self._paused()
+        doc = self.loop.run_until_complete(recap_async(cards, state, self.recap_writer, self.languages, calls_left=0 if paused else self._calls_left(match_id),
+                                                       storyline=storyline))
         self.calls[match_id] = self.calls.get(match_id, 0) + doc["verification"]["attempts"]
+        self._model_outcome(doc, doc["verification"]["attempts_log"], paused, doc["verification"])
         (getattr(self.sink, "recap", None) or self.sink.card)(doc)
         return doc
 
