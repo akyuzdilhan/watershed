@@ -1122,21 +1122,24 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
     vals, fields = it.values(facts, lang)
     stat = "top_fact" in facts  # the stat of the match
 
-    def pool(templates: list[str]) -> list[str]:
-        return [it.clean(x) for x in templates if it.usable(x, facts)]
+    def choose(templates: list[str], slot: str, optional: bool = False) -> tuple[str, list[dict]] | None:
+        """A line of the part: the templates true for the facts first, the plain ones when none of those can be told (`insight_texts.pools`)."""
+        first, plain = it.pools(templates, facts)
+        return pick.line(first, vals, fields, slot, optional=optional) or pick.line(plain, vals, fields, slot, optional=optional)
 
-    heads = pool(it.part(t, "headlines", facts))
+    heads, plain_heads = it.pools(it.part(t, "headlines", facts), facts)
     if stat:
         heads = [h for h in heads if ":" not in h] or heads  # after its own prefix, a second colon reads badly
-    headline = pick.headline([heads], vals, fields, "headline")
-    why = pick.line(pool(it.part(t, "whys", facts)), vals, fields, "why")
+    headline = pick.headline([heads], vals, fields, "headline") or pick.headline([plain_heads], vals, fields, "headline")
+    why = choose(it.part(t, "whys", facts), "why")
     if not headline or not why:
         return None
     text, claims = headline[0], headline[1]
     body, body_claims = why
     if stat:
         names = {w for v in facts.values() if isinstance(v, str) for w in v.split()}
-        text = it.STAT_PREFIX[lang] + (text if text.split()[0] in names else text[:1].lower() + text[1:])
+        first = re.sub(r"\W+$", "", text.split()[0])  # "Rovers:" is a name too
+        text = it.STAT_PREFIX[lang] + (text if first in names else text[:1].lower() + text[1:])
         extra = fill(it.STAT_WHY[lang], vals, fields)
         if extra:
             body, body_claims = body + extra[0], body_claims + extra[1]
@@ -1144,8 +1147,8 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
     if not duo:
         return out, []
     hearts = it.STAT_HEART.get(fam, it.STAT_HEART["any"])[lang] if stat else it.part(t, "heart", facts)
-    heart = pick.line(pool(hearts), vals, fields, "heart", optional=True)
-    eye = pick.line(pool(it.part(t, "eye", facts)), vals, fields, "eye", optional=True)
+    heart = choose(hearts, "heart", optional=True)
+    eye = choose(it.part(t, "eye", facts), "eye", optional=True)
     if not heart or not eye:
         return out, None
     return out, [{"speaker": HEART, "lang": lang, "line": heart[0], "claims": heart[1]}, {"speaker": EYE, "lang": lang, "line": eye[0], "claims": eye[1]}]
