@@ -264,3 +264,25 @@ def test_the_stdio_command_serves_a_desk_folder(tmp_path, history):
     assert moment == expected
     assert json.loads(state)["facts"]["match_score_now"] == "Varleigh 3-2 Yarnford"  # the 63' goal was ruled out
     assert json.loads(player)["facts"]["player_marijn_scarpetta_league_goals"] == history.player(history.find_players("Marijn Scarpetta")[0])["goals"]
+
+
+def test_the_history_view_computes_a_count_once_across_threads(history):
+    from worker.insight_history import HistoryView
+
+    view = HistoryView(history)
+    seen, start = [], threading.Barrier(8)
+
+    def query(f):
+        seen.append(1)
+        return 1, 1
+
+    def ask():
+        start.wait()
+        return view.count("probe", query)
+
+    threads = [threading.Thread(target=ask) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(seen) == view.n and view.count("probe", query) == (view.n, view.n)  # the pipeline and the MCP tools share the cache: one scan

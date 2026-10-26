@@ -3,6 +3,7 @@
 Only the read API of the contract is used (`seasons`, `matches`, `head_to_head`, `last`, `player`). The match records are read with tolerant accessors, since the history module is built in parallel: a goal may name its team as `home`/`away` or by club, its player as an id or a `{id, name}` dict, and the half-time score may be a dict, a pair or a "1-0" string. The reduced features are what every count works on, and `last()` is asked with a predicate over the same features, so a count and its "last time" always agree.
 """
 
+import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -166,24 +167,27 @@ class HistoryView:
         self.has_goals = any(f.goals for f in self.features)
         self._cache: dict = {}
         self._runs: dict | None = None
+        self._lock = threading.RLock()  # the pipeline's thread and the MCP tools' worker threads share the caches
 
     def count(self, name: str, query: Callable[[Features], tuple[int, int]]) -> tuple[int, int]:
-        if name not in self._cache:
-            k = n = 0
-            for f in self.features:
-                a, b = query(f)
-                k += a
-                n += b
-            self._cache[name] = (k, n)
-        return self._cache[name]
+        with self._lock:
+            if name not in self._cache:
+                k = n = 0
+                for f in self.features:
+                    a, b = query(f)
+                    k += a
+                    n += b
+                self._cache[name] = (k, n)
+            return self._cache[name]
 
     def last(self, match_pred: Callable[[Features], bool], name: str | None = None) -> Features | None:
         """The most recent past match where `match_pred` holds, asked through `History.last` and read back as features; cached under `name`."""
         if name is not None:
             key = "last:" + name
-            if key not in self._cache:
-                self._cache[key] = self.last(match_pred)
-            return self._cache[key]
+            with self._lock:
+                if key not in self._cache:
+                    self._cache[key] = self.last(match_pred)
+                return self._cache[key]
         found = None
         last = getattr(self.history, "last", None)
         if last is not None:
@@ -217,38 +221,40 @@ class HistoryView:
 
     def club_max_goals(self, club: str) -> int:
         key = "club-max:" + club
-        if key not in self._cache:
-            self._cache[key] = max((f.goals_of(s) for f in self.features for s in ("home", "away") if f.club(s) == club), default=0)
-        return self._cache[key]
+        with self._lock:
+            if key not in self._cache:
+                self._cache[key] = max((f.goals_of(s) for f in self.features for s in ("home", "away") if f.club(s) == club), default=0)
+            return self._cache[key]
 
     # --- runs -----------------------------------------------------------------------------------
 
     def runs(self) -> dict:
         """Per club, the results in order; league-wide, the lengths of every unbeaten and winless run."""
-        if self._runs is None:
-            seq: dict[str, list[str]] = {}
-            for f in self.features:
-                seq.setdefault(f.home, []).append(f.result("home"))
-                seq.setdefault(f.away, []).append(f.result("away"))
-            lengths = {"unbeaten": [], "winless": []}
-            current = {}
-            for club, results in seq.items():
-                cur = {}
-                for kind, breaks in (("unbeaten", "L"), ("winless", "W")):
-                    n = 0
-                    for r in results:
-                        if r == breaks:
-                            if n:
-                                lengths[kind].append(n)
-                            n = 0
-                        else:
-                            n += 1
-                    if n:
-                        lengths[kind].append(n)
-                    cur[kind] = n
-                current[club] = cur
-            self._runs = {"results": seq, "lengths": lengths, "current": current}
-        return self._runs
+        with self._lock:
+            if self._runs is None:
+                seq: dict[str, list[str]] = {}
+                for f in self.features:
+                    seq.setdefault(f.home, []).append(f.result("home"))
+                    seq.setdefault(f.away, []).append(f.result("away"))
+                lengths = {"unbeaten": [], "winless": []}
+                current = {}
+                for club, results in seq.items():
+                    cur = {}
+                    for kind, breaks in (("unbeaten", "L"), ("winless", "W")):
+                        n = 0
+                        for r in results:
+                            if r == breaks:
+                                if n:
+                                    lengths[kind].append(n)
+                                n = 0
+                            else:
+                                n += 1
+                        if n:
+                            lengths[kind].append(n)
+                        cur[kind] = n
+                    current[club] = cur
+                self._runs = {"results": seq, "lengths": lengths, "current": current}
+            return self._runs
 
     def run_tail(self, kind: str, length: int) -> tuple[int, int]:
         lengths = self.runs()["lengths"][kind]
@@ -257,16 +263,17 @@ class HistoryView:
     def drought_tail(self, side: str, gap: int) -> tuple[int, int]:
         """League-wide: of the wins by the `side` club of a fixture (same home and away clubs), how many came `gap` or more seasons after its previous win there (or after the first meeting)."""
         name = f"drought-{side}"
-        if name not in self._cache:
-            first: dict[tuple[str, str], int] = {}
-            last_win: dict[tuple[str, str], int] = {}
-            gaps = []
-            for f in self.features:
-                fixture = (f.home, f.away)
-                first.setdefault(fixture, f.season_idx)
-                if f.result(side) == "W":
-                    gaps.append(f.season_idx - last_win.get(fixture, first[fixture]))
-                    last_win[fixture] = f.season_idx
-            self._cache[name] = gaps
-        gaps = self._cache[name]
+        with self._lock:
+            if name not in self._cache:
+                first: dict[tuple[str, str], int] = {}
+                last_win: dict[tuple[str, str], int] = {}
+                gaps = []
+                for f in self.features:
+                    fixture = (f.home, f.away)
+                    first.setdefault(fixture, f.season_idx)
+                    if f.result(side) == "W":
+                        gaps.append(f.season_idx - last_win.get(fixture, first[fixture]))
+                        last_win[fixture] = f.season_idx
+                self._cache[name] = gaps
+            gaps = self._cache[name]
         return sum(1 for g in gaps if g >= gap), len(gaps)
