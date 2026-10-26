@@ -1,6 +1,6 @@
 """The console (`/`): the rundown of cards, the selected card with its texts, the claim behind every number and the Verifier's report, its history, the producer's decisions, and the win-probability curve.
 
-The rundown is in match order, the cards waiting for a decision grouped at the top. The selected card shows its heading, then Approve, Edit and Reject, then its texts in one language at a time (English by default, French and Spanish on the switch next to the buttons). Fact types, fields and audit actions read as words ("Half-time lead lost"), not keys. A card ruled out shows why VAR ruled it out and what the duo says about it (`duo_ruling`). The writing trace (`verification.attempts_log`, `fallback_reason`, `writer_config`) is shown when the card carries it. Without a selection the earliest card waiting for a decision is picked, else the most recent card of the match.
+The rundown is in match order, the cards waiting for a decision grouped at the top. The selected card shows its heading, then Approve, Edit and Reject, then its texts in one language at a time (English by default, French and Spanish on the switch next to the buttons). Fact types, fields and audit actions read as words ("Half-time lead lost"), not keys. A card ruled out shows why VAR ruled it out and what the duo says about it (`duo_ruling`). The writing trace (`verification.attempts_log`, `fallback_reason`, `writer_config`) is shown when the card carries it. Without a selection the earliest card waiting for a decision is picked, else, at full time, the headline story (the first card VAR pulled off air, else the card of the highest value), else the most recent card of the match.
 
 What stays with the producer (the offside margin, the writer settings, the error causes and `fallback_reason`, which can hold a service's error message) is folded under "Producer details", closed by default (`panels.producer_details`), and the producer's identity never shows: the console says `security.display_name()` ("Producer", or `PRODUCER_DISPLAY_NAME`) in "Signed in as", in the decision messages and in the history, while the audit keeps the identity. A screen capture of the producer's view shows neither an address nor a margin unless the producer opens the details.
 
@@ -536,11 +536,21 @@ def button_states(card: dict | None) -> tuple[bool, bool, bool]:
 
 # --- callbacks as plain functions -----------------------------------------------------------------
 
-def default_pick(cards: list[dict]) -> str | None:
-    """The card selected when none is: the top of the rundown when it waits for a decision, else the most recent card of the match (the rundown is in match order)."""
+def headline_card(cards: list[dict]) -> dict | None:
+    """The story of a finished match: the first card VAR pulled off air, else the card of the highest value (`value_pts`), the earliest on a tie; None without a card."""
+    pulled = [c for c in cards if c.get("status") == "retracted" and c.get("retracted_on_air")]
+    if pulled:
+        return min(pulled, key=lambda c: (c.get("clock_s") or 0, c.get("version") or 1))
+    return max(cards, key=lambda c: (c.get("value_pts") or 0, -(c.get("clock_s") or 0)), default=None)
+
+
+def default_pick(cards: list[dict], final: bool = False) -> str | None:
+    """The card selected when none is: the top of the rundown when it waits for a decision; else, the match finished, its headline story (`headline_card`); else, live, the most recent card (the rundown is in match order)."""
     if not cards:
         return None
-    return cards[0]["id"] if cards[0].get("status") == "pending" else cards[-1]["id"]
+    if cards[0].get("status") == "pending":
+        return cards[0]["id"]
+    return headline_card(cards)["id"] if final else cards[-1]["id"]
 
 
 def match_options(current: str | None, store=None) -> tuple[list[dict], str | None]:
@@ -558,7 +568,7 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
             t: float | None = None):
     """(rundown options, selected card, detail, heading, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed.
 
-    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the earliest waiting card is picked, else the most recent (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
+    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the earliest waiting card is picked, else the headline story at full time, else the most recent (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
     store = store or get_store()
     lang = lang if lang in LANG_NAMES else DEFAULT_LANG
     if not match_id:
@@ -566,7 +576,7 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     cards, state, audit, x_max = replay(store.cards(match_id), store.state(match_id), store.audit(match_id), t)
     cards, fb_docs = rundown_order(cards), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
-    picked = selected if selected in ids else default_pick(cards)
+    picked = selected if selected in ids else default_pick(cards, bool((state or {}).get("final")))
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]

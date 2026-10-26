@@ -976,19 +976,30 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
     assert ["ru-waiting" in o["label"].className for o in options] == [c["status"] == "pending" for c in after]
 
 
-def test_without_a_card_waiting_the_most_recent_card_is_selected(desk):
+def test_without_a_card_waiting_the_headline_story_is_selected_at_full_time(desk):
     waiting = [c for c in desk.cards(MATCH) if c["status"] == "pending"]
     assert waiting and console.refresh(MATCH, None, None)[1] == console.rundown_order(desk.cards(MATCH))[0]["id"]  # the earliest waiting card first
     for c in waiting:
         assert console.decide("reject", MATCH, c["id"], "producer-1")[1]
     cards = desk.cards(MATCH)
-    assert not any(c["status"] == "pending" for c in cards)
+    assert not any(c["status"] == "pending" for c in cards) and desk.state(MATCH)["final"]
     picked = next(c for c in cards if c["id"] == console.refresh(MATCH, None, None)[1])
-    latest = max((c.get("clock_s") or 0, c.get("version") or 1) for c in cards)
-    assert (picked.get("clock_s") or 0, picked.get("version") or 1) == latest  # the most recent card, not the first of the match
+    assert picked["id"] == console.headline_card(cards)["id"]
     earliest = min(cards, key=lambda c: c.get("clock_s") or 0)
     assert earliest["id"] != picked["id"] and console.refresh(MATCH, earliest["id"], None)[1] is no_update  # a selection is kept
     assert console.default_pick([]) is None
+
+
+def test_the_headline_story_is_the_first_card_pulled_off_air_else_the_highest_value():
+    cards = [{"id": "a", "status": "approved", "clock_s": 100, "value_pts": 30}, {"id": "b", "status": "approved", "clock_s": 200, "value_pts": 60},
+             {"id": "c", "status": "approved", "clock_s": 300, "value_pts": 0}]
+    assert console.default_pick(cards, final=True) == "b"  # the highest value, not the last card
+    assert console.default_pick(cards, final=False) == "c"  # live: the most recent
+    pulled = cards + [{"id": "d", "status": "retracted", "retracted_on_air": True, "clock_s": 250, "value_pts": 10},
+                      {"id": "e", "status": "retracted", "retracted_on_air": True, "clock_s": 280, "value_pts": 90},
+                      {"id": "f", "status": "retracted", "clock_s": 150, "value_pts": 95}]
+    assert console.default_pick(pulled, final=True) == "d"  # the first VAR retraction on air
+    assert console.default_pick([{"id": "w", "status": "pending"}, *pulled], final=True) == "w"  # a card waiting for a producer comes first
 
 
 def test_readable_labels_for_fact_types_fields_and_audit_actions(desk):
