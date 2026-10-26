@@ -818,7 +818,9 @@ def layout(user: str | None) -> html.Div:
         panels.graphics_pane(),
         panels.insights_pane(),
         html.Main([
-            html.Section([html.Div([html.H3("Rundown"), follow_button()], className="col-head"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
+            html.Section([html.Div([html.Button("‹", id="c-rundown-fold", className="fold-btn", n_clicks=0, title=FOLD_TITLES[0], **{"aria-label": FOLD_TITLES[0]}),
+                                    html.H3("Rundown"), follow_button()], className="col-head"),
+                          dcc.Store(id="c-rundown-folded", storage_type="local"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
             html.Section([
                 html.Div(id="c-head"),
                 html.Div([html.Div([html.Button("Approve", id="c-approve", className="btn btn-approve", disabled=True),
@@ -845,6 +847,12 @@ FOLLOWING = "Following live"
 # The Follow live button reads what the desk does: following the latest card (on), or kept on the card the viewer clicked (off, a click follows again)
 FOLLOW_VIEW = ("function(on) { on = on !== false; return on ? ['" + FOLLOWING + "', 'btn btn-small follow follow-on', 'The detail follows the latest card; click a card to keep it'] "
                ": ['" + FOLLOW_LIVE + "', 'btn btn-small follow', 'Follow the latest card again']; }")
+
+
+FOLD_TITLES = ("Fold the rundown to its minutes", "Unfold the rundown")
+# The rundown's chevron folds it to a slim column of minutes and status dots; the choice is kept in this browser (c-rundown-folded, local storage)
+FOLD_TOGGLE = "function(n, folded) { return !folded; }"
+FOLD_VIEW = ("function(folded) { return folded ? ['desk rundown-folded', '›', '" + FOLD_TITLES[1] + "'] : ['desk', '‹', '" + FOLD_TITLES[0] + "']; }")
 
 
 def follow_button() -> html.Button:
@@ -977,6 +985,8 @@ def register(app) -> None:
         Input("c-tick", "n_intervals"), Input("c-rev", "data"), Input("c-match", "value"), Input("c-rundown", "value"), Input("c-lang", "value"),
         State("c-sig", "data"), Input("c-replay", "data"), Input("c-follow", "data"))(_refresh_cb)
     app.clientside_callback("function(n) { return true; }", Output("c-follow", "data", allow_duplicate=True), Input("c-follow-live", "n_clicks"), prevent_initial_call=True)
+    app.clientside_callback(FOLD_TOGGLE, Output("c-rundown-folded", "data"), Input("c-rundown-fold", "n_clicks"), State("c-rundown-folded", "data"), prevent_initial_call=True)
+    app.clientside_callback(FOLD_VIEW, Output("c-pane-desk", "className"), Output("c-rundown-fold", "children"), Output("c-rundown-fold", "title"), Input("c-rundown-folded", "data"))
     app.clientside_callback(FOLLOW_VIEW, Output("c-follow-live", "children"), Output("c-follow-live", "className"), Output("c-follow-live", "title"), Input("c-follow", "data"))
     app.callback(Output("c-replay-t", "max"), Output("c-replay-t", "marks"), Output("c-replay-t", "value"), Output("c-replay", "data", allow_duplicate=True),
                  Input("c-p-match", "data"), prevent_initial_call="initial_duplicate")(_replay_range_cb)

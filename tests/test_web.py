@@ -1019,6 +1019,17 @@ def test_follow_live_sits_next_to_the_rundown_and_the_replay_follows_again():
     assert console.INTRO_REPLAY.endswith("'desk', true]; }") and console.FOLLOW_LIVE in console.FOLLOW_VIEW
 
 
+def test_the_rundown_folds_to_its_minutes_and_remembers_it_in_the_browser():
+    css = (SRC / "web" / "assets" / "watershed.css").read_text(encoding="utf-8")
+    assert "minmax(220px, .85fr) minmax(360px, 1.6fr) minmax(360px, 1.5fr)" in css  # about 21% of the width at 1440
+    assert ".desk.rundown-folded { grid-template-columns: 76px" in css and ".rundown-folded .ru-who" in css
+    for user in ("producer-1", None):
+        page = console.layout(user)
+        assert find(page, lambda c: getattr(c, "id", None) == "c-rundown-folded")[0].storage_type == "local"
+        assert find(page, lambda c: getattr(c, "id", None) == "c-rundown-fold")[0].title == console.FOLD_TITLES[0]
+    assert "rundown-folded" in console.FOLD_VIEW and console.FOLD_TOGGLE == "function(n, folded) { return !folded; }"
+
+
 def test_the_headline_story_is_the_first_card_pulled_off_air_else_the_highest_value():
     cards = [{"id": "a", "status": "approved", "clock_s": 100, "value_pts": 30}, {"id": "b", "status": "approved", "clock_s": 200, "value_pts": 60},
              {"id": "c", "status": "approved", "clock_s": 300, "value_pts": 0}]
