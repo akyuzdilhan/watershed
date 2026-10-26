@@ -363,7 +363,7 @@ FINISH_WORDS = {"en": r"(?i)\b(?:finish(?:es|ed|ing)?|shoot(?:s|ing)?|scor(?:e|e
 TEMPO_WORDS = {"en": r"(?i)\b(?:quick|quickly|rapid|fast|counter|counters|counter-attack\w*|counterattack\w*|breakaway)\b",
                "fr": r"(?i)\b(?:rapides?|rapidement|vite|éclair|contre-attaques?|(?:un|en|le|du|vrai|ce) contre)\b",
                "es": r"(?i)\b(?:rápid[oa]s?|rápidamente|contragolpes?|contraataques?|a la contra)\b"}
-MAX_SENTENCES, MAX_WORDS = 3, 60  # per language, all notes together
+MAX_SENTENCES, MAX_WORDS = 3, {"en": 60, "fr": 80, "es": 80}  # per language, all notes together; French and Spanish run longer than English
 
 
 def meaning_issues(line: str, lang: str, claims: list[dict], facts: dict) -> list[dict]:
@@ -385,8 +385,9 @@ def meaning_issues(line: str, lang: str, claims: list[dict], facts: dict) -> lis
                 found.append({"rule": "threat_reading", "text": s})
         if re.search(FINISH_WORDS[lang], s):
             shooter = str(facts.get("shooter_name", ""))
+            named = bool(shooter) and any(re.search(rf"\b{re.escape(n)}\b", s) for n in (shooter, shooter.split()[-1]))  # the shooter named: others may appear (who won it, who passed)
             others = {str(facts[k]) for k in ("ball_winner_name", "key_passer_name", "key_pass_receiver_name") if facts.get(k) and facts[k] != shooter}
-            if any(re.search(rf"\b{re.escape(n)}\b", s) or re.search(rf"\b{re.escape(n.split()[-1])}\b", s) and n.split()[-1] not in shooter.split() for n in others):
+            if not named and any(re.search(rf"\b{re.escape(n)}\b", s) or re.search(rf"\b{re.escape(n.split()[-1])}\b", s) and n.split()[-1] not in shooter.split() for n in others):
                 found.append({"rule": "role", "text": s})
         if facts.get("move_tempo") != "quick counter" and re.search(TEMPO_WORDS[lang], s):
             found.append({"rule": "tempo", "text": s})
@@ -422,7 +423,7 @@ def verify_analysis(texts: Any, languages: list[str], facts: dict) -> dict:
         body = " ".join(normalise(str(l.get("line", ""))) for l in lines if isinstance(l, dict))
         n_sentences = len([x for x in re.split(r"(?<=[.!?])\s+", body.strip()) if x])
         report["languages"][lang] = {"count": len(lines), "count_ok": MIN_LINES <= len(lines) <= MAX_LINES, "sentences": n_sentences, "words": word_count(body),
-                                     "length_ok": n_sentences <= MAX_SENTENCES and word_count(body) <= MAX_WORDS}
+                                     "length_ok": n_sentences <= MAX_SENTENCES and word_count(body) <= MAX_WORDS[lang]}
         for i, l in enumerate(lines):
             l = l if isinstance(l, dict) else {}
             line = normalise(str(l.get("line", "")))
@@ -446,7 +447,7 @@ def analysis_feedback(report: dict, json_valid: bool = True) -> list[str]:
     """What the Verifier rejected, one line per problem: the retry note and the trace."""
     lines = [] if json_valid else ["the reply was not one JSON object"]
     lines += [f"{lang}: 2 or 3 lines" for lang, v in report["languages"].items() if not v["count_ok"]]
-    lines += [f"{lang}: too long, {v['sentences']} sentences and {v['words']} words (at most {MAX_SENTENCES} and {MAX_WORDS})" for lang, v in report["languages"].items()
+    lines += [f"{lang}: too long, {v['sentences']} sentences and {v['words']} words (at most {MAX_SENTENCES} and {MAX_WORDS[lang]})" for lang, v in report["languages"].items()
               if not v.get("length_ok", True)]
     for e in report["lines"]:
         problems = [f"{k}: {e[k]}" for k in ("bad_claims", "unclaimed_numbers", "wrong_unit", "unknown_names") if e[k]] + [f"{i['rule']}: {i['text']}" for i in e["style_errors"]]
@@ -474,7 +475,7 @@ RULE_HINTS = {  # what each refusal means, in the retry note
     "role": "only shooter_name shoots, finishes or scores; ball_winner_name won the ball, key_passer_name played the key pass",
     "tempo": "quick, rapid or counter only when move_tempo is quick counter; otherwise say direct move or patient build-up as move_tempo says",
     "percent_space": "English: no space before % (63%)",
-    "too long": "at most 3 sentences and 60 words per language, all notes together",
+    "too long": "at most 3 sentences per language, all notes together, and 60 words in English, 80 in French or Spanish",
     "forbidden_word": "never swing or momentum in French or Spanish",
     "probability_without_team": "French chance(s), Spanish probabilidad, opciones, posibilidades only in a sentence that names a club; say occasion, ocasión",
 }
@@ -521,7 +522,7 @@ Readings: the code has already judged what the numbers mean. Use these facts as 
 - threat_share_reading: in control, even or under the cosh; threat_trend: rising, falling or steady.
 Roles: shooter_name took the shot; ball_winner_name won the ball; key_passer_name played the key pass to key_pass_receiver_name. Never swap them.
 
-What to write: what is not obvious from the replay. Pick the 2 or 3 strongest facts. Each note is one full sentence: say what happened and why it matters for the game (a high regain caught the defence unset, a quick counter, a pass that broke the lines, a shooter with more room than usual, a line pushed up and caught behind, a team in control or scoring against the run of play). At most 3 sentences and 60 words per language, all notes together.
+What to write: what is not obvious from the replay. Pick the 2 or 3 strongest facts. Each note is one full sentence: say what happened and why it matters for the game (a high regain caught the defence unset, a quick counter, a pass that broke the lines, a shooter with more room than usual, a line pushed up and caught behind, a team in control or scoring against the run of play). At most 3 sentences per language, all notes together, and 60 words in English, 80 in French or Spanish.
 
 Rules. The Verifier refuses a note that breaks any of them, and one refused note sends all of them back:
 1. At most 2 numbers in a sentence. Every group of digits counts: metres, seconds, percentages, passes. "Went from 20 m to the Varleigh goal in 13 s using 5 passes" has 3 numbers and is refused; write "It started 20 m from the Varleigh goal, and 13 s later the shot was away."

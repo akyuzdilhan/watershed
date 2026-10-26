@@ -208,7 +208,7 @@ def test_the_instructions_name_the_on_air_rules():
     for rule in ("At most 2 numbers in a sentence", "Never write the minute", "Never the words median, médiane, mediana, recent", "Never numbers in brackets",
                  "There is no minute field", "never judge a number yourself", "move_tempo: quick counter, direct move or patient build-up",
                  "space_vs_typical", "line_vs_average", "threat_share_reading", "Only shooter_name shoots", "only when move_tempo is quick counter",
-                 "no space before it in English", "At most 3 sentences and 60 words per language"):
+                 "no space before it in English", "60 words in English, 80 in French or Spanish"):
         assert rule in ANALYST_INSTRUCTIONS, rule
     for lang in ("fr", "es"):  # the Writer's rule on clubs, word for word
         line = next(l for l in WRITER_INSTRUCTIONS.splitlines() if l.startswith(f"- {lang}:"))
@@ -543,3 +543,13 @@ def test_the_readings_are_computed_in_code():
     words = ("more", "less", "same")
     assert [compare(3.3, 2.8, words, ratio=0.15), compare(3.2, 2.8, words, ratio=0.15), compare(2.3, 2.8, words, ratio=0.15)] == ["more", "same", "less"]
     assert [compare(28, 25, words, margin=3), compare(27, 25, words, margin=3), compare(22, 25, words, margin=3)] == ["more", "same", "less"]
+
+
+def test_a_sentence_may_name_who_won_the_ball_beside_the_shooter():
+    from worker.analysis import meaning_issues
+
+    facts = {"shooter_name": "Jakub Méndez", "ball_winner_name": "Hayden Mannion", "key_passer_name": "Honoré Haro", "move_tempo": "quick counter"}
+    both = "Hayden Mannion won it with a tackle, and Jakub Méndez struck 10 s later."
+    other_only = "Hayden Mannion won it and Honoré Haro finished the move."
+    assert [i["rule"] for i in meaning_issues(both, "en", [], facts)] == []
+    assert [i["rule"] for i in meaning_issues(other_only, "en", [], facts)] == ["role"]
