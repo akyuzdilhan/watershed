@@ -1,4 +1,4 @@
-"""Watershed web app: the console at `/` (read only for a visitor in public mode, every control for a signed-in producer), the public overlay at `/overlay`.
+"""Watershed web app: the console at `/` (read only for a visitor in public mode, every control for a signed-in producer), the public overlay at `/overlay`, the container probe at `/healthz`.
 
 Run locally: `DESK_DIR=data/desk PUBLIC_MODE=0 python -m web.app` (from `src/`, or with `src` on the path). In the container, gunicorn serves `web.app:server`.
 """
@@ -6,12 +6,20 @@ Run locally: `DESK_DIR=data/desk PUBLIC_MODE=0 python -m web.app` (from `src/`, 
 import os
 
 from dash import Dash, Input, Output, dcc, html
+from flask import Response
 
 from web import console, overlay, security
 
 app = Dash(__name__, title="Watershed", update_title=None, suppress_callback_exceptions=True)
 server = app.server
 security.install(server)
+
+
+@server.route("/healthz")
+def healthz() -> Response:
+    """The startup, readiness and liveness probe of the container: the process answers, reads nothing, and is outside the rate limit (`security.limited`)."""
+    return Response("ok", mimetype="text/plain")
+
 
 app.layout = html.Div([dcc.Location(id="url", refresh=False), html.Div(id="page")])
 

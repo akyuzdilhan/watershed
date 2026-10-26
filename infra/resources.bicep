@@ -63,6 +63,13 @@ var workerSubscriptionName = 'worker'
 var cosmosDatabaseName = 'watershed'
 var cosmosContainers = [ 'events', 'cards', 'audit' ]
 var serviceBusFqdn = '${serviceBus.name}.servicebus.windows.net'
+// Probes of the web container: HTTP on /healthz for the real image (src/web/app.py, outside the rate limit), TCP on port 80 for the placeholder of the first provision, which has no /healthz.
+var webProbeTarget = startsWith(webImage, 'mcr.microsoft.com/azuredocs/containerapps-helloworld') ? { tcpSocket: { port: 80 } } : { httpGet: { path: '/healthz', port: 80 } }
+var webProbes = [
+  union(webProbeTarget, { type: 'Startup', periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 24 }) // up to 2 minutes to import Dash and the desk
+  union(webProbeTarget, { type: 'Readiness', periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3 })
+  union(webProbeTarget, { type: 'Liveness', periodSeconds: 30, timeoutSeconds: 5, failureThreshold: 3 })
+]
 var easyAuthEnabled = !empty(webAuthClientId)
 // /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.CognitiveServices/accounts/{name}
 var foundryParts = split(foundryAccountId, '/')
@@ -349,6 +356,7 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
           name: 'web'
           // Placeholder until `azd deploy` pushes the real image (port 80 matches it).
           image: webImage
+          probes: webProbes
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'

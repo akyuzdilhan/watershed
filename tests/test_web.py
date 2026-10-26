@@ -566,6 +566,14 @@ def test_rate_limit_answers_429_on_pages_and_callbacks_only():
     assert client.get("/", headers=spoofed).status_code == 429  # a forged first entry does not reset the count
 
 
+def test_the_health_probe_answers_ok_outside_the_rate_limit(monkeypatch):
+    monkeypatch.setattr(app.server.extensions["watershed_rate_limiter"], "per_minute", 0)  # every limited route refused
+    client = app.server.test_client()
+    assert client.get("/overlay").status_code == 429
+    probe = client.get("/healthz")
+    assert probe.status_code == 200 and probe.get_data(as_text=True) == "ok" and probe.mimetype == "text/plain"
+
+
 def test_rate_limit_lets_the_desk_the_graphics_and_the_overlay_run_together(monkeypatch):
     monkeypatch.delenv("RATE_LIMIT_PER_MIN", raising=False)
     assert security.install(Flask("default")).per_minute == 600
