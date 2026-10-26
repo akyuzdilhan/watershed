@@ -629,6 +629,8 @@ def card_context(card: dict | None, feed: dict | None, docs: list[dict], story: 
     if kind:
         try:
             fig = _sized(graphic_figure(feed, kind, item, compact=True), 440)
+            if fig.layout.title.text:  # the column is narrow: the subtitle's key ("Numbered in order; width: threat added") is in the note under the figure
+                fig.layout.title.text = fig.layout.title.text.replace(". Numbered in order; width: threat added", ".")
         except (StopIteration, KeyError, ValueError, IndexError) as error:
             fig = empty_figure(f"Cannot draw this graphic: {error}")
         note = NOTES[kind].replace("(last 10 actions)", f"(last {COMPACT_BUILDUP} actions here, 10 under All graphics)") if kind == "buildups" else NOTES[kind]
