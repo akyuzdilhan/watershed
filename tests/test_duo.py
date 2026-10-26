@@ -29,11 +29,24 @@ def replay_names() -> dict[str, list[str]]:
     return {side: [p["name"] for p in t["starting"] + t["bench"]] for side, t in info["teams"].items()}
 
 
+@functools.lru_cache(maxsize=1)
+def replay_players() -> dict[str, str]:
+    """Player names of the demo replay by player id."""
+    info = next(m for m in generate_match(7, "demo")[0] if m["type"] == "match_info")
+    return {p["id"]: p["name"] for t in info["teams"].values() for p in t["starting"] + t["bench"]}
+
+
+PLAYER = next(n for n in replay_players().values() if re.fullmatch(r"[A-Z][a-z]+ [A-Z][a-z]+", n))  # who scores in the crafted cards
+SURNAME = PLAYER.split()[-1]
+SUB = replay_players()["home-20"]  # the demo's substitute, who scores four
+SUB_SURNAME = SUB.split()[-1]
+
+
 def make_card(moment="goal", side="home", facts=None, score=None, minute="52'", **extra):
     base = {"goal": {"team_wp_before_pct": 30, "team_wp_after_pct": 54}, "save": {"xg_pct": 20, "team_wp_before_pct": 81, "team_wp_if_goal_pct": 24},
             "red_card": {"team_wp_before_pct": 55, "team_wp_after_pct": 40}, "chance": {"xg_pct": 40, "team_wp_before_pct": 40, "team_wp_if_goal_pct": 70}}
     return {"id": f"c-{moment}-{side}", "version": 1, "match_id": "m", "team": side, "team_name": TEAMS[side], "moment": moment, "minute_label": minute, "clock_s": 3000.0,
-            "player": {"id": f"{side}-9", "name": "Assar Ingleby"}, "score_before": score or {"home": 1, "away": 1}, "facts": facts or base[moment], "value_pts": 24, **extra}
+            "player": {"id": f"{side}-9", "name": PLAYER}, "score_before": score or {"home": 1, "away": 1}, "facts": facts or base[moment], "value_pts": 24, **extra}
 
 
 @pytest.fixture(scope="module")
@@ -128,15 +141,15 @@ def test_every_duo_line_passes_the_verifier_with_its_numbers_claimed(kind, card,
 
 
 def test_insight_lines_and_texts_pass_the_verifier():
-    doc = {"id": "insight-m-sub4", "type": "insight", "match_id": "m", "kind": "record", "headline_facts": {"player": "Marijn Scarpetta", "goals": 4}, "field_meanings": {}}
+    doc = {"id": "insight-m-sub4", "type": "insight", "match_id": "m", "kind": "record", "headline_facts": {"player": SUB, "goals": 4}, "field_meanings": {}}
     facts, _ = insight_facts(doc, TEAMS)
     for lang in LANGS:
         for template in all_strings(LINES["insight"][lang]) :
-            filled = fill(template, {"subject": "Marijn Scarpetta"}, {})
+            filled = fill(template, {"subject": SUB}, {})
             assert verify_duo([{"speaker": HEART, "lang": lang, "line": filled[0], "claims": []}, {"speaker": EYE, "lang": lang, "line": "Yes.", "claims": []}], [lang], facts)["verified"], filled
         for kind, pairs in INSIGHT_TEMPLATES[lang].items():
             for headline, why in pairs:
-                values = {"subject": "Marijn Scarpetta", "home_team": "Varleigh", "away_team": "Yarnford"}
+                values = {"subject": SUB, "home_team": "Varleigh", "away_team": "Yarnford"}
                 text = {"headline": fill(headline, values, {})[0], "why": fill(why, values, {})[0], "lang": lang, "claims": []}
                 _, report = verify(json.dumps([text], ensure_ascii=False), [lang], facts)
                 assert report["verified"] and not report["cards"][0]["style_warnings"], (lang, kind, text, report)
@@ -159,7 +172,7 @@ def test_every_template_variant_passes_every_check(side):
                     assert report["verified"] and not e["style_warnings"] and not e["unknown_names"], (moment, lang, text, e)
                     assert TEAMS[side] in w[0]
                     if moment == "goal":
-                        assert "Assar Ingleby" in h[0]
+                        assert PLAYER in h[0]
 
 
 def test_low_stake_templates_have_no_probability():
@@ -185,7 +198,7 @@ def test_instruction_duo_example_passes_the_verifier():
 def test_duo_verifier_rejects_unclaimed_numbers_one_speaker_and_too_many_lines():
     card = make_card()
     facts, _ = card_facts(card, TEAMS)
-    good = [{"speaker": HEART, "lang": "en", "line": "Ingleby! Varleigh are level!", "claims": []},
+    good = [{"speaker": HEART, "lang": "en", "line": f"{SURNAME}! Varleigh are level!", "claims": []},
             {"speaker": EYE, "lang": "en", "line": "Varleigh go from 30% to 54% to win.", "claims": [{"value": 30, "source_field": "varleigh_wp_before_pct"}, {"value": 54, "source_field": "varleigh_wp_after_pct"}]}]
     assert verify_duo(good, ["en"], facts)["verified"]
     unclaimed = [good[0], dict(good[1], line="Varleigh go from 30% to 61% to win.")]
@@ -289,7 +302,7 @@ def test_a_stakeless_goal_from_4_2_to_5_2_at_88():
     assert not re.search(r"\d", words)
     assert re.search(r"\b(?:five|fifth|fourth|cinq|cinquième|quatrième|cinco|quinto|cuarto)\b", words.lower()), words
     # a model that still writes a probability for it fails: the field is not in the facts
-    bad = [{"headline": "Ingleby makes it five", "why": "Varleigh go from 98% to 99% to win.", "lang": "en",
+    bad = [{"headline": f"{SURNAME} makes it five", "why": "Varleigh go from 98% to 99% to win.", "lang": "en",
             "claims": [{"value": 98, "source_field": "varleigh_wp_before_pct"}, {"value": 99, "source_field": "varleigh_wp_after_pct"}]}]
     assert not verify(json.dumps(bad), ["en"], facts)[1]["verified"]
 
@@ -313,9 +326,9 @@ class FakeWriter:
 GOAL_CLAIMS = [{"value": 30, "source_field": "varleigh_wp_before_pct"}, {"value": 54, "source_field": "varleigh_wp_after_pct"}, {"value": 24, "source_field": "swing_pts"}]
 
 
-def reply(headline="Ingleby levels it for Varleigh", duo=True):
+def reply(headline=f"{SURNAME} levels it for Varleigh", duo=True):
     texts = [{"headline": headline, "why": "Varleigh go from 30% to 54% to win, up 24 points.", "lang": "en", "claims": GOAL_CLAIMS}]
-    lines = [{"speaker": "wren", "lang": "en", "line": "Ingleby! And this place has woken up!", "claims": []},
+    lines = [{"speaker": "wren", "lang": "en", "line": f"{SURNAME}! And this place has woken up!", "claims": []},
              {"speaker": "joss", "lang": "en", "line": "That goal is worth 24 points to Varleigh.", "claims": [GOAL_CLAIMS[2]]}]
     return json.dumps({"texts": texts, "duo": lines} if duo else texts)
 
@@ -330,12 +343,12 @@ def test_one_call_returns_texts_and_duo():
 
 def test_the_prompt_receives_what_the_match_already_said():
     memory = PhraseMemory()
-    writer = FakeWriter([reply(), reply("Ingleby again for Varleigh")])
+    writer = FakeWriter([reply(), reply(f"{SURNAME} again for Varleigh")])
     asyncio.run(draft(make_card(), TEAMS, writer, ["en"], memory=memory, duo=True))
     second = dict(make_card(), id="c-2")
     d = asyncio.run(draft(second, TEAMS, writer, ["en"], memory=memory, duo=True))
     avoid = writer.calls[1]["avoid"]
-    assert "Ingleby levels it for Varleigh" in avoid["en"]["headlines"] and avoid["en"]["openings"] and "levels" in avoid["en"]["verbs"]
+    assert f"{SURNAME} levels it for Varleigh" in avoid["en"]["headlines"] and avoid["en"]["openings"] and "levels" in avoid["en"]["verbs"]
     assert writer.calls[1]["request"]["avoid"] == avoid
     assert d.report["verified"] and d.report["repetition"]["warnings"]  # same why and lines: warned, not failed
 
@@ -343,10 +356,10 @@ def test_the_prompt_receives_what_the_match_already_said():
 def test_an_identical_headline_fails_and_is_retried():
     memory = PhraseMemory()
     asyncio.run(draft(make_card(), TEAMS, FakeWriter([reply()]), ["en"], memory=memory, duo=True))
-    writer = FakeWriter([reply(), reply("A second for Ingleby")])
+    writer = FakeWriter([reply(), reply(f"A second for {SURNAME}")])
     d = asyncio.run(draft(dict(make_card(), id="c-2"), TEAMS, writer, ["en"], memory=memory, duo=True))
     assert d.attempts == 2 and d.writer == "fake" and "already used" in writer.calls[1]["note"]
-    assert d.texts[0]["headline"] == "A second for Ingleby"
+    assert d.texts[0]["headline"] == f"A second for {SURNAME}"
 
 
 def test_model_texts_are_kept_when_only_the_duo_fails():
@@ -370,8 +383,8 @@ def test_a_writer_without_duo_mode_gets_template_lines():
 
 def test_verifier_warns_on_a_reused_phrase_and_fails_a_reused_headline():
     memory = PhraseMemory()
-    texts = [{"headline": "Ingleby scores for Varleigh", "why": "Varleigh go from 30% to 54% to win, up 24 points.", "lang": "en"}]
-    memory.record("a", texts, [{"speaker": "wren", "lang": "en", "line": "Hold on to your seats! Here we go again!"}], {"scorer": "Assar Ingleby", "score_before": "Varleigh 0-0 Yarnford"})
+    texts = [{"headline": f"{SURNAME} scores for Varleigh", "why": "Varleigh go from 30% to 54% to win, up 24 points.", "lang": "en"}]
+    memory.record("a", texts, [{"speaker": "wren", "lang": "en", "line": "Hold on to your seats! Here we go again!"}], {"scorer": PLAYER, "score_before": "Varleigh 0-0 Yarnford"})
     errors, warnings = memory.issues("b", texts, [{"speaker": "wren", "lang": "en", "line": "Hold on to your seats! What a game!"}])
     assert [e["rule"] for e in errors] == ["repeated_headline"]
     assert {"repeated_opening", "repeated_phrase", "repeated_tic"} <= {w["rule"] for w in warnings}
@@ -393,7 +406,7 @@ def test_template_headlines_never_repeat_even_for_the_same_scorer():
 # --- insights and storyline through the desk -------------------------------------------------------------
 
 INSIGHT = {"id": "insight-m-sub4", "type": "insight", "match_id": "m", "key": "sub4", "kind": "record", "minute_label": "83'", "clock_s": 5000.0, "event_id": "e1",
-           "headline_facts": {"player": "Marijn Scarpetta", "goals_by_substitute": 4, "past_matches": 18620, "times_before": 0},
+           "headline_facts": {"player": SUB, "goals_by_substitute": 4, "past_matches": 18620, "times_before": 0},
            "field_meanings": {"goals_by_substitute": "goals by the substitute in this match", "past_matches": "matches in the league history", "times_before": "substitutes who scored 4 before"},
            "rarity": {"p": 0.0, "surprisal_bits": 14.2, "basis": "4 goals by a substitute: 0 in 18,620 matches since 1976/77"}, "value": 90, "status": "proposed"}
 
@@ -427,7 +440,7 @@ def test_a_model_insight_with_a_count_of_matches_is_retried():
 
 
 def test_write_insight_falls_back_to_the_template_after_one_retry():
-    invented = json.dumps({"texts": [{"headline": "Scarpetta record", "why": "Scarpetta scores 4, a first in 19,000 matches.", "lang": "en", "claims": []}], "duo": []})
+    invented = json.dumps({"texts": [{"headline": f"{SUB_SURNAME} record", "why": f"{SUB_SURNAME} scores 4, a first in 19,000 matches.", "lang": "en", "claims": []}], "duo": []})
     writer = FakeWriter([invented, invented])
     doc = Desk(MemorySink(), writer, languages=("en",)).write_insight(json.loads(json.dumps(INSIGHT)), TEAMS)
     v = doc["verification"]
@@ -439,7 +452,7 @@ def test_write_insight_falls_back_to_the_template_after_one_retry():
 
 def test_write_insight_keeps_the_documents_own_verified_texts_as_template():
     doc = json.loads(json.dumps(INSIGHT))
-    doc["texts"] = [{"headline": "Four goals from the bench", "why": "Marijn Scarpetta scores 4 as a substitute.", "lang": "en", "claims": [{"value": 4, "source_field": "goals_by_substitute"}]}]
+    doc["texts"] = [{"headline": "Four goals from the bench", "why": f"{SUB} scores 4 as a substitute.", "lang": "en", "claims": [{"value": 4, "source_field": "goals_by_substitute"}]}]
     out = Desk(MemorySink(), TemplateWriter(), languages=("en",)).write_insight(doc, TEAMS)
     assert out["texts"][0]["headline"] == "Four goals from the bench"
 
@@ -460,7 +473,7 @@ def test_storyline_goes_through_the_same_path():
 
 
 ENGINE_FACTS = {  # the headline facts the insight engine gives a substitute's four goals and a comeback
-    "scorer-home-20-4": {"player": "Marijn Scarpetta", "team": "Varleigh", "goals": 4, "goal_minutes": "52', 57', 66', 83'", "substitute": True, "came_on": "46'",
+    "scorer-home-20-4": {"player": SUB, "team": "Varleigh", "goals": 4, "goal_minutes": "52', 57', 66', 83'", "substitute": True, "came_on": "46'",
                          "history_count": 0, "history_opportunities": 19000, "history_since": "1976/77", "history_seasons": 50},
     "comeback-home-2-3": {"team": "Varleigh", "opponent": "Yarnford", "deficit_goals": 2, "trailing_score": "0-2", "stage": "won", "score": "5-2", "club_last_season": "2019/20", "club_seasons_since": 7,
                           "history_count": 114, "history_opportunities": 9579, "history_since": "1976/77", "history_seasons": 50, "history_per_season": 2.3, "one_in": 83,
@@ -728,7 +741,7 @@ def test_the_stat_of_the_match_keeps_the_club_name_and_one_colon():
     for t in out["texts"]:
         prefix = insight_texts.STAT_PREFIX[t["lang"]]
         rest = t["headline"][len(prefix):]
-        assert t["headline"].startswith(prefix) and ":" not in rest and H in rest, t  # never "Stat of the match: rovers: 12 shots"
+        assert t["headline"].startswith(prefix) and ":" not in rest and H in rest, t  # never "Stat of the match: varleigh: 12 shots"
 
 
 class EveryDocVersion(MemorySink):

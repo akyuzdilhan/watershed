@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -7,12 +9,16 @@ from worker.desk import Desk
 from worker.writer import TemplateWriter, card_facts, writer_prompt
 
 TEAMS = {"home": "Varleigh", "away": "Yarnford"}
+REPLAY_TRUTH = Path(__file__).resolve().parents[1] / "data" / "replay" / "demo-0007.truth.json"
+PLAYER = next(p["name"] for team in json.loads(REPLAY_TRUTH.read_text(encoding="utf-8"))["teams"].values() for p in team["squad"]
+              if re.fullmatch(r"[A-Z][a-z]+ [A-Z][a-z]+", p["name"]))  # who scores in the crafted cards: a player of the replay, never written in a test
+SURNAME = PLAYER.split()[-1]
 
 
 def make_card(moment="goal", side="home", card_id=None):
     facts = {"goal": {"team_wp_before_pct": 30, "team_wp_after_pct": 54}, "save": {"xg_pct": 20, "team_wp_before_pct": 81, "team_wp_if_goal_pct": 24}}[moment]
     return {"id": card_id or f"c-{moment}-{side}", "version": 1, "match_id": "m", "team": side, "team_name": TEAMS[side], "moment": moment, "minute_label": "52'",
-            "clock_s": 3000.0, "event_id": "e1", "player": {"id": f"{side}-9", "name": "Elio Ingleby"}, "score_before": {"home": 1, "away": 1}, "facts": facts, "value_pts": 24}
+            "clock_s": 3000.0, "event_id": "e1", "player": {"id": f"{side}-9", "name": PLAYER}, "score_before": {"home": 1, "away": 1}, "facts": facts, "value_pts": 24}
 
 
 class Sink:
@@ -102,12 +108,12 @@ def test_profile_rules_and_examples_are_bounded_most_frequent_first():
 
 def test_the_writer_prompt_carries_the_house_rules():
     p = fb.build_profile([vote("c1", "down", "Varleigh are flying!", reasons=["wrong_tone"], note="No hype", at=1.0),
-                          vote("c2", "up", "Ingleby levels it.", part="headline", at=2.0)], now=0)
+                          vote("c2", "up", f"{SURNAME} levels it.", part="headline", at=2.0)], now=0)
     card = make_card()
     prompt = writer_prompt(card, ["en"], preferences=fb.prompt_block(p, card, ["en"]))
     assert prompt.startswith("Write the cards for this request:")
     assert "Control room preferences" in prompt and fb.RULES["wrong_tone"] in prompt and "No hype" in prompt
-    assert '"Varleigh are flying!"' in prompt and '"Ingleby levels it."' in prompt
+    assert '"Varleigh are flying!"' in prompt and f'"{SURNAME} levels it."' in prompt
     assert writer_prompt(card, ["en"]) == f"Write the cards for this request: {json.dumps({'card_id': card['id'], 'languages': ['en']})}"
 
 
@@ -188,7 +194,7 @@ def test_a_template_variant_with_repeated_thumbs_down_is_picked_last():
 
 def test_export_writes_judgements_and_pairs(tmp_path):
     votes = [vote("c1", "down", "Varleigh are flying!", reasons=["wrong_tone"], note="No hype", at=1.0, writer="gpt-model"),
-             dict(vote("c1", "up", "Ingleby levels it at 52'.", at=2.0), id="feedback-c1-v2-why-en-0-p1", doc_version=2),
+             dict(vote("c1", "up", f"{SURNAME} levels it at 52'.", at=2.0), id="feedback-c1-v2-why-en-0-p1", doc_version=2),
              vote("c2", "up", "Another", lang="fr", at=3.0)]
     out = fb.export(votes, tmp_path / "dataset.jsonl")
     assert out == {"judgements": 3, "pairs": 1, "out": str(tmp_path / "dataset.jsonl")}
@@ -197,7 +203,7 @@ def test_export_writes_judgements_and_pairs(tmp_path):
     assert judgement["record"] == "judgement" and "by" not in judgement
     assert set(judgement) >= {"facts", "field_meanings", "text", "verdict", "reasons", "note", "writer", "lang", "part"}
     pair = rows[-1]
-    assert pair["record"] == "pair" and pair["chosen"] == "Ingleby levels it at 52'." and pair["rejected"] == "Varleigh are flying!"
+    assert pair["record"] == "pair" and pair["chosen"] == f"{SURNAME} levels it at 52'." and pair["rejected"] == "Varleigh are flying!"
     assert pair["rejected_reasons"] == ["wrong_tone"] and pair["facts"] and pair["lang"] == "en"
 
 

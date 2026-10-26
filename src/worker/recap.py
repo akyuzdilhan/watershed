@@ -408,7 +408,7 @@ class RecapTemplateWriter:
         for lang in languages:
             phrase = TP_PHRASE.get(r["tp_moment"] or "", {}).get(lang, "")
             if lang == "fr" and str(facts.get("turning_point_player", " "))[0] in "AEIOUYÉÈH":
-                phrase = phrase.replace("de {", "d'{")  # le but d'Ivo Ellery
+                phrase = phrase.replace("de {", "d'{")  # le but d'Otto Meyer
             final, ht, low, tp, scorer = (s.replace("{tp}", phrase) for s in TEMPLATES["recap"][lang])
             recap = [final, ht]
             if r["W"] and facts.get(f"{r['W']}_lowest_wp_pct", 100) < 50:  # only when the winner was ever behind in the odds

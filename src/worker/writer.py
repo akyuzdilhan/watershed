@@ -1167,7 +1167,7 @@ def insight_fact_text(doc: dict, facts: dict, lang: str, pick: _Picker, duo: boo
     body, body_claims = why
     if stat:
         names = {w for v in facts.values() if isinstance(v, str) for w in v.split()}
-        first = re.sub(r"\W+$", "", text.split()[0])  # "Rovers:" is a name too
+        first = re.sub(r"\W+$", "", text.split()[0])  # "Varleigh:" is a name too
         text = it.STAT_PREFIX[lang] + (text if first in names else text[:1].lower() + text[1:])
         extra = fill(it.STAT_WHY[lang], vals, fields)
         if extra:

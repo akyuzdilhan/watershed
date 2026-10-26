@@ -438,7 +438,7 @@ def test_an_approval_holds_while_var_checks_the_goal(demo, history, tmp_path, st
 
 
 def test_a_fact_updated_during_a_var_check_keeps_its_steps(demo, history):
-    """United, down to ten, score (3-3), Rovers go 4-3 and VAR checks that goal; United score again (4-4) during the check. That goal updates the fact on United's goals with ten men and flags it under review in the same message (its score rests on the goal checked): the flag keeps the new version as the engine wrote it, the producer's decisions on the previous one included, and every step stays in the history."""
+    """Yarnford, down to ten, score (3-3), Varleigh go 4-3 and VAR checks that goal; Yarnford score again (4-4) during the check. That goal updates the fact on Yarnford's goals with ten men and flags it under review in the same message (its score rests on the goal checked): the flag keeps the new version as the engine wrote it, the producer's decisions on the previous one included, and every step stays in the history."""
     from worker.desk import Desk
     from worker.writer import TemplateWriter
 
