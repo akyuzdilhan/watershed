@@ -19,3 +19,56 @@ services:
       path: Dockerfile
       context: ../..
       remoteBuild: true
+hooks:
+  # Foundry is created outside the templates: without its two ids the worker would get no Foundry role and no endpoint, and every card would fall back to the templates.
+  preprovision:
+    posix:
+      shell: sh
+      continueOnError: false
+      run: |
+        missing=""
+        [ -n "${FOUNDRY_ACCOUNT_ID:-}" ] || missing="$missing FOUNDRY_ACCOUNT_ID"
+        [ -n "${FOUNDRY_PROJECT_ENDPOINT:-}" ] || missing="$missing FOUNDRY_PROJECT_ENDPOINT"
+        if [ -n "$missing" ]; then
+          echo "Missing azd variables:$missing. Set them first, for example: azd env set FOUNDRY_ACCOUNT_ID /subscriptions/<subscription-id>/resourceGroups/<foundry-resource-group>/providers/Microsoft.CognitiveServices/accounts/<foundry-account> and azd env set FOUNDRY_PROJECT_ENDPOINT <project endpoint> (docs/notes/infra.md)." >&2
+          exit 1
+        fi
+    windows:
+      shell: pwsh
+      continueOnError: false
+      run: |
+        $missing = @('FOUNDRY_ACCOUNT_ID', 'FOUNDRY_PROJECT_ENDPOINT') | Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+        if ($missing) {
+          Write-Error ("Missing azd variables: " + ($missing -join ', ') + ". Set them first, for example: azd env set FOUNDRY_ACCOUNT_ID /subscriptions/<subscription-id>/resourceGroups/<foundry-resource-group>/providers/Microsoft.CognitiveServices/accounts/<foundry-account> and azd env set FOUNDRY_PROJECT_ENDPOINT <project endpoint> (docs/notes/infra.md).")
+          exit 1
+        }
+  # azd deploys the two apps, not the replay job: point the job at the worker image just pushed, so no second provision is needed.
+  postdeploy:
+    posix:
+      shell: sh
+      continueOnError: false
+      run: |
+        set -eu
+        image=$(azd env get-value SERVICE_WORKER_IMAGE_NAME 2>/dev/null || true)
+        if [ -z "$image" ]; then
+          echo "No worker image deployed yet: the replay job keeps its image."
+          exit 0
+        fi
+        job=$(azd env get-value AZURE_REPLAY_JOB_NAME)
+        rg=$(azd env get-value AZURE_RESOURCE_GROUP)
+        echo "Replay job $job: image $image"
+        az containerapp job update --name "$job" --resource-group "$rg" --container-name replay --image "$image" --output none
+    windows:
+      shell: pwsh
+      continueOnError: false
+      run: |
+        $image = azd env get-value SERVICE_WORKER_IMAGE_NAME 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $image) {
+          Write-Host "No worker image deployed yet: the replay job keeps its image."
+          exit 0
+        }
+        $job = azd env get-value AZURE_REPLAY_JOB_NAME
+        $rg = azd env get-value AZURE_RESOURCE_GROUP
+        Write-Host "Replay job ${job}: image $image"
+        az containerapp job update --name $job --resource-group $rg --container-name replay --image $image --output none
+        exit $LASTEXITCODE

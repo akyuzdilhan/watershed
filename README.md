@@ -335,10 +335,10 @@ Signed in with `az login` and `azd auth login`, from the repository root. The Fo
 ```
 azd env set FOUNDRY_ACCOUNT_ID /subscriptions/<subscription-id>/resourceGroups/<foundry-resource-group>/providers/Microsoft.CognitiveServices/accounts/<foundry-account>
 azd env set FOUNDRY_PROJECT_ENDPOINT <project endpoint>
-azd provision      # identities, roles, Service Bus, Cosmos DB, the apps and the job with a placeholder image
-azd deploy         # builds both images in ACR (the worker build also generates the league history)
-azd provision      # the replay job picks up the worker image (azd does not deploy jobs)
+azd up             # provision (identities, roles, Service Bus, Cosmos DB, the apps and the job), then deploy (both images built in ACR)
 ```
+
+Two azd hooks in `azure.yaml` replace the manual steps: `preprovision` stops with a clear message while `FOUNDRY_ACCOUNT_ID` or `FOUNDRY_PROJECT_ENDPOINT` is unset, and `postdeploy` points the replay job at the worker image just deployed (`az containerapp job update --image`), since azd deploys the apps but not the job.
 
 `azd env get-values` then gives `SERVICE_WEB_URI`, `SERVICE_BUS_FQDN`, `COSMOS_ENDPOINT` and the names of the worker app and the replay job. Producer sign-in needs a one-time Entra app registration, whose client id goes in `WEB_AUTH_CLIENT_ID` before another `azd provision`; judging mode is `WORKER_EXTRA_ARGS=--auto-approve`. A replay is one job run: KEDA starts the worker when the subscription has messages, and `python -m worker.reset --match demo-0007 --cosmos --yes` clears the match before the next replay. The exact sequence, the app registration and the reset are in [`docs/notes/infra.md`](docs/notes/infra.md).
 
