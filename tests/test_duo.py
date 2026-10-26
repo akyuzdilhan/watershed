@@ -757,7 +757,7 @@ def league_matches():
 
     history = generate(9, 5)
     out = []
-    for seed, story in ((7, "demo"), (3, "random"), (5, "random"), (13, "random"), (15, "random")):
+    for seed, story in ((7, "demo"), (3, "random"), (34, "random"), (13, "random"), (15, "random")):  # seed 34: a late goal and a starter's goals, since the Faker names changed the unscripted matches
         stream, _ = generate_match(seed, story, frames=False)
         sink = EveryDocVersion()
         pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True), history=history)
