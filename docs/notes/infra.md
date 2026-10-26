@@ -117,6 +117,7 @@ A replay reuses the same ids. A second replay of a match would mix with what the
    APP=$(azd env get-value AZURE_WORKER_APP_NAME); RG=$(azd env get-value AZURE_RESOURCE_GROUP)
    az containerapp revision restart -n $APP -g $RG --revision $(az containerapp show -n $APP -g $RG --query properties.latestRevisionName -o tsv)
    ```
+   "Restart succeeded" comes back before the old replica has stopped: wait until `az containerapp replica list -n $APP -g $RG` shows no replica, or only one created after the restart, before step 3. On 26/10 a replay started 14 s after the restart: the old replica read the match info and the kick-off, then stopped; the new one took the session without them, ignored every action, and wrote no card.
 3. Start the replay. The web app caches the feed it has read; the ids are the same on a replay, so its graphics stay consistent, and restarting its revision clears the cache if needed.
 
 ## Easy Auth
