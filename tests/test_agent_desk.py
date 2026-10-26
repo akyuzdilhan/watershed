@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import dataclasses
 import json
 import os
 import subprocess
@@ -16,7 +17,7 @@ from league.history import generate
 from scripted_chat import ScriptedModel, call, turn
 from worker.agent_desk import AgentDesk, TextsOnly
 from worker.desk import Desk
-from worker.duo_agents import DuoModel, DuoRunner
+from worker.duo_agents import DuoModel, DuoResult, DuoRunner
 from worker.mcp_server import FactRegistry, HistoryFacts
 from worker.pipeline import MemorySink, Pipeline
 from worker.writer import TemplateWriter, card_facts, draft, low_stake, verify_duo
@@ -220,7 +221,7 @@ def test_the_duo_has_a_budget_of_its_own(hf):
     assert desk.runner.budget.used("m") == 2
     assert sink.cards["card-1"]["duo_writer"] == "agents:scripted"
     (entry,) = [e for e in sink.audit if e["card_id"] == "card-2" and e["action"] == "duo_fallback"]
-    assert entry["reason"] == "budget" and sink.cards["card-2"]["duo_trace"]["applied"] is False
+    assert entry["reason"] == "budget" and entry["kept"] == sink.cards["card-2"]["duo_writer"] and sink.cards["card-2"]["duo_trace"]["applied"] is False
     assert writer.calls[0]["duo"] is False and writer.calls[1]["duo"] is True  # the second card was not handed to the agents: the Writer wrote its duo
     assert len(model.clients["wren"].requests) == 1
 
@@ -243,9 +244,38 @@ def test_a_job_is_submitted_only_with_the_runs_of_its_turns(hf):
     go_on.set()
     desk.close()
     (entry,) = [e for e in sink.audit if e["card_id"] == "card-2" and e["action"] == "duo_fallback"]
-    assert entry["reason"] == "budget" and sink.cards["card-2"]["duo_writer"] == "template"
+    assert entry["reason"] == "budget" and entry["kept"] == sink.cards["card-2"]["duo_writer"] == "template"
     assert any(l["claims"] and l["claims"][0]["source_field"].startswith("season_") for l in sink.cards["card-2"]["duo"])  # the plan would have needed four turns
     assert sink.cards["card-1"]["duo_writer"] == "agents:scripted" and desk.runner.budget.used("m") == 2
+
+
+def test_a_card_goes_to_the_agents_only_with_the_runs_of_all_its_turns(hf):
+    writer = FakeWriter()
+    desk, sink = desk_with(ScriptedModel([], []), hf, writer=writer, duo_calls=3)
+    season = {"facts": {"score_now": "Varleigh 2-1 Yarnford", "varleigh_rank_at_kickoff": 18, "varleigh_rank_if_score_holds": 15, "varleigh_relegation_chance_if_score_holds_pct": 20},
+              "meanings": {}}
+    desk.write(goal_card(season_context=season), TEAMS)  # three runs free, four turns for the table: not even asked
+    desk.close()
+    assert [c["duo"] for c in writer.calls] == [True] and desk.runner.budget.left("m") == 3
+    stored = sink.cards["card-g66"]
+    (entry,) = [e for e in sink.audit if e["action"] == "duo_fallback"]
+    assert (entry["reason"], entry["kept"], stored["duo_writer"]) == ("budget", "fake", "fake")
+
+
+def test_the_desk_checks_the_subjects_again(hf):
+    desk, sink = desk_with(ScriptedModel([], []), hf, duo_calls=0, auto_approve=True)
+    card = goal_card()
+    desk.write(card, TEAMS)
+    claim = [{"value": 6, "source_field": GOALS_FIELD}]
+    said = {"en": ("Varleigh are in front now.", "He had 6 league goals before this season."), "fr": ("Varleigh passe devant.", "Il avait 6 buts en championnat avant cette saison."),
+            "es": ("El Varleigh se pone por delante.", "El Varleigh tenía en él 6 goles de liga antes de esta temporada.")}
+    lines = [{"speaker": s, "lang": lang, "line": said[lang][i], "claims": [] if i == 0 else claim} for i, s in enumerate(("wren", "joss")) for lang in LANGS]
+    trace = {"model": "scripted", "plan": [["wren", "react"], ["joss", "detail"]], "turns": [], "runs": 2, "ms": 0, "tool_facts": {}, "conflicts": []}
+    result = DuoResult(card["id"], 1, "m", True, None, lines, {GOALS_FIELD: {"value": 6, "tool": "player_history", "args": {}}}, trace)
+    assert desk._apply(dataclasses.replace(result, subjects={GOALS_FIELD: ["Marijn Scarpetta"]})) is False
+    assert sink.cards[card["id"]]["duo_trace"]["reason"] == "final"
+    assert desk._apply(result) is True  # without subjects, the same lines pass
+    desk.close()
 
 
 def test_a_failed_hand_over_keeps_the_template_and_never_stops_the_pipeline(hf):
@@ -290,6 +320,7 @@ def test_the_demo_match_with_the_dry_duo(history, hf):
         pipeline.handle(m)
     pipeline.flush()
     desk.close()
+    assert not desk.live and not desk.teams and not registry._states and not registry._storylines  # the match is over, its jobs ended: forgotten
     cards = sorted(sink.cards.values(), key=lambda c: c["clock_s"])
     eligible = [c for c in cards if c["value_pts"] >= 10 and not low_stake(c)]
     assert {c["minute_label"] for c in eligible} >= {"14'", "31'", "52'", "57'", "66'", "72'"}

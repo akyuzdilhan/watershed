@@ -94,6 +94,14 @@ class FactRegistry:
         with self._lock:
             return self._storylines.get(match_id)
 
+    def drop(self, card_ids, match_id: str) -> None:
+        """Forgets a match the desk is done with: the facts and states of its cards, and its storyline."""
+        with self._lock:
+            for i in card_ids:
+                self._moments.pop(i, None)
+                self._states.pop(i, None)
+            self._storylines.pop(match_id, None)
+
     def mark(self, tool: str) -> None:
         """Counts one call served by `tool`."""
         with self._lock:

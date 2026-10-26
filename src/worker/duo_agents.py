@@ -15,7 +15,7 @@ import re
 import threading
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from agent_framework import Agent, AgentMiddleware, AgentResponse, BaseChatClient, ChatResponse, Content, FunctionInvocationLayer, MCPStdioTool, Message
 from agent_framework.orchestrations import GroupChatBuilder
@@ -168,9 +168,9 @@ ROLE_TEXT = {"react": "React to the moment as it happens: the emotion and the st
 
 TOOL_TEXT = {"get_match_state": "get_match_state(card_id): the match so far at this moment: score, the goals that count in order, red cards, the largest deficit of each club.",
              "get_storyline": "get_storyline(match_id): the pre-match storyline: league positions, what is at stake in %, form, head-to-head, players to watch.",
-             "player_history": "player_history(name, club): a player's league career before this season: goals, appearances, appearances off the bench, first season, clubs, best season.",
+             "player_history": "player_history(name, club): a player's league career before this season: goals, appearances, appearances off the bench, first season, clubs, best season. Appearances are numbers of matches: read them, never say them.",
              "club_history": "club_history(club): titles, seasons in the league, best finish, last title.",
-             "head_to_head": "head_to_head(club_a, club_b): league meetings of two clubs: how many, wins, draws, first and last meeting, biggest wins.",
+             "head_to_head": "head_to_head(club_a, club_b): league meetings of two clubs: how many, wins, draws, first and last meeting, biggest wins. Meetings, wins and draws are numbers of matches: read them, never say them.",
              "last_time": "last_time(kind, club): the last time something happened in the league history and how rare it is; kind is hat_trick, hat_trick_by_substitute, brace_by_substitute or comeback_win_from_two_down."}
 
 TURN_MARK = "Your turn: "
@@ -209,19 +209,28 @@ class DuoResult:
     lines: list[dict]
     tool_facts: dict  # field -> {value, tool, args}, the tool facts the lines claim
     trace: dict
+    subjects: dict = field(default_factory=dict)  # field of tool_facts -> the clubs or players its tool result is about
 
 
 # --- the exchange, as data -----------------------------------------------------------------------------
 
+TABLE_PLAN = ((HEART, "react"), (EYE, "detail"), (HEART, "ask_table"), (EYE, "table"))
+
+
 def duo_plan(facts: dict, template_lines) -> tuple:
     """The running order: four turns when the template duo tells the table (a season_ claim), else two, three for a big moment or a hat-trick. verify_duo then gets 2 to 4 alternating lines per language."""
     if any(isinstance(c, dict) and str(c.get("source_field", "")).startswith("season_") for l in template_lines for c in l.get("claims") or []):
-        return ((HEART, "react"), (EYE, "detail"), (HEART, "ask_table"), (EYE, "table"))
+        return TABLE_PLAN
     plan = ((HEART, "react"), (EYE, "detail"))
     big = max(abs(facts.get("swing_pts") or 0), abs(facts.get("save_value_pts") or 0)) >= BIG_MOMENT_PTS
     if big or (isinstance(facts.get("scorer_match_goals"), int) and facts["scorer_match_goals"] >= 3):
         plan += ((HEART, "answer"),)
     return plan
+
+
+def turns_needed(facts: dict) -> int:
+    """The most turns a card's exchange can take, known before its template duo is written: the table's four when the card has season_ facts, else as duo_plan."""
+    return len(TABLE_PLAN) if any(str(k).startswith("season_") for k in facts) else len(duo_plan(facts, ()))
 
 
 def duo_spec(card: dict, teams: dict[str, str], languages, memory=None, tools: dict | None = None) -> DuoSpec:
@@ -367,11 +376,12 @@ def subject_problem(lang: str, text: str, claim: dict, subjects: list[str]) -> s
 
 
 LEAGUE_WIDE_FIELDS = frozenset(f"{kind}_seasons_with_one" for kind in LAST_TIME_KINDS)  # last_time without a club: seasons of the whole league
+MATCH_COUNT_FIELD = re.compile(r"^(h2h_\w+_(meetings|wins|draws)|player_\w+_appearances)$")  # head_to_head's meetings, wins and draws, player_history's appearances
 
 
 def off_air_field(name: str) -> bool:
-    """A tool fact the agents may read but never tell: a count of times in the history (a number of matches, in effect) or a rarity of the whole league, not anchored on a club or a player."""
-    return name.endswith("_count") or name in LEAGUE_WIDE_FIELDS
+    """A tool fact the agents may read but never tell: a count of times in the history, a number of matches (meetings, wins, draws, appearances), or a rarity of the whole league, not anchored on a club or a player."""
+    return name.endswith("_count") or name in LEAGUE_WIDE_FIELDS or bool(MATCH_COUNT_FIELD.match(name))
 
 
 def line_problems(line: dict, facts: dict, role: str | None = None, subjects: dict | None = None) -> list[str]:
@@ -420,15 +430,15 @@ def relied_on(lines: list[dict], ledger: dict) -> list[str]:
     return [k for k, v in ledger.items() if relied(k, v)]
 
 
-def check_duo(lines: list[dict], languages, facts: dict, plan) -> list[str]:
-    """The final check of an exchange: 2 to 4 alternating lines per language in the running order, and every line as at its turn."""
+def check_duo(lines: list[dict], languages, facts: dict, plan, subjects: dict | None = None) -> list[str]:
+    """The final check of an exchange: 2 to 4 alternating lines per language in the running order, and every line as at its turn (`subjects` as in line_problems)."""
     report = verify_duo(lines, list(languages), facts)
     problems = [f"format: {lang}: 2 to 4 lines, alternating wren and joss" for lang, v in report["languages"].items() if not (v["count_ok"] and v["alternates"] and v["speakers_ok"])]
     for lang in languages:
         for slot, l in enumerate(x for x in lines if isinstance(x, dict) and x.get("lang") == lang):
             if slot >= len(plan) or l.get("speaker") != plan[slot][0]:
                 problems.append(f"format: {lang}: line {slot} not in the running order")
-            problems += line_problems(l, facts, plan[slot][1] if slot < len(plan) else None)
+            problems += line_problems(l, facts, plan[slot][1] if slot < len(plan) else None, subjects)
     return problems
 
 
@@ -615,11 +625,12 @@ class DuoJob:
         ok = self.failed is None and self.slot == len(self.plan)
         reason = self.failed or (None if ok else "final")
         tool_facts = {k: {"value": self.ledger[k], "tool": self.provenance[k]["tool"], "args": self.provenance[k]["args"]} for k in relied_on(self.lines, self.ledger)}
-        if ok and check_duo(self.lines, spec.languages, self.facts | {k: v["value"] for k, v in tool_facts.items()}, self.plan):  # as the desk checks it again
+        subjects = {k: self.subjects[k] for k in tool_facts if k in self.subjects}
+        if ok and check_duo(self.lines, spec.languages, self.facts | {k: v["value"] for k, v in tool_facts.items()}, self.plan, subjects):  # as the desk checks it again
             ok, reason = False, "final"
         trace = {"model": self.model_name, "plan": [[s, r] for s, r in self.plan], "turns": self.turns, "runs": self.runs,
                  "ms": round(1000 * (time.perf_counter() - self.started)), "tool_facts": tool_facts if ok else {}, "conflicts": self.conflicts}
-        return DuoResult(spec.card_id, spec.version, spec.match_id, ok, None if ok else reason, list(self.lines) if ok else [], tool_facts if ok else {}, trace)
+        return DuoResult(spec.card_id, spec.version, spec.match_id, ok, None if ok else reason, list(self.lines) if ok else [], tool_facts if ok else {}, trace, subjects if ok else {})
 
 
 class TurnGate(AgentMiddleware):
@@ -814,8 +825,9 @@ class DuoRunner:
         self._lock = threading.Lock()
         self._futures: list[concurrent.futures.Future] = []
         self._tasks: dict[tuple[str, int], asyncio.Task] = {}
-        self._submitted: dict[str, set[int]] = {}
-        self._cancelled: set[tuple[str, int]] = set()
+        self._pending: Counter = Counter()  # (card id, version) -> jobs submitted and not ended
+        self._matches: Counter = Counter()  # match id -> jobs submitted and not ended
+        self._cancelled: set[tuple[str, int]] = set()  # of pending jobs only
         self._closed = False
         self._server = None  # built on the duo's loop at the first job
         self._gate: asyncio.Semaphore | None = None
@@ -830,19 +842,41 @@ class DuoRunner:
                 log.warning("duo runner closed: %s v%s not run", spec.card_id, spec.version)
                 self.budget.release(spec.match_id, (spec.card_id, spec.version))
                 return
-            self._submitted.setdefault(spec.card_id, set()).add(spec.version)
+            self._pending[(spec.card_id, spec.version)] += 1
+            self._matches[spec.match_id] += 1
+            self._futures = [f for f in self._futures if not f.done()]
             self._futures.append(asyncio.run_coroutine_threadsafe(self._run(spec), self._loop))
 
     async def _run(self, spec: DuoSpec) -> None:
         if self._gate is None:
             self._gate = asyncio.Semaphore(1)
-        async with self._gate:
-            try:
-                result = await self._job(spec)
-            finally:
-                self.budget.release(spec.match_id, (spec.card_id, spec.version))  # before the next job starts
-            self._results.put(result)
-            log.info("duo %s v%s: %s", spec.card_id, spec.version, "verified" if result.ok else result.reason)
+        try:
+            async with self._gate:
+                try:
+                    result = await self._job(spec)
+                finally:
+                    self.budget.release(spec.match_id, (spec.card_id, spec.version))  # before the next job starts
+                self._results.put(result)
+                log.info("duo %s v%s: %s", spec.card_id, spec.version, "verified" if result.ok else result.reason)
+        finally:
+            self._forget(spec)
+
+    def _forget(self, spec: DuoSpec) -> None:
+        """A job ended (its result is queued): nothing about it is kept, so a worker that runs for days keeps nothing per job."""
+        key = (spec.card_id, spec.version)
+        with self._lock:
+            self._pending[key] -= 1
+            if self._pending[key] <= 0:
+                del self._pending[key]
+                self._cancelled.discard(key)
+            self._matches[spec.match_id] -= 1
+            if self._matches[spec.match_id] <= 0:
+                del self._matches[spec.match_id]
+
+    def pending(self, match_id: str) -> int:
+        """Jobs of a match submitted and not ended; at 0, every result of the match is in results()."""
+        with self._lock:
+            return self._matches.get(match_id, 0)
 
     async def _job(self, spec: DuoSpec) -> DuoResult:
         key = (spec.card_id, spec.version)
@@ -878,7 +912,7 @@ class DuoRunner:
     def cancel(self, card_id: str) -> None:
         """Cancels every version of a card submitted so far: a queued job will not start, a running one is stopped."""
         with self._lock:
-            self._cancelled |= {(card_id, v) for v in self._submitted.get(card_id, ())}
+            self._cancelled |= {k for k in self._pending if k[0] == card_id}
             tasks = [t for (c, _), t in self._tasks.items() if c == card_id]
         if tasks and not self._loop.is_closed():
             for task in tasks:
@@ -908,7 +942,7 @@ class DuoRunner:
             if self._closed:
                 return
             self._closed = True
-            cards = list(self._submitted)
+            cards = list(dict.fromkeys(c for c, _ in self._pending))
         if not self.wait(timeout):
             for card_id in cards:
                 self.cancel(card_id)

@@ -14,8 +14,8 @@ from league.history import generate
 from scripted_chat import ScriptedModel, call, turn
 from worker.desk import Desk
 from worker.duo import PERSONAS
-from worker.duo_agents import (DUO_RULES, DuoBudget, DuoJob, DuoModel, DuoRunner, duo_plan, duo_spec, duo_workflow, line_problems, persona_instructions, relied_on,
-                               run_duo, unbacked_number_words, unknown_names)
+from worker.duo_agents import (DUO_RULES, DuoBudget, DuoJob, DuoModel, DuoRunner, check_duo, duo_plan, duo_spec, duo_workflow, line_problems, off_air_field,
+                               persona_instructions, relied_on, run_duo, turns_needed, unbacked_number_words, unknown_names)
 from worker.mcp_server import FactRegistry, HistoryFacts, build_server
 from worker.pipeline import MemorySink, Pipeline
 from worker.writer import EXAMPLE_DUO, EXAMPLE_FACTS, TemplateWriter, card_facts, verify_duo
@@ -176,6 +176,18 @@ def test_a_tool_number_is_told_with_its_subject():
     assert line_problems(alone, facts) == []  # without subjects (a card fact), no rule
 
 
+def test_the_final_check_keeps_the_subject_rule():
+    facts = card_facts(goal_card(scorer_match_goals=1), TEAMS)[0] | {GOALS_FIELD: 6}
+    claim = [{"value": 6, "source_field": GOALS_FIELD}]
+    said = {"en": ("Varleigh are in front now.", "He had 6 league goals before this season."), "fr": ("Varleigh passe devant.", "Il avait 6 buts en championnat avant cette saison."),
+            "es": ("El Varleigh se pone por delante.", "El Varleigh tenía en él 6 goles de liga antes de esta temporada.")}
+    lines = [{"speaker": s, "lang": lang, "line": said[lang][i], "claims": [] if i == 0 else claim} for i, s in enumerate(("wren", "joss")) for lang in LANGS]
+    plan = [("wren", "react"), ("joss", "detail")]
+    assert check_duo(lines, LANGS, facts, plan) == []
+    problems = check_duo(lines, LANGS, facts, plan, {GOALS_FIELD: ["Marijn Scarpetta"]})
+    assert [p.split(": ")[:2] for p in problems] == [["en", "subject"], ["fr", "subject"], ["es", "subject"]]
+
+
 def test_a_last_time_without_a_club_is_told_about_its_club():
     field = "last_comeback_win_from_two_down_seasons_ago"
     facts = card_facts(goal_card(), TEAMS)[0] | {field: 6, "last_comeback_win_from_two_down_club": "Stellbury"}
@@ -218,6 +230,7 @@ def test_a_nominal_exchange(hf):
     lookup = result.trace["turns"][1]["tools"][0]
     assert (lookup["name"], lookup["args"], lookup["error"]) == ("player_history", {"name": "Marijn Scarpetta"}, None) and GOALS_FIELD in lookup["fields"]
     assert result.tool_facts[GOALS_FIELD] == {"value": goals, "tool": "player_history", "args": {"name": "Marijn Scarpetta"}}
+    assert result.subjects[GOALS_FIELD][0] == "Marijn Scarpetta" and set(result.subjects) == set(result.tool_facts)  # for the desk's check again
     second = [t for _, _, t in model.clients["wren"].requests[1]["messages"]]
     assert any(t.startswith("Joss said: ") and f"{goals} league goals" in t for t in second)
     assert sorted(model.clients["joss"].requests[0]["tools"]) == ["club_history", "head_to_head", "last_time", "player_history"]
@@ -431,11 +444,45 @@ def test_the_dry_model_speaks_the_template_and_looks_the_player_up(hf):
     ("en", "City take three points if it ends now.", [], "style"),
     ("en", "What a save — unbelievable.", [], "style"),
     ("en", "Marco Pellegrini would have scored that.", [], "unknown_names"),
+    ("en", "Varleigh and Yarnford have met 38 times.", [{"value": 38, "source_field": "h2h_varleigh_yarnford_meetings"}], "bad_claims"),
+    ("en", "Varleigh have won 17 of them.", [{"value": 17, "source_field": "h2h_varleigh_yarnford_varleigh_wins"}], "bad_claims"),
+    ("en", "Varleigh have won seventeen of them.", [], "number_words"),
+    ("fr", "Ari Holt compte 93 matchs en championnat.", [{"value": 93, "source_field": "player_ari_holt_appearances"}], "bad_claims"),
 ])
 def test_the_on_air_rules_hold_for_the_agents(lang, text, claims, category):
-    facts = dict(EXAMPLE_FACTS, hat_trick_count=41, hat_trick_seasons_with_one=30)
+    facts = dict(EXAMPLE_FACTS, hat_trick_count=41, hat_trick_seasons_with_one=30, h2h_varleigh_yarnford_meetings=38, h2h_varleigh_yarnford_varleigh_wins=17,
+                 player_ari_holt_appearances=93)
     problems = line_problems({"lang": lang, "speaker": "wren", "line": text, "claims": claims}, facts)
     assert any(p.split(": ")[1] == category for p in problems), problems
+
+
+def test_the_numbers_of_matches_of_the_history_tools_are_off_air(hf):
+    clubs = sorted(hf.view.clubs)[:2]
+    fields = {**hf.player("Marijn Scarpetta")[0], **hf.head_to_head(*clubs)[0], **hf.club(clubs[0])[0]}
+    off = {k.rsplit("_", 1)[-1] for k in fields if off_air_field(k)}
+    assert off == {"appearances", "meetings", "draws", "wins"}
+    assert not off_air_field(GOALS_FIELD) and not any(off_air_field(k) for k in fields if k.endswith(("_win", "_season", "_titles", "_meeting")))
+
+
+def test_the_turns_a_card_may_need_are_known_before_its_duo():
+    assert turns_needed(card_facts(goal_card(scorer_match_goals=1), TEAMS)[0]) == 2
+    assert turns_needed(card_facts(goal_card(), TEAMS)[0]) == 3  # a hat-trick
+    season = {"facts": {"varleigh_rank_if_score_holds": 15}, "meanings": {}}
+    assert turns_needed(card_facts(goal_card(scorer_match_goals=1, season_context=season), TEAMS)[0]) == 4
+
+
+def test_the_runner_keeps_nothing_of_a_job_that_ended(hf):
+    runner = DuoRunner(ScriptedModel([react(), react()], [card_line()], delay=0.3), FactRegistry(), hf)
+    runner.submit(spec_of(goal_card(id="card-a", scorer_match_goals=1)))
+    runner.submit(spec_of(goal_card(id="card-b", scorer_match_goals=1)))
+    runner.cancel("card-b")
+    assert runner.pending("m") == 2
+    assert runner.wait(10)
+    assert {r.card_id: r.reason for r in runner.results()} == {"card-a": None, "card-b": "cancelled"}
+    assert runner.pending("m") == 0 and not runner._pending and not runner._matches and not runner._cancelled
+    runner.submit(spec_of(goal_card(id="card-c", scorer_match_goals=1)))
+    assert len(runner._futures) == 1  # the futures of the ended jobs were let go
+    runner.close()
 
 
 @pytest.mark.parametrize("lang,text", [("en", "Offside by a whisker, and Ari Holt can breathe."), ("fr", "Hors-jeu d'un rien."), ("es", "Fuera de juego por muy poco.")])
