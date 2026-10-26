@@ -227,6 +227,7 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
     assert {c.title for c in find(claims[0], lambda c: getattr(c, "className", "") == "fact-key")} == {c["source_field"] for t in save["texts"] for c in t["claims"]}  # the key on hover
     inside = texts_in(verification[0])
     assert inside.count("Verifier: passes") == len(save["texts"]) and "every number claimed" in inside and "claims match the facts" in inside and "History" in inside
+    assert texts_in(verification[0].children[0]) == "How this card was checked" and console.CHECKED_NOTE in inside and "Which model wrote it, how many tries" in inside
     reps = save["verification"].get("repetition_warnings", 0)
     assert (f"{reps} style note(s)" if reps else "no style note") in inside and "repetition warning" not in text
     assert "Facts" not in text  # the raw facts table is gone

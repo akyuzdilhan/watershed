@@ -359,14 +359,16 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     when = html.Div(f"When written: {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s), "
                     + (f"{reps} style note(s): an opening, phrase or tic already used in this match" if reps else "no style note"), className="muted small") if v else None
     labelled = [html.Div([html.Span(LANG_NAMES.get(t.get("lang", ""), t.get("lang", "")), className="lang"), c], className="check-lang") for t, c in zip(texts, checks)] if len(texts) > 1 else checks
-    inside = [html.P("The Verifier's checks on the text as it stands, how it was written, and every decision on the card.", className="muted small"),
+    inside = [html.P(CHECKED_NOTE, className="muted small"),
               *labelled, *([when] if when is not None else []), *writing_trace(card, read_only), html.H3("History"), history_view(card, audit, read_only)]
-    out.append(html.Details([html.Summary("Verification and history"), *inside], open=False, className="fold fold-verification"))
+    out.append(html.Details([html.Summary(CHECKED_TITLE), *inside], open=False, className="fold fold-verification"))
     if not read_only:
         out += [html.H3("Producer feedback"), panels.fb_stats(feedback or [])]
     return html.Div(out)
 
 
+CHECKED_TITLE = "How this card was checked"
+CHECKED_NOTE = "Which model wrote it, how many tries, how long it took, and every decision since: written, published, held for VAR, retracted."
 PERIOD_STARTS = (2700.0, 5400.0, 6300.0)  # second half, extra time
 
 
