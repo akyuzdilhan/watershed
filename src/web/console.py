@@ -513,26 +513,48 @@ def _approve_styles_cb(_sig, match_id, card_id):
     return approve_styles((get_store().card(match_id, card_id) if match_id and card_id else None))
 
 
-def context(match_id: str | None, card_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None):
-    """(the selected card's graphic and insights under the curve, signature), `panels.card_context`; no_update for both when the card, its insights, the storyline and the language did not change. `t` (the replay's minute) leaves out the insights written after it."""
+LIVE_FAR_MIN = 5.0  # minutes between the selected card and the minute shown beyond which the live pitch replaces the card's moment
+
+
+def live_minute(state: dict | None, t: float | None) -> float | None:
+    """The minute the live pitch shows: the replay's, else, while the match is played, the last minute of the curve; None at full time without a replay."""
+    if t is not None and t < full_time(state):
+        return t
+    return full_time(state) if state and state.get("wp_timeline") and not state.get("final") else None
+
+
+def show_live(card_x: float | None, now: float | None, playing: bool) -> bool:
+    """Whether the live pitch replaces "This moment on the pitch": a minute to show, and the replay playing, no card selected, or the card far from that minute (`LIVE_FAR_MIN`)."""
+    return now is not None and (playing or card_x is None or abs(card_x - now) > LIVE_FAR_MIN)
+
+
+def context(match_id: str | None, card_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None, playing: bool = False):
+    """(the selected card's graphic and insights under the curve, signature), `panels.card_context`; no_update for both when the card, its insights, the storyline, the language and the live minute did not change. `t` (the replay's minute) leaves out the insights written after it; while the replay plays (`playing`), or away from the card, the live pitch (`panels.live_block`) takes the place of the card's moment."""
     store = store or get_store()
     card = store.card(match_id, card_id) if match_id and card_id else None
-    if card is None:
+    state = (store.state(match_id) or {}) if match_id else {}
+    now = live_minute(state, t)
+    points, x_of, breaks = axis(state.get("wp_timeline") or [])
+    card_x = x_of.get(card.get("event_id")) if card else None
+    if card is not None and card_x is None:
+        card_x = (card.get("clock_s") or 0) / 60
+    live = show_live(card_x, now, bool(playing))
+    if card is None and not live:
         return [], None
-    docs, story = store.insights(match_id), store.storyline(match_id)
-    state = store.state(match_id) or {}
+    docs, story = (store.insights(match_id), store.storyline(match_id)) if card is not None else ([], None)
     if t is not None and t < full_time(state):
-        points, x_of, breaks = axis(state.get("wp_timeline") or [])
         docs = [d for d in docs if (x_of.get(d.get("event_id")) if d.get("event_id") in x_of else (label_x(d.get("minute_label"), points, breaks) or 0)) <= t]
     feed = store.feed(match_id)
-    sig = _sig(match_id, card_id, card.get("status"), card.get("version"), panels.tied_insights(docs, card), (story or {}).get("texts"), lang, (feed or {}).get("last_seq"))
+    shift = breaks[0] - 45 if breaks else 0.0
+    sig = _sig(match_id, card_id, (card or {}).get("status"), (card or {}).get("version"), panels.tied_insights(docs, card), (story or {}).get("texts"), lang, (feed or {}).get("last_seq"),
+               round(now, 1) if live else None)
     if sig == last_sig:
         return no_update, no_update
-    return panels.card_context(card, feed, docs, story, lang), sig
+    return panels.card_context(card, feed, docs, story, lang, live=panels.live_block(feed, now, shift) if live else None), sig
 
 
-def _context_cb(_sig, match_id, card_id, lang, last_sig, t=None):
-    return context(match_id, card_id, lang, last_sig, t=t)
+def _context_cb(_sig, match_id, card_id, lang, last_sig, t=None, paused=True):
+    return context(match_id, card_id, lang, last_sig, t=t, playing=paused is False)
 
 
 def button_states(card: dict | None) -> tuple[bool, bool, bool]:
@@ -978,7 +1000,7 @@ def register(app) -> None:
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
     app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
     app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
-                 State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"))(_context_cb)
+                 State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"), State("c-replay-tick", "disabled"))(_context_cb)
     app.callback(Output("c-intro-var", "children"), Output("c-intro-var", "style"), Output("c-intro-card", "data"), Input("c-p-match", "data"))(lambda m: intro_target(m))
     app.clientside_callback("function(n) { return true; }", Output("c-intro-closed", "data"), Input("c-intro-close", "n_clicks"), prevent_initial_call=True)
     app.clientside_callback(INTRO_HIDE, Output("c-intro", "style"), Input("c-intro-closed", "data"))

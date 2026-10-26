@@ -9,7 +9,7 @@ from dash import html, no_update
 from flask import Flask
 
 from generator import generate_match
-from web import console, matchfeed, overlay, panels, security, store
+from web import console, graphics, matchfeed, overlay, panels, security, store
 from web.app import app, route
 from worker.desk import Desk
 from worker.pipeline import JsonFileSink, Pipeline
@@ -1240,6 +1240,26 @@ def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_d
     right = find(console.layout(None), lambda c: "col-right" in (getattr(c, "className", "") or "") and "c-wp" in component_ids(c.children))[0]
     assert "c-context" in component_ids(right.children)
     assert [v["label"] for v in panels.VIEWS] == ["Desk", "All graphics", "All insights and storyline"]
+
+
+def test_a_live_pitch_follows_the_replay_and_the_card_s_moment_comes_back_when_paused(feed_desk):
+    feed, goal = feed_desk.feed(MATCH), card_at(feed_desk, "63'")
+    points, x_of, breaks = console.axis(feed_desk.state(MATCH)["wp_timeline"])
+    shift, t = breaks[0] - 45, x_of[goal["event_id"]] - 2
+    seq = graphics.actions_until(feed, t, shift)
+    assert len(seq) == graphics.LIVE_ACTIONS and all(graphics.action_minute(a, shift) <= t for a in seq)
+    words = graphics.ticker(feed, seq)
+    assert len(words) == 3 and words[0].startswith(seq[-1]["minute_label"]) and all("#" not in w for w in words)  # the most recent first, surnames only
+    fig = graphics.live_figure(feed, seq)
+    assert fig.layout.meta["live"] == [a["event_id"] for a in seq] and fig.data[-1].meta == {"live": "ball"}
+    playing, _ = console.context(MATCH, goal["id"], "en", None, feed_desk, t=t, playing=True)
+    assert "Live" in texts_in(playing) and "This moment on the pitch" not in texts_in(playing) and find(playing, lambda c: getattr(c, "className", "") == "ticker")
+    paused, _ = console.context(MATCH, goal["id"], "en", None, feed_desk, t=t, playing=False)
+    assert "This moment on the pitch" in texts_in(paused)  # paused next to the card: its moment
+    far, _ = console.context(MATCH, goal["id"], "en", None, feed_desk, t=20.0, playing=False)
+    assert "Live" in texts_in(far) and "This moment on the pitch" not in texts_in(far)  # paused far from the card: the live pitch
+    assert console.show_live(None, None, True) is False and console.live_minute({"final": True, "wp_timeline": []}, None) is None
+    assert "margin" not in texts_in(playing).lower()
 
 
 def test_the_desk_draws_a_short_build_up_with_where_the_ball_was_won_off_the_pitch(feed_desk):

@@ -842,3 +842,96 @@ def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 
     except (StopIteration, KeyError, ValueError):
         return None
     return None
+
+
+# --- live: the last actions up to a minute of the match, under the desk's curve during a replay -------
+
+LIVE_ACTIONS = 8  # actions drawn on the live pitch
+LIVE_TICKER = 3  # events told in words under it
+
+
+def action_minute(a: dict, shift: float = 0.0) -> float:
+    """Where an action sits on the desk's continuous minute axis: its clock in minutes, the second half and later pushed right by the first half's added time (`shift`)."""
+    return a.get("clock_s", 0) / 60 + (shift if (a.get("period") or 1) >= 2 else 0.0)
+
+
+def actions_until(feed: dict, t: float, shift: float = 0.0, n: int = LIVE_ACTIONS) -> list[dict]:
+    """The last `n` actions of the feed up to minute `t` of the continuous axis, in match order."""
+    return [a for a in feed["actions"] if action_minute(a, shift) <= t][-n:]
+
+
+def turnover(a: dict, nxt: dict | None) -> bool:
+    """Whether the ball changed hands after `a`: a failed pass, or the next action by the other team (a shot ends the move, not a turnover)."""
+    if a.get("shot"):
+        return False
+    return a.get("result") == "fail" or (nxt is not None and nxt["team"] != a["team"] and stroke(a) != "won")
+
+
+def _short(a: dict | None) -> str:
+    """A player as the ticker names him: his surname."""
+    name = ((a or {}).get("player") or {}).get("name", "") or "?"
+    return name.split()[-1]
+
+
+def ticker_line(a: dict, nxt: dict | None) -> str:
+    """One event in words, the way a commentator's assistant would note it: "61' Davies passes to Scarpetta", "64' Kossi shoots, saved", "65' Oduya wins the ball"."""
+    who, kind = _short(a), stroke(a)
+    to = f" to {_short(nxt)}" if nxt is not None and nxt["team"] == a["team"] and nxt["player"]["id"] != a["player"]["id"] else ""
+    if kind == "shot":
+        what = f"shoots, {_lower(OUTCOMES[_outcome(a)][0])}"
+    elif kind == "won":
+        what = f"wins the ball ({WINS[a['action_type']]})"
+    elif kind == "carry":
+        what = "carries the ball"
+    elif turnover(a, nxt):
+        what = ("passes" if kind == "pass" else "crosses") + ", lost"
+    else:
+        what = ("crosses" if kind == "cross" else "passes") + to
+    return f"{a.get('minute_label', '')} {who} {what}"
+
+
+def ticker(feed: dict, seq: list[dict], n: int = LIVE_TICKER) -> list[str]:
+    """The last `n` events of `seq` in words, the most recent first; the receiver of the last pass is read from the feed when it already holds the next action."""
+    acts = feed["actions"]
+    index = {a["event_id"]: k for k, a in enumerate(acts)}
+    out = []
+    for a in seq[-n:]:
+        k = index.get(a["event_id"])
+        nxt = acts[k + 1] if k is not None and k + 1 < len(acts) and acts[k + 1].get("period") == a.get("period") and acts[k + 1] in seq else None
+        out.append(ticker_line(a, nxt))
+    return out[::-1]
+
+
+def live_figure(feed: dict, seq: list[dict], theme="dark", width: int | None = None) -> go.Figure:
+    """The last actions up to a minute, the home team attacking right: passes and carries as thin arrows in the team's colour, shots thick in their outcome's colour, a cross where the ball was lost, the ball's last position ringed."""
+    t = _t(theme)
+    fig = pitch.pitch_figure(theme, width)
+    for k, a in enumerate(seq):
+        nxt = seq[k + 1] if k + 1 < len(seq) else None
+        sx, sy = pitch.clamp(*_to_home(a, a["start_x"], a["start_y"]))
+        ex, ey = pitch.clamp(*_to_home(a, a.get("end_x", a["start_x"]), a.get("end_y", a["start_y"])))
+        kind = stroke(a)
+        fade = 0.45 + 0.55 * (k + 1) / len(seq)
+        if kind == "shot":
+            c, w = OUTCOMES[_outcome(a)][1], 4.0
+        else:
+            c, w = t[a["team"]], 1.6
+        if math.hypot(ex - sx, ey - sy) >= 0.5:
+            fig.add_trace(go.Scatter(x=[sx, ex], y=[sy, ey], mode="lines+markers", hoverinfo="skip", showlegend=False, opacity=fade,
+                                     line={"color": c, "width": w, "dash": "dash" if kind == "carry" else "solid"},
+                                     marker={"symbol": ["circle", "arrow"], "size": [5, 8 + w], "angleref": "previous", "color": c}, meta={"live": kind}))
+        else:
+            fig.add_trace(go.Scatter(x=[sx], y=[sy], mode="markers", hoverinfo="skip", showlegend=False, opacity=fade, marker={"size": 7, "color": c}, meta={"live": kind}))
+        if turnover(a, nxt):
+            fig.add_trace(go.Scatter(x=[ex], y=[ey], mode="markers", hoverinfo="skip", showlegend=False, marker={"symbol": "x-thin", "size": 11, "line": {"color": t["text"], "width": 2}},
+                                     meta={"live": "turnover"}))
+    if seq:
+        last = seq[-1]
+        bx, by = pitch.clamp(*_to_home(last, last.get("end_x", last["start_x"]), last.get("end_y", last["start_y"])))
+        fig.add_trace(go.Scatter(x=[bx], y=[by], mode="markers", hoverinfo="skip", showlegend=False, meta={"live": "ball"},
+                                 marker={"size": 15, "color": t["ball"], "line": {"color": t[last["team"]], "width": 3}}))
+    teams = team_names(feed.get("info"))
+    fig.update_layout(title_text=_title(f"Live {seq[-1].get('minute_label', '') if seq else ''}",
+                                        f"<span style='color:{t['home']}'>{teams['home']}</span> attacks right, <span style='color:{t['away']}'>{teams['away']}</span> left"),
+                      showlegend=False, meta={"live": [a["event_id"] for a in seq]})
+    return fig

@@ -620,23 +620,43 @@ def insight_line(d: dict, lang: str | None) -> html.Div:
                      *words], className="ctx-insight")
 
 
-def card_context(card: dict | None, feed: dict | None, docs: list[dict], story: dict | None, lang: str | None = None) -> list:
-    """Under the desk's curve: the match graphic of the selected card (`card_graphic`), the insights tied to it (`tied_insights`) and the storyline's headline. Nothing that stays with the producer: no fact table, no margin (a run is drawn without it)."""
-    if card is None:
+LIVE_NOTE = "The last actions up to this minute: thin arrows passes (dashed carries), thick the shots in their outcome's colour, a cross where the ball was lost, the ring the ball now."
+
+
+def live_block(feed: dict | None, t: float | None, shift: float = 0.0) -> list:
+    """The live mini-pitch under the curve during a replay (and live, away from the selected card): the last `graphics.LIVE_ACTIONS` actions up to minute `t` and a one-line ticker of the last three events, the most recent first."""
+    if not feed or not feed.get("actions") or t is None:
         return []
+    seq = G.actions_until(feed, t, shift)
+    if not seq:
+        return [html.H3("Live"), html.P("Kick-off: no action yet.", className="muted small")]
+    fig = _sized(G.live_figure(feed, seq, THEME, None), 300)
+    fig.update_layout(margin={"l": 6, "r": 6, "t": 48, "b": 6})
+    return [html.H3("Live"), html.Div(" · ".join(G.ticker(feed, seq)), className="ticker", **{"aria-live": "polite"}),
+            dcc.Graph(figure=fig, config={"displayModeBar": False, "staticPlot": True}, className="ctx-figure live-figure"), html.P(LIVE_NOTE, className="muted small")]
+
+
+def moment_block(feed: dict | None, card: dict) -> list:
+    """"This moment on the pitch": the match graphic of the card (`card_graphic`) with its note, or a line saying where the graphics are."""
     out = [html.H3("This moment on the pitch")]
     kind, item = card_graphic(feed, card)
-    if kind:
-        try:
-            fig = _sized(graphic_figure(feed, kind, item, compact=True), 440)
-            if fig.layout.title.text:  # the column is narrow: the subtitle's key ("Numbered in order; width: threat added") is in the note under the figure
-                fig.layout.title.text = fig.layout.title.text.replace(". Numbered in order; width: threat added", ".")
-        except (StopIteration, KeyError, ValueError, IndexError) as error:
-            fig = empty_figure(f"Cannot draw this graphic: {error}")
-        note = NOTES[kind].replace("(last 10 actions)", f"(last {COMPACT_BUILDUP} actions here, 10 under All graphics)") if kind == "buildups" else NOTES[kind]
-        out += [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(note, className="muted small")]
-    else:
-        out.append(html.P("No pitch graphic for this moment; every graphic of the match is under All graphics.", className="muted small"))
+    if not kind:
+        return out + [html.P("No pitch graphic for this moment; every graphic of the match is under All graphics.", className="muted small")]
+    try:
+        fig = _sized(graphic_figure(feed, kind, item, compact=True), 440)
+        if fig.layout.title.text:  # the column is narrow: the subtitle's key ("Numbered in order; width: threat added") is in the note under the figure
+            fig.layout.title.text = fig.layout.title.text.replace(". Numbered in order; width: threat added", ".")
+    except (StopIteration, KeyError, ValueError, IndexError) as error:
+        fig = empty_figure(f"Cannot draw this graphic: {error}")
+    note = NOTES[kind].replace("(last 10 actions)", f"(last {COMPACT_BUILDUP} actions here, 10 under All graphics)") if kind == "buildups" else NOTES[kind]
+    return out + [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(note, className="muted small")]
+
+
+def card_context(card: dict | None, feed: dict | None, docs: list[dict], story: dict | None, lang: str | None = None, live: list | None = None) -> list:
+    """Under the desk's curve: the match graphic of the selected card (`moment_block`), or the live pitch (`live`, from `live_block`) while a replay plays or away from the card, then the insights tied to the card (`tied_insights`) and the storyline's headline. Nothing that stays with the producer: no fact table, no margin (a run is drawn without it)."""
+    if card is None:
+        return list(live or [])
+    out = list(live) if live else moment_block(feed, card)
     out.append(html.H3("Insights on this moment"))
     out += [insight_line(d, lang) for d in tied_insights(docs, card)] or [html.P("None for this moment; every insight is under All insights and storyline.", className="muted small")]
     t = text_in(story, lang)
