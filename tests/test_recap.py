@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import json
 import re
@@ -37,15 +38,15 @@ def test_demo_recap_is_verified_in_three_languages(demo):
     for t in recap["texts"]:
         for section, limit in MAX_WORDS.items():
             assert 0 < word_count(t[section]) <= limit  # "44 %" is one word
-    assert recap["facts"]["final_score"] == "Varleigh 5-2 Yarnford" and recap["facts"]["half_time_score"] == "Varleigh 0-2 Yarnford"
+    assert recap["facts"]["final_score"] == "Rovers 5-2 United" and recap["facts"]["half_time_score"] == "Rovers 0-2 United"
 
 
-def test_turning_point_is_a_second_half_varleigh_goal(demo):
+def test_turning_point_is_a_second_half_rovers_goal(demo):
     cards, _, truth, recap = demo
     tp = recap["analysis"]["turning_point"]
-    varleigh_second_half = {f"card-{g['event_id']}" for g in truth["goals"] if g["counts"] and g["team"] == "home" and g["period"] == 2}
-    assert tp["card_id"] in varleigh_second_half and tp["player"] == "Marijn Scarpetta" and tp["swing_pts"] > 30
-    assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": "Marijn Scarpetta", "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
+    rovers_second_half = {f"card-{g['event_id']}" for g in truth["goals"] if g["counts"] and g["team"] == "home" and g["period"] == 2}
+    assert tp["card_id"] in rovers_second_half and tp["player"] == "Dorian Lightfoot" and tp["swing_pts"] > 30
+    assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": "Dorian Lightfoot", "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
 
 
 def test_no_retracted_card_is_cited(demo):
@@ -68,12 +69,13 @@ def test_no_retracted_card_is_cited(demo):
 
 def test_recap_tells_the_goals_ruled_out_and_why(demo):
     _, _, _, recap = demo
-    assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
-        ("63'", "Marijn Scarpetta", "offside", None), ("69'", "Jakub Méndez", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
+    goals = recap["analysis"]["disallowed_goals"]
+    assert [(g["minute_label"], g["reason"], g["margin_cm"]) for g in goals] == [("63'", "offside", None), ("69'", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
     texts = {t["lang"]: t for t in recap["texts"]}
-    assert "VAR ruled out Marijn Scarpetta's goal at 63' (offside) and Jakub Méndez's goal at 69' (handball)." in texts["en"]["recap"]
-    assert "(hors-jeu)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
-    assert "(fuera de juego)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
+    # how close the offside was is said in words (tight: by a whisker), from the worker's var_decision; never the margin
+    assert f"VAR ruled out {goals[0]['player']}'s goal at 63' (offside by a whisker) and {goals[1]['player']}'s goal at 69' (handball)." in texts["en"]["recap"]
+    assert "(hors-jeu d'un rien)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
+    assert "(fuera de juego por muy poco)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]
     claims = {(c["source_field"], c["value"]) for t in recap["texts"] for c in t["claims"]}
     assert ("disallowed_2_minute", 69) in claims and not any("25" in t["recap"] for t in recap["texts"])
@@ -83,7 +85,7 @@ def test_disallowed_goals_can_be_passed_explicitly(demo):
     cards, state, _, _ = demo
     plain = [{k: v for k, v in c.items() if k not in ("ruled_out", "var_decision")} for c in cards]  # a desk written before the cards recorded VAR decisions
     assert build_recap(plain, state)["analysis"]["disallowed_goals"] == []
-    given = [{"minute_label": "63'", "team": "home", "player": "Marijn Scarpetta", "reason": "offside", "margin_cm": 25}]
+    given = [{"minute_label": "63'", "team": "home", "player": "Dorian Lightfoot", "reason": "offside", "margin_cm": 25}]
     recap = build_recap(plain, state, disallowed=given)
     en = next(t for t in recap["texts"] if t["lang"] == "en")
     assert "offside by a whisker" in en["recap"] and recap["verification"]["verified"]
@@ -112,9 +114,9 @@ def test_only_approved_cards_count(demo):
 def test_fan_text_for_the_losing_side(demo):
     cards, state, _, _ = demo
     recap = build_recap(cards, state, fan_side="away")
-    assert recap["fan_team"] == "Yarnford" and recap["verification"]["verified"]
+    assert recap["fan_team"] == "United" and recap["verification"]["verified"]
     en = next(t for t in recap["texts"] if t["lang"] == "en")
-    assert en["fan"].startswith("Hard to take for Yarnford")
+    assert en["fan"].startswith("Hard to take for United")
 
 
 def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
@@ -123,11 +125,11 @@ def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
     good = [dict(t) for t in recap["texts"]]
     assert verify_recap(json.dumps(good), ["en", "fr", "es"], facts, cards)[1]["verified"]
     cases = {
-        "invented number": "Varleigh won with 61% possession.",
-        "retracted goal": "Marijn Scarpetta scored at 63' too.",
-        "unknown player": "Varleigh won, Valdemar McGrory starred.",
-        "spelled number": "Marijn Scarpetta scored four goals.",
-        "too long": " ".join(["Varleigh"] * (MAX_WORDS["recap"] + 1)),
+        "invented number": "Rovers won with 61% possession.",
+        "retracted goal": "Dorian Lightfoot scored at 63' too.",
+        "unknown player": "Rovers won, Umberto Valtonen starred.",
+        "spelled number": "Dorian Lightfoot scored four goals.",
+        "too long": " ".join(["Rovers"] * (MAX_WORDS["recap"] + 1)),
     }
     for case, text in cases.items():
         bad = [dict(good[0], recap=text)] + good[1:]
@@ -153,7 +155,7 @@ class FailingWriter:
 
     async def write_async(self, match_id, facts, languages, note=None):
         self.calls += 1
-        return json.dumps([{"lang": lang, "recap": "Varleigh won 9-0.", "fan": "Yes.", "analyst": "Yes.", "claims": []} for lang in languages])
+        return json.dumps([{"lang": lang, "recap": "Rovers won 9-0.", "fan": "Yes.", "analyst": "Yes.", "claims": []} for lang in languages])
 
 
 def test_a_failing_model_gets_one_retry_then_the_template(demo):
@@ -174,17 +176,17 @@ def test_cli_writes_recap_next_to_the_cards(tmp_path, monkeypatch, capsys):
 
 # --- the table after the match -------------------------------------------------------------------------
 
-SEASON_FACTS = {"season_varleigh_rank_before": 17, "season_varleigh_relegation_chance_before_pct": 11, "season_varleigh_relegation_chance_after_pct": 4}
+SEASON_FACTS = {"season_rovers_rank_before": 17, "season_rovers_relegation_chance_before_pct": 11, "season_rovers_relegation_chance_after_pct": 4}
 
 
 @pytest.mark.parametrize("lang,matchday,provisional", [
-    ("en", "Varleigh move from 17th to 16th once the matchday is played", "With this result, Varleigh are provisionally 14th (17th before the match)"),
-    ("fr", "Après la journée, Varleigh est 16e (17e avant le match)", "Avec ce résultat, Varleigh est provisoirement 14e (17e avant le match)"),
-    ("es", "Tras la jornada, el Varleigh queda 16.º (17.º antes del partido)", "Con este resultado, el Varleigh es provisionalmente 14.º (17.º antes del partido)"),
+    ("en", "Rovers move from 17th to 16th once the matchday is played", "With this result, Rovers are provisionally 14th (17th before the match)"),
+    ("fr", "Après la journée, Rovers est 16e (17e avant le match)", "Avec ce résultat, Rovers est provisoirement 14e (17e avant le match)"),
+    ("es", "Tras la jornada, el Rovers queda 16.º (17.º antes del partido)", "Con este resultado, el Rovers es provisionalmente 14.º (17.º antes del partido)"),
 ])
 def test_the_season_sentence_gives_the_rank_after_the_matchday_or_says_it_is_provisional(lang, matchday, provisional):
-    writer = RecapTemplateWriter({"season_slug": "varleigh", "season_club": "Varleigh"})
-    for facts, expected in ((SEASON_FACTS | {"season_varleigh_rank_after_matchday": 16}, matchday), (SEASON_FACTS | {"season_varleigh_rank_after": 14}, provisional)):
+    writer = RecapTemplateWriter({"season_slug": "rovers", "season_club": "Rovers"})
+    for facts, expected in ((SEASON_FACTS | {"season_rovers_rank_after_matchday": 16}, matchday), (SEASON_FACTS | {"season_rovers_rank_after": 14}, provisional)):
         text, claims = writer.fill(writer.season_sentence(lang, facts), facts)
         assert text.replace("\xa0", " ").startswith(expected) and {c["source_field"] for c in claims} <= set(facts), text
 
@@ -192,19 +194,19 @@ def test_the_season_sentence_gives_the_rank_after_the_matchday_or_says_it_is_pro
 def test_season_facts_keep_the_rank_after_the_matchday_and_no_league_points(monkeypatch):
     import worker.storyline as storyline
 
-    extra = {"final_score": "Varleigh 5-2 Yarnford"}
-    for club, ranks, chances in (("varleigh", (17, 14, 16), (11, 4)), ("yarnford", (18, 18, 19), (34, 52))):
+    extra = {"final_score": "Rovers 5-2 United"}
+    for club, ranks, chances in (("rovers", (17, 14, 16), (11, 4)), ("united", (18, 18, 19), (34, 52))):
         extra |= {f"{club}_rank_before": ranks[0], f"{club}_rank_after": ranks[1], f"{club}_rank_after_matchday": ranks[2], f"{club}_points_before": 28, f"{club}_points_after": 31,
                   f"{club}_in_drop_zone_before": ranks[0] >= 18, f"{club}_in_drop_zone_after": ranks[1] >= 18, f"{club}_relegation_chance_before_pct": chances[0],
                   f"{club}_relegation_chance_after_pct": chances[1], f"{club}_relegation_change_pts": abs(chances[1] - chances[0]), f"{club}_relegation_change_direction": "down"}
     monkeypatch.setattr(storyline, "post_match", lambda story, home, away: (dict(extra), {k: k for k in extra}))
     facts, meanings, roles = {}, {}, {}
-    analysis = {"score": {"home": 5, "away": 2}, "teams": {"home": "Varleigh", "away": "Yarnford"}, "winner": "home"}
-    season_facts({"focus": {"Varleigh": "relegation", "Yarnford": "relegation"}}, analysis, facts, meanings, roles)
-    assert facts["season_varleigh_rank_after_matchday"] == 16 and "season_varleigh_rank_after" not in facts and set(meanings) == set(facts)
-    assert facts["season_varleigh_in_drop_zone_after_matchday"] is False and facts["season_yarnford_in_drop_zone_after_matchday"] is True
+    analysis = {"score": {"home": 5, "away": 2}, "teams": {"home": "Rovers", "away": "United"}, "winner": "home"}
+    season_facts({"focus": {"Rovers": "relegation", "United": "relegation"}}, analysis, facts, meanings, roles)
+    assert facts["season_rovers_rank_after_matchday"] == 16 and "season_rovers_rank_after" not in facts and set(meanings) == set(facts)
+    assert facts["season_rovers_in_drop_zone_after_matchday"] is False and facts["season_united_in_drop_zone_after_matchday"] is True
     assert not [k for k in facts if k.endswith("_in_drop_zone_after")] and not [k for k in facts if "points" in k.split("_")]
-    assert roles == {"season_club": "Varleigh", "season_slug": "varleigh"}  # the winner's season: its chance of going down moved by 7 points
+    assert roles == {"season_club": "Rovers", "season_slug": "rovers"}  # the winner's season: its chance of going down moved by 7 points
 
 
 # --- texts and typography -----------------------------------------------------------------------------
@@ -257,14 +259,15 @@ def test_the_margin_in_var_decision_is_never_copied_into_the_recap(demo):
     given = []
     for c in json.loads(json.dumps(cards)):
         if c.get("ruled_out"):
-            margin = c["ruled_out"]["margin_cm"]
-            c["var_decision"] = {"reason": c["ruled_out"]["cause"], "call": "tight" if margin is not None else None, "margin_m": margin / 100 if margin is not None else None}
+            offside = c["ruled_out"]["reason"] == "offside"
+            c["var_decision"] = {"reason": c["ruled_out"]["cause"], "call": "tight" if offside else None, "margin_m": 0.17 if offside else None}
             c["ruled_out"]["margin_cm"] = None
         given.append(c)
     assert any(c.get("var_decision", {}).get("margin_m") for c in given)
     recap = build_recap(given, state)
     assert [g["margin_cm"] for g in recap["analysis"]["disallowed_goals"]] == [None, None] and recap["verification"]["verified"]
     assert "margin_m" not in json.dumps(recap) and not any("margin" in k for k in recap["facts"])
+    assert not any(n in json.dumps(recap["texts"]) for n in ("0.17", "17 cm", "17cm"))
     assert "(offside by a whisker)" in next(t for t in recap["texts"] if t["lang"] == "en")["recap"]
 
 
@@ -305,3 +308,84 @@ def test_model_replies_follow_the_on_air_rules(demo):
     writer = ScriptedWriter([json.dumps(league, ensure_ascii=False), json.dumps(good, ensure_ascii=False)])
     out = build_recap(cards, state, writer)
     assert out["writer"] == "scripted-model" and out["verification"]["attempts"] == 2 and "league_points_verb" in writer.notes[1]
+
+
+# --- time limits, 429 and the trace of each attempt ------------------------------------------------------
+
+class FakeResponse:
+    """What Agent Framework's Agent.run returns, as far as the recap writer reads it."""
+
+    def __init__(self, text, finish_reason="stop"):
+        self.text, self.finish_reason = text, finish_reason
+        self.usage_details = {"input_token_count": 2400, "output_token_count": 900, "reasoning_output_token_count": 400}
+
+
+class FakeAgent:
+    """Stands in for the Foundry recap agent: replays responses or raises, after `delay` seconds, and records each run. No model call."""
+
+    def __init__(self, *steps, delay=0.0):
+        self.steps, self.delay, self.runs = list(steps), delay, []
+
+    async def run(self, prompt, options=None):
+        self.runs.append({"prompt": prompt, "options": options})
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        step = self.steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+
+class RateLimitError(Exception):
+    status_code = 429
+
+
+TRACE_KEYS = {"attempt", "writer", "verified", "rejected", "finish_reason", "usage", "latency_s", "error"}
+
+
+def test_a_slow_recap_call_is_cut_and_the_template_writes(demo):
+    cards, state, _, recap = demo
+    agent = FakeAgent(FakeResponse(json.dumps(recap["texts"])), delay=1.0)
+    writer = RecapWriter(model="recap-test", agent=agent, timeout_s=0.05)
+    out = build_recap(cards, state, writer)
+    v = out["verification"]
+    assert out["writer"] == "template" and v["verified"] and v["attempts"] == 1 and len(agent.runs) == 1 and v["fallback_reason"] == "timeout"
+    assert set(v["attempts_log"][0]) == TRACE_KEYS and v["attempts_log"][0]["error"].startswith("timeout") and out["writer_config"] == writer.config
+    assert RecapWriter(model="recap-test", agent=agent).timeout_s == 45
+
+
+def test_a_rate_limited_recap_is_not_retried(demo):
+    cards, state, _, recap = demo
+    error = RuntimeError("service failed to complete the prompt")
+    error.__cause__ = RateLimitError("Too Many Requests")
+    agent = FakeAgent(error, FakeResponse(json.dumps(recap["texts"])))
+    out = build_recap(cards, state, RecapWriter(model="recap-test", agent=agent))
+    v = out["verification"]
+    assert len(agent.runs) == 1 and out["writer"] == "template" and v["fallback_reason"] == "rate_limit" and "429" in v["attempts_log"][0]["error"]
+
+
+def test_a_recap_cut_by_the_token_limit_is_asked_again_with_more_room(demo):
+    cards, state, _, recap = demo
+    good = json.dumps(recap["texts"], ensure_ascii=False)
+    agent = FakeAgent(FakeResponse(good[:80], "length"), FakeResponse(good))
+    writer = RecapWriter(model="recap-test", effort="medium", agent=agent)
+    out = build_recap(cards, state, writer)
+    v = out["verification"]
+    assert out["writer"] == "recap-test" and v["verified"] and v["attempts"] == 2 and v["fallback_reason"] is None
+    assert agent.runs[0]["options"] is None and agent.runs[1]["options"] == {"max_tokens": 6000}
+    assert [(a["finish_reason"], a["verified"]) for a in v["attempts_log"]] == [("length", False), ("stop", True)] and v["attempts_log"][0]["error"].startswith("truncated")
+    assert v["attempts_log"][1]["usage"] == {"input_tokens": 2400, "output_tokens": 900, "reasoning_tokens": 400}
+    assert "\nVerifier feedback on your previous draft: your previous reply was cut off" in agent.runs[1]["prompt"]
+    assert out["writer_config"] == {"deployment": "recap-test", "effort": "medium", "max_tokens": 3000, "prompt_sha": writer.config["prompt_sha"]} and len(writer.config["prompt_sha"]) == 12
+
+
+def test_a_recap_cut_twice_goes_to_the_template(demo):
+    cards, state, _, recap = demo
+    cut = FakeResponse(json.dumps(recap["texts"])[:80], "length")
+    out = build_recap(cards, state, RecapWriter(model="recap-test", agent=FakeAgent(cut, cut)))
+    assert out["writer"] == "template" and out["verification"]["verified"] and out["verification"]["fallback_reason"] == "truncated"
+
+
+def test_a_template_recap_has_no_trace(demo):
+    _, _, _, recap = demo
+    assert (recap["verification"]["attempts_log"], recap["verification"]["fallback_reason"], recap["writer_config"]) == ([], None, None)

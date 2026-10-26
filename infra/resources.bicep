@@ -20,7 +20,6 @@ param foundryAccountId string = ''
 param foundryProjectEndpoint string = ''
 
 param foundryModel string = 'gpt-5.4-nano'
-param foundryModelFallback string = 'gpt-5-mini'
 param foundryReasoningEffort string = 'medium'
 
 @description('Role granted to the worker on the Foundry account. Default: Foundry User (formerly Azure AI User), the role Microsoft documents for calling models through a Foundry project.')
@@ -455,10 +454,6 @@ var workerEnv = [
   {
     name: 'FOUNDRY_MODEL'
     value: foundryModel
-  }
-  {
-    name: 'FOUNDRY_MODEL_FALLBACK'
-    value: foundryModelFallback
   }
   {
     name: 'FOUNDRY_REASONING_EFFORT'

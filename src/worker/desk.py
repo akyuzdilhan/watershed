@@ -2,7 +2,7 @@
 
 Statuses: `pending` (written and checked, waiting for a producer), `approved` (on air), `rejected`, `retracted` (the feed took the moment back; a card that was on air must come off). A rewrite (goal credited to another player) writes a new version, which waits for approval again. In auto-approve mode (announced to the judges), a verified card goes on air without a click; a card the Verifier failed and the template replaced is approved too, since the template only uses checked fields.
 
-Each card carries the duo's suggested lines (`duo`: text proposed to the commentary team, never voiced), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason and minute; its `margin_cm` stays null) and the duo's lines about it (`duo_ruling`). The offside margin and how close it was (`var_decision.margin_m` and `call`, set by the Spotter) are for the producer only: neither the duo nor the recap gets them, so no line says "by a whisker" or "clear". A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
+Each card carries the duo's suggested lines (`duo`: text proposed to the commentary team, never voiced), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason and minute; its `margin_cm` stays null) and the duo's lines about it (`duo_ruling`). The offside margin (`var_decision.margin_m`, set by the Spotter) is for the producer only: no text on air gives it as a number. How close it was may be said in words, tight ("by a whisker") or clear, from `var_decision.call`. A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
 Who writes what: the cards and their duo by `writer`; the insights and the storyline by `insight_writer` (the card writer when it is None; the live worker passes the template writer, so the model only writes the cards and the recap); the post-match recap by `recap_writer` (`worker.recap.RecapWriter` on Foundry; the recap template when it is None). An insight writer gets the insight's `headline_facts` without the figures kept for the producer (`OFF_AIR_FACTS`: bits, match counts, the stat of the match's ratio, desk values), and the Verifier checks its texts against what it got; the stored document keeps them for the console.
 
@@ -70,11 +70,13 @@ class Desk:
         doc["machine_translated"] = d.machine_translated
         doc["writer"] = d.writer
         doc["duo_writer"] = d.duo_writer
-        doc["verification"] = {"verified": d.report["verified"], "attempts": d.attempts}
+        doc["verification"] = {"verified": d.report["verified"], "attempts": d.attempts, "attempts_log": d.attempts_log, "fallback_reason": d.fallback_reason}
+        doc["writer_config"] = d.writer_config
         warnings = (d.report.get("repetition") or {}).get("warnings", [])
         if warnings:
             doc["verification"]["repetition_warnings"] = len(warnings)
-        self._audit(doc, "written", d.writer, {"verified": d.report["verified"], "attempts": d.attempts})
+        self._audit(doc, "written", d.writer, {"verified": d.report["verified"], "attempts": d.attempts, "attempts_log": d.attempts_log,
+                                               "fallback_reason": d.fallback_reason, "writer_config": d.writer_config})
         if self.auto_approve:
             doc["status"] = "approved"
             self._audit(doc, "approved", "auto-approve")

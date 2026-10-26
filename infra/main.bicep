@@ -24,9 +24,8 @@ param foundryAccountId string = ''
 @description('Foundry project endpoint passed to the worker.')
 param foundryProjectEndpoint string = ''
 
-@description('Main and fallback model deployments, and reasoning effort, passed to the worker.')
+@description('Model deployment and reasoning effort, passed to the worker. No fallback model: the templates are the fallback.')
 param foundryModel string = 'gpt-5.4-nano'
-param foundryModelFallback string = 'gpt-5-mini'
 param foundryReasoningEffort string = 'medium'
 
 @description('Extra worker arguments, for example --auto-approve in judging mode.')
@@ -73,7 +72,6 @@ module resources 'resources.bicep' = {
     foundryAccountId: foundryAccountId
     foundryProjectEndpoint: foundryProjectEndpoint
     foundryModel: foundryModel
-    foundryModelFallback: foundryModelFallback
     foundryReasoningEffort: foundryReasoningEffort
     workerExtraArgs: workerExtraArgs
     workerMinReplicas: workerMinReplicas
