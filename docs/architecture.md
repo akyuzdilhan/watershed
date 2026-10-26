@@ -213,7 +213,7 @@ Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth:
 | Producer approves during a VAR check | Allowed; the card is flagged `under_review`. Known limitation | `Desk.approve` |
 | Correction for a moment without a card | Applied to the match state; no card action | `Spotter.process` |
 | Final whistle | The win probability becomes certain only on `full_time`; before it, never 0% or 100% on air | `SkellamWinProb.minutes_left`, `shown` |
-| Cosmos DB throttled (1,000 RU/s shared) or briefly unavailable | Retried on 408, 429, 449 and 5xx with exponential backoff, jitter and the service's retry-after hint; not load-tested | `with_retry` in `azure_io.py` |
+| Cosmos DB throttled (1,000 RU/s shared) or briefly unavailable | Retried on 408, 429, 449, 500, 502, 503 and 504 with exponential backoff, jitter and the service's retry-after hint; not load-tested | `with_retry` in `azure_io.py` |
 | Logging loop | Log Analytics stops ingesting for the day beyond 0.2 GB | `infra/resources.bicep` |
 
 ## Deployment

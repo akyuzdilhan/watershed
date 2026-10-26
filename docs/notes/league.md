@@ -1,6 +1,6 @@
 # Synthetic League
 
-A light league simulated at score level (N1): 20 fictional clubs, one score per fixture, no event feed. It gives the demo match a season around it (positions, points, what is at stake) and, later, the pre-match expected goals of the demo fixture. Code in `src/league/`, tests in `tests/test_league.py`.
+A light league simulated at score level: 20 fictional clubs, one score per fixture, no event feed. It gives the demo match a season around it (positions, points, what is at stake) and, later, the pre-match expected goals of the demo fixture. Code in `src/league/`, tests in `tests/test_league.py`.
 
 ## Model
 
@@ -18,7 +18,7 @@ A light league simulated at score level (N1): 20 fictional clubs, one score per 
 
 ## Calibration
 
-`python -m league --seed 1 --calibrate 1000` (0.1 s; 0.2 s with `--elite`). Each season draws new strengths. The reference values are the ones of our design notes, recalled and not yet checked against published tables: they must be checked before being quoted in public.
+`python -m league --seed 1 --calibrate 1000` (0.1 s; 0.2 s with `--elite`). Each season draws new strengths. Targets recalled, not yet checked against published tables: they must be checked before being quoted in public.
 
 | Measure | Target | Band (test) | Normal | Elite tier |
 |---|---|---|---|---|
@@ -31,7 +31,7 @@ A light league simulated at score level (N1): 20 fictional clubs, one score per 
 | Goals per match | 2.85 | 2.79 to 2.91 | 2.85 | 2.85 |
 | Seasons with a club on 95 or more | 4 in 30 (13 %) | none | 20.5 % | 39.9 % |
 | Seasons with two clubs on 95 or more | 1 in 30 | none | 1.1 % | 4.9 % |
-| Strongest club champion | 60 to 70 % (our earlier simulation) | none | 62 % | 72 % |
+| Strongest club champion | 60 to 70 % (an earlier simulation) | none | 62 % | 72 % |
 
 The normal setting reproduces the earlier local simulation (88.3, 30.3, 18.5, 24.3 %, 43.7 %, 0.56). The elite tier reproduces its elite figures (92.4 points, 39.1 % and 4.3 %) only with the reading "the two strongest clubs gain 0.13": two clubs picked at random and shifted by 0.30 give 89.0 points and 25 % of seasons with a club on 95, because a +0.30 shift is about one standard deviation, below where the best club of 20 already sits. The tier is off by default.
 
@@ -76,7 +76,7 @@ python -m league demo --seed 1 --matchday 30
 
 ## What is imperfect
 
-- The reference values are recalled, not sourced; the bands are wide enough to pass on any of them. They are not quoted in public.
+- The reference values are recalled, not sourced; the bands are wide enough to pass on any of them. The README does not quote them.
 - mu and h are fixed, not drawn per season (season environment), and there are no promoted clubs or strengths carried from one season to the next.
 - Strengths are constant through the season: no injuries, form or managers (all below the noise of about 7 points per club and season, or channelled elsewhere in the design).
 - Tie-breakers stop at goals scored, then club index; the Premier League goes on to head-to-head points, away goals in head-to-head and a play-off.
