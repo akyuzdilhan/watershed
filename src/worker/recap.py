@@ -12,14 +12,13 @@ Usage:
 import argparse
 import asyncio
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
 
 from worker.duo import fr_de, fr_typography
-from worker.writer import (LANGUAGES, MACHINE_TRANSLATED, air_issues, league_points_field, names_ok, no_em_dash, offside_call, sentences, shown, var_ruling, verify,
-                           word_count)
+from worker.writer import (LANGUAGES, MACHINE_TRANSLATED, AgentWriter, air_issues, league_points_field, model_attempts, names_ok, no_em_dash, offside_call, sentences,
+                           shown, var_ruling, verify, word_count)
 
 MAX_WORDS = {"recap": 100, "fan": 50, "analyst": 60}
 HALF_TIME_GAP_S = 120  # the match clock goes back to 45:00 at the start of the second half
@@ -473,17 +472,16 @@ for _section, _limit in MAX_WORDS.items():  # the limits the Verifier applies
     RECAP_INSTRUCTIONS = RECAP_INSTRUCTIONS.replace(f"<{_section}_words>", str(_limit))
 
 
-class RecapWriter:
-    """The recap agent on Microsoft Foundry (Agent Framework, Responses API), with get_recap_facts as a function tool. Same set-up as `writer.FoundryWriter`."""
+class RecapWriter(AgentWriter):
+    """The recap agent on Microsoft Foundry (Agent Framework, Responses API), with get_recap_facts as a function tool. Same set-up as `writer.FoundryWriter`
+    (`writer.AgentWriter`: bounded tool loop, time limit per call, trace of the last call)."""
 
-    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int = 3000) -> None:
-        from agent_framework import Agent, tool
-        from agent_framework.foundry import FoundryChatClient
-        from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
+    instructions = RECAP_INSTRUCTIONS
+    agent_name = "recap-writer"
 
-        self.model = model or os.environ["FOUNDRY_MODEL"]
-        self.name = self.model
-        self.facts: dict[str, tuple[dict, dict]] = {}
+    def tool(self):
+        from agent_framework import tool
+
         store = self.facts
 
         @tool(approval_mode="never_require")
@@ -494,21 +492,14 @@ class RecapWriter:
             facts, meanings = store[match_id]
             return json.dumps({"facts": facts, "field_meanings": meanings}, ensure_ascii=False)
 
-        credential = ChainedTokenCredential(ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID")), AzureCliCredential())
-        client = FoundryChatClient(project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"], model=self.model, credential=credential)
-        options: dict[str, Any] = {"max_tokens": max_tokens}
-        effort = effort or os.environ.get("FOUNDRY_REASONING_EFFORT")
-        if effort:
-            options["reasoning"] = {"effort": effort}
-        self.agent = Agent(client=client, name="recap-writer", instructions=RECAP_INSTRUCTIONS, tools=[get_recap_facts], default_options=options)
+        return get_recap_facts
 
-    async def write_async(self, match_id: str, facts: tuple[dict, dict], languages: list[str], note: str | None = None) -> str:
+    async def write_async(self, match_id: str, facts: tuple[dict, dict], languages: list[str], note: str | None = None, max_tokens: int | None = None) -> str:
         self.facts[match_id] = facts
         prompt = f"Write the post-match texts for this request: {json.dumps({'match_id': match_id, 'languages': languages})}"
         if note:
-            prompt += f"\nNote from the previous attempt: {note}"
-        response = await self.agent.run(prompt)
-        return response.text
+            prompt += f"\nVerifier feedback on your previous draft: {note}"
+        return await self.run(prompt, max_tokens)
 
 
 def failures(report: dict) -> str:
@@ -521,32 +512,37 @@ def failures(report: dict) -> str:
 
 async def recap_async(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, calls_left: int = 2,
                       disallowed: list[dict] | None = None, storyline: dict | None = None) -> dict:
-    """Analyses the match, writes and verifies the texts: the model, one retry, then the template. `disallowed` overrides the goals ruled out read from the cards; `storyline` (the pre-match document) adds what the result changed in the table."""
+    """Analyses the match, writes and verifies the texts: the model, one retry, then the template (`writer.model_attempts`: no retry after a timeout, a 429,
+    a network error or a 5xx; a reply cut by the token limit retried once with more room). `disallowed` overrides the goals ruled out read from the cards;
+    `storyline` (the pre-match document) adds what the result changed in the table. The trace (`verification.attempts_log`, `fallback_reason`,
+    `writer_config`) follows the contract of the cards."""
     analysis = analyse(cards, state, disallowed)
     facts, meanings, roles = recap_facts(analysis, fan_side)
     if storyline is not None and analysis["final"]:
         season_facts(storyline, analysis, facts, meanings, roles)
-    attempts, note, texts, report, name = 0, None, None, None, "template"
-    if writer is not None and not isinstance(writer, RecapTemplateWriter):
-        for _ in range(min(2, calls_left)):
-            attempts += 1
-            try:
-                text = await writer.write_async(state["match_id"], (facts, meanings), languages, note)
-            except Exception as error:  # a model or network failure falls through to the template
-                text = json.dumps({"error": f"{type(error).__name__}: {error}"[:300]})
-            texts, report = verify_recap(text, languages, facts, cards)
-            if report["verified"]:
-                name = writer.name
-                break
-            note = failures(report)
+    texts, report, name, log, reason = None, None, "template", [], None
+    model = writer is not None and not isinstance(writer, RecapTemplateWriter)
+    if model:
+        async def call(note: str | None, max_tokens: int | None) -> str:
+            return await writer.write_async(state["match_id"], (facts, meanings), languages, note, **({"max_tokens": max_tokens} if max_tokens else {}))
+
+        def check(reply: str) -> tuple[bool, list[str], str]:
+            nonlocal texts, report
+            texts, report = verify_recap(reply, languages, facts, cards)
+            return report["verified"], [failures(report)] if not report["verified"] else [], failures(report)
+
+        log, reason = await model_attempts(writer, calls_left, call, check)
+        if reason is None:
+            name = writer.name
     if not report or not report["verified"]:
         texts, report = verify_recap(RecapTemplateWriter(roles).write(facts, languages), languages, facts, cards)
+    config = getattr(writer, "config", None) if log else None
     cited = [analysis["turning_point"]["card_id"]] if "turning_point" in analysis else []
     cited += [m["card_id"] for m in analysis["biggest_moments"] if m["card_id"] not in cited]
     return {"id": f"recap-{state['match_id']}", "type": "recap", "match_id": state["match_id"], "final": analysis["final"], "fan_team": facts["fan_team"],
             "analyst_team": facts["analyst_team"], "texts": texts, "machine_translated": sorted(MACHINE_TRANSLATED & set(languages)), "writer": name,
-            "verification": {"verified": report["verified"], "attempts": attempts, "report": report}, "cited_cards": cited,
-            "analysis": analysis, "facts": facts, "field_meanings": meanings}
+            "verification": {"verified": report["verified"], "attempts": len(log), "report": report, "attempts_log": log, "fallback_reason": reason if model else None},
+            "writer_config": config if isinstance(config, dict) else None, "cited_cards": cited, "analysis": analysis, "facts": facts, "field_meanings": meanings}
 
 
 def build_recap(cards: list[dict], state: dict, writer=None, languages: list[str] = list(LANGUAGES), fan_side: str | None = None, disallowed: list[dict] | None = None,

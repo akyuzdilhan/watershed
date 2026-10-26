@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import json
 import re
@@ -68,12 +69,13 @@ def test_no_retracted_card_is_cited(demo):
 
 def test_recap_tells_the_goals_ruled_out_and_why(demo):
     _, _, _, recap = demo
-    assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
-        ("63'", "Dorian Lightfoot", "offside", None), ("69'", "Vito Valtonen", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
+    goals = recap["analysis"]["disallowed_goals"]
+    assert [(g["minute_label"], g["reason"], g["margin_cm"]) for g in goals] == [("63'", "offside", None), ("69'", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
     texts = {t["lang"]: t for t in recap["texts"]}
-    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
-    assert "(hors-jeu)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
-    assert "(fuera de juego)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
+    # how close the offside was is said in words (tight: by a whisker), from the worker's var_decision; never the margin
+    assert f"VAR ruled out {goals[0]['player']}'s goal at 63' (offside by a whisker) and {goals[1]['player']}'s goal at 69' (handball)." in texts["en"]["recap"]
+    assert "(hors-jeu d'un rien)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
+    assert "(fuera de juego por muy poco)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]
     claims = {(c["source_field"], c["value"]) for t in recap["texts"] for c in t["claims"]}
     assert ("disallowed_2_minute", 69) in claims and not any("25" in t["recap"] for t in recap["texts"])
@@ -257,14 +259,15 @@ def test_the_margin_in_var_decision_is_never_copied_into_the_recap(demo):
     given = []
     for c in json.loads(json.dumps(cards)):
         if c.get("ruled_out"):
-            margin = c["ruled_out"]["margin_cm"]
-            c["var_decision"] = {"reason": c["ruled_out"]["cause"], "call": "tight" if margin is not None else None, "margin_m": margin / 100 if margin is not None else None}
+            offside = c["ruled_out"]["reason"] == "offside"
+            c["var_decision"] = {"reason": c["ruled_out"]["cause"], "call": "tight" if offside else None, "margin_m": 0.17 if offside else None}
             c["ruled_out"]["margin_cm"] = None
         given.append(c)
     assert any(c.get("var_decision", {}).get("margin_m") for c in given)
     recap = build_recap(given, state)
     assert [g["margin_cm"] for g in recap["analysis"]["disallowed_goals"]] == [None, None] and recap["verification"]["verified"]
     assert "margin_m" not in json.dumps(recap) and not any("margin" in k for k in recap["facts"])
+    assert not any(n in json.dumps(recap["texts"]) for n in ("0.17", "17 cm", "17cm"))
     assert "(offside by a whisker)" in next(t for t in recap["texts"] if t["lang"] == "en")["recap"]
 
 
@@ -305,3 +308,84 @@ def test_model_replies_follow_the_on_air_rules(demo):
     writer = ScriptedWriter([json.dumps(league, ensure_ascii=False), json.dumps(good, ensure_ascii=False)])
     out = build_recap(cards, state, writer)
     assert out["writer"] == "scripted-model" and out["verification"]["attempts"] == 2 and "league_points_verb" in writer.notes[1]
+
+
+# --- time limits, 429 and the trace of each attempt ------------------------------------------------------
+
+class FakeResponse:
+    """What Agent Framework's Agent.run returns, as far as the recap writer reads it."""
+
+    def __init__(self, text, finish_reason="stop"):
+        self.text, self.finish_reason = text, finish_reason
+        self.usage_details = {"input_token_count": 2400, "output_token_count": 900, "reasoning_output_token_count": 400}
+
+
+class FakeAgent:
+    """Stands in for the Foundry recap agent: replays responses or raises, after `delay` seconds, and records each run. No model call."""
+
+    def __init__(self, *steps, delay=0.0):
+        self.steps, self.delay, self.runs = list(steps), delay, []
+
+    async def run(self, prompt, options=None):
+        self.runs.append({"prompt": prompt, "options": options})
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        step = self.steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+
+class RateLimitError(Exception):
+    status_code = 429
+
+
+TRACE_KEYS = {"attempt", "writer", "verified", "rejected", "finish_reason", "usage", "latency_s", "error"}
+
+
+def test_a_slow_recap_call_is_cut_and_the_template_writes(demo):
+    cards, state, _, recap = demo
+    agent = FakeAgent(FakeResponse(json.dumps(recap["texts"])), delay=1.0)
+    writer = RecapWriter(model="recap-test", agent=agent, timeout_s=0.05)
+    out = build_recap(cards, state, writer)
+    v = out["verification"]
+    assert out["writer"] == "template" and v["verified"] and v["attempts"] == 1 and len(agent.runs) == 1 and v["fallback_reason"] == "timeout"
+    assert set(v["attempts_log"][0]) == TRACE_KEYS and v["attempts_log"][0]["error"].startswith("timeout") and out["writer_config"] == writer.config
+    assert RecapWriter(model="recap-test", agent=agent).timeout_s == 45
+
+
+def test_a_rate_limited_recap_is_not_retried(demo):
+    cards, state, _, recap = demo
+    error = RuntimeError("service failed to complete the prompt")
+    error.__cause__ = RateLimitError("Too Many Requests")
+    agent = FakeAgent(error, FakeResponse(json.dumps(recap["texts"])))
+    out = build_recap(cards, state, RecapWriter(model="recap-test", agent=agent))
+    v = out["verification"]
+    assert len(agent.runs) == 1 and out["writer"] == "template" and v["fallback_reason"] == "rate_limit" and "429" in v["attempts_log"][0]["error"]
+
+
+def test_a_recap_cut_by_the_token_limit_is_asked_again_with_more_room(demo):
+    cards, state, _, recap = demo
+    good = json.dumps(recap["texts"], ensure_ascii=False)
+    agent = FakeAgent(FakeResponse(good[:80], "length"), FakeResponse(good))
+    writer = RecapWriter(model="recap-test", effort="medium", agent=agent)
+    out = build_recap(cards, state, writer)
+    v = out["verification"]
+    assert out["writer"] == "recap-test" and v["verified"] and v["attempts"] == 2 and v["fallback_reason"] is None
+    assert agent.runs[0]["options"] is None and agent.runs[1]["options"] == {"max_tokens": 6000}
+    assert [(a["finish_reason"], a["verified"]) for a in v["attempts_log"]] == [("length", False), ("stop", True)] and v["attempts_log"][0]["error"].startswith("truncated")
+    assert v["attempts_log"][1]["usage"] == {"input_tokens": 2400, "output_tokens": 900, "reasoning_tokens": 400}
+    assert "\nVerifier feedback on your previous draft: your previous reply was cut off" in agent.runs[1]["prompt"]
+    assert out["writer_config"] == {"deployment": "recap-test", "effort": "medium", "max_tokens": 3000, "prompt_sha": writer.config["prompt_sha"]} and len(writer.config["prompt_sha"]) == 12
+
+
+def test_a_recap_cut_twice_goes_to_the_template(demo):
+    cards, state, _, recap = demo
+    cut = FakeResponse(json.dumps(recap["texts"])[:80], "length")
+    out = build_recap(cards, state, RecapWriter(model="recap-test", agent=FakeAgent(cut, cut)))
+    assert out["writer"] == "template" and out["verification"]["verified"] and out["verification"]["fallback_reason"] == "truncated"
+
+
+def test_a_template_recap_has_no_trace(demo):
+    _, _, _, recap = demo
+    assert (recap["verification"]["attempts_log"], recap["verification"]["fallback_reason"], recap["writer_config"]) == ([], None, None)

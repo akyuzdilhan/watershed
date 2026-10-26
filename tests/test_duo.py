@@ -244,7 +244,7 @@ def test_var_ruling_is_recorded_with_its_reason_and_margin(demo):
     for card in (offside, handball):
         facts, _ = ruling_facts(card, TEAMS)
         assert verify_duo(card["duo_ruling"], LANGS, facts)["verified"]
-    assert not any(w in l["line"].lower() for l in offside["duo_ruling"] for w in ("whisker", "that close", "d'un rien", "si peu", "por muy poco", "tan poco"))  # nor how close it was
+    assert any(w in l["line"].lower() for l in offside["duo_ruling"] for w in ("whisker", "that close", "d'un rien", "si peu", "por muy poco", "tan poco"))  # how close it was, in words
     assert not any(w in l["line"] for l in offside["duo_ruling"] for w in ("25", "cm", "centim"))  # the margin never goes on air
     assert all("VAR" in " ".join(l["line"] for l in handball["duo_ruling"] if l["lang"] == lang) or lang != "en" for lang in LANGS)
 
@@ -428,7 +428,10 @@ def test_write_insight_falls_back_to_the_template_after_one_retry():
     invented = json.dumps({"texts": [{"headline": "Lightfoot record", "why": "Lightfoot scores 4, a first in 19,000 matches.", "lang": "en", "claims": []}], "duo": []})
     writer = FakeWriter([invented, invented])
     doc = Desk(MemorySink(), writer, languages=("en",)).write_insight(json.loads(json.dumps(INSIGHT)), TEAMS)
-    assert doc["writer"] == "template" and doc["verification"] == {"verified": True, "attempts": 2} | ({"repetition_warnings": doc["verification"]["repetition_warnings"]} if "repetition_warnings" in doc["verification"] else {})
+    v = doc["verification"]
+    assert doc["writer"] == "template" and v["verified"] and v["attempts"] == 2 and v["fallback_reason"] == "verifier"
+    assert [(a["attempt"], a["verified"], bool(a["rejected"]), a["error"]) for a in v["attempts_log"]] == [(1, False, True, None), (2, False, True, None)]
+    assert doc["writer_config"] is None  # a writer without a Foundry configuration
     assert "unclaimed" in writer.calls[1]["note"] or "bad_claims" in writer.calls[1]["note"]
 
 
