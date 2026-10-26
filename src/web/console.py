@@ -26,6 +26,7 @@ from worker.writer import card_facts, claim_ok, offside_call, verify, verify_duo
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
 LANG_OPTIONS = [{"value": code, "label": name} for code, name in LANG_NAMES.items()]
 DEFAULT_LANG = "en"
+LANG_NOTE = "Texts in EN/FR/ES; console labels in English"
 AI_WRITTEN = AI_WRITTEN_LABEL["en"]  # a language the model and the templates write directly, with no native review
 MOMENTS = {"goal": "Goal", "save": "Save", "red_card": "Red card", "chance": "Chance"}
 STATUS = {"proposed": ("Writing", "st-proposed"), "pending": ("Pending", "st-pending"), "approved": ("On air", "st-approved"),
@@ -86,21 +87,31 @@ def speaker_name(code: str | None) -> str:
     return p.short if p else (code or "?")
 
 
-def claims_view(t: dict, duo_lines: list[dict], facts: dict, meanings: dict) -> html.Div:
-    """Every number of a language with the field it was taken from and what that field means: the text's claims, then those of the suggested lines."""
-    rows = []
-    for where, claims in [("text", t.get("claims") or [])] + [(speaker_name(d.get("speaker")), d.get("claims") or []) for d in duo_lines]:
+def claim_rows(texts: list[dict], duo_lines: list[dict], facts: dict, meanings: dict) -> list[dict]:
+    """Every number of the texts and the suggested lines, one row per value and field (`value`, `field`, `meaning`, `ok`, `where`: "text", a speaker), in order of first use."""
+    rows: dict[tuple, dict] = {}
+    for where, claims in [("text", t.get("claims") or []) for t in texts] + [(speaker_name(d.get("speaker")), d.get("claims") or []) for d in duo_lines]:
         for c in claims if isinstance(claims, list) else []:
             if not isinstance(c, dict):
                 continue
             field = str(c.get("source_field", ""))
-            ok = claim_ok(c, facts)
-            rows.append(html.Tr([html.Td(_num(c.get("value")), className="claim-value"), html.Td(field_label(field), className="fact-key", title=field),
-                                 html.Td(meanings.get(field) or ("" if ok else "not a fact of this card"), className="muted small" if ok else "claim-bad small"),
-                                 html.Td(where, className="muted small")]))
-    if not rows:
-        return html.Div("No number in this language.", className="muted small")
-    return html.Table([html.Tbody(rows)], className="claims")
+            row = rows.setdefault((_num(c.get("value")), field), {"value": _num(c.get("value")), "field": field, "meaning": meanings.get(field, ""), "ok": claim_ok(c, facts), "where": []})
+            if where not in row["where"]:
+                row["where"].append(where)
+    return list(rows.values())
+
+
+CLAIMS_NOTE = "Each number in the text and the suggested lines, the fact it is taken from, and what that fact means. The Verifier rejects any number without a fact."
+
+
+def claims_view(rows: list[dict]) -> html.Details:
+    """The claims folded and closed by default: one row per number and fact, where it is used ("text, Joss")."""
+    head = html.Tr([html.Th(h) for h in ("Number", "Fact", "Meaning", "Used in")])
+    body = [html.Tr([html.Td(r["value"], className="claim-value"), html.Td(field_label(r["field"]), className="fact-key", title=r["field"]),
+                     html.Td(r["meaning"] or ("" if r["ok"] else "not a fact of this card"), className="muted small" if r["ok"] else "claim-bad small"),
+                     html.Td(", ".join(r["where"]), className="muted small")]) for r in rows]
+    inside = [html.P(CLAIMS_NOTE, className="muted small"), html.Table([html.Thead(head), html.Tbody(body)], className="claims") if rows else html.Div("No number in this language.", className="muted small")]
+    return html.Details([html.Summary(f"Where each number comes from ({len(rows)})"), *inside], open=False, className="fold fold-claims")
 
 
 def _issue(x) -> str:
@@ -114,8 +125,8 @@ def _issue(x) -> str:
 TEXT_CHECKS = (("unclaimed_numbers", "every number claimed"), ("bad_claims", "claims match the facts"), ("wrong_unit", "units"), ("style_errors", "style"))
 
 
-def checks_view(lang: str, t: dict, duo_lines: list[dict], facts: dict, style: bool) -> html.Div:
-    """The Verifier's checks on one language as it stands (`worker.writer.verify` and `verify_duo`, no model): what passes, what fails, the warnings."""
+def checks_view(lang: str, t: dict, duo_lines: list[dict], facts: dict, style: bool) -> tuple[bool, html.Div]:
+    """(passes, pills): the Verifier's checks on one language as it stands (`worker.writer.verify` and `verify_duo`, no model), what passes, what fails, the style notes."""
     _, report = verify(json.dumps([t], ensure_ascii=False), [lang], facts, style=style)
     entry = (report.get("cards") or [{}])[0]
     pills, ok = [], bool(entry.get("verified"))
@@ -141,18 +152,19 @@ def checks_view(lang: str, t: dict, duo_lines: list[dict], facts: dict, style: b
         ok = ok and bool(d["verified"])
     pills += [html.Span(w, className="check check-warn") for w in warnings]
     verdict = html.Span("Verifier: passes" if ok else "Verifier: fails", className="badge " + ("st-approved" if ok else "st-retracted"))
-    return html.Div([verdict, *pills], className="checks")
+    return ok, html.Div([verdict, *pills], className="checks")
 
 
-def language_block(card: dict, t: dict, verdicts: dict | None, facts: dict, meanings: dict, style: bool) -> html.Div:
+def language_block(card: dict, t: dict, verdicts: dict | None) -> html.Div:
     lang = t.get("lang", "")
     mt = set(card.get("machine_translated") or [])
-    duo_lines = [d for d in card.get("duo") or [] if isinstance(d, dict) and d.get("lang") == lang]
     return html.Div([html.Div([html.Span(LANG_NAMES.get(lang, lang), className="lang"), *([html.Span(AI_WRITTEN, className="badge st-mt")] if lang in mt else [])],
                               className="lang-row"),
-                     *panels.text_lines(card, t, verdicts, "d"),
-                     claims_view(t, duo_lines, facts, meanings),
-                     checks_view(lang, t, duo_lines, facts, style)], className="text-block")
+                     *panels.text_lines(card, t, verdicts, "d")], className="text-block")
+
+
+def duo_of(card: dict, lang: str) -> list[dict]:
+    return [d for d in card.get("duo") or [] if isinstance(d, dict) and d.get("lang") == lang]
 
 
 def _is_num(x) -> bool:
@@ -211,6 +223,51 @@ def _usage(a: dict) -> str:
     return " / ".join(_num(u[k]) if u.get(k) is not None else "-" for k in ("input_tokens", "output_tokens", "reasoning_tokens"))
 
 
+def _count(x) -> str:
+    """A count as shown: a list by its length ("none" when empty), never as "[]"."""
+    if isinstance(x, (list, tuple)):
+        return str(len(x)) if x else "none"
+    return _num(x) if x is not None else "-"
+
+
+def latency(doc: dict) -> float | None:
+    """Seconds the model attempts took, from `verification.attempts_log`; None without a timed attempt."""
+    log = (doc.get("verification") or {}).get("attempts_log") if isinstance(doc.get("verification"), dict) else None
+    times = [a["latency_s"] for a in log if isinstance(a, dict) and _is_num(a.get("latency_s"))] if isinstance(log, list) else []
+    return sum(times) if times else None
+
+
+def status_words(card: dict, audit: list[dict], read_only: bool) -> str:
+    """Where the card stands, with who decided: "on air, approved by auto-approve", "waiting for a producer", "retracted by the feed (VAR offside)"."""
+    status = card.get("status")
+    if status == "retracted":
+        reason = var_reason(card)
+        why = f" (VAR {VAR_REASONS.get(reason, readable(reason) or 'decision').lower()})" if reason is not None else ""
+        return ("retracted on air" if card.get("retracted_on_air") else "retracted before air") + why
+    if status in ("approved", "rejected"):
+        word = "approved" if status == "approved" else "rejected"
+        entries = [e for e in audit if e.get("card_id") == card["id"] and e.get("action") == word and e.get("by")] or [h for h in card.get("history") or [] if h.get("action") == word]
+        who = f" by {actor(entries[-1]['by'], word, card, read_only)}" if entries else ""
+        return ("on air, approved" if status == "approved" else "rejected") + who
+    return "waiting for a producer" if status == "pending" else "being written"
+
+
+def summary_line(card: dict, audit: list[dict], rows: list[dict], verified: bool, read_only: bool) -> html.Div:
+    """One line a judge reads first: the verdict, how many numbers are traced to a fact, the writer, the time the model took, where the card stands."""
+    bad = [r for r in rows if not r["ok"]]
+    numbers = ("no number to trace" if not rows else f"every number traced to a fact ({len(rows)})" if not bad else f"{len(bad)} of {len(rows)} numbers without a fact")
+    writer = card.get("writer") or "?"
+    parts = [numbers, "written by the templates" if writer == "template" else writer]
+    secs = latency(card)
+    if secs is not None:
+        parts.append(f"{secs:.1f} s")
+    if card.get("under_review") and card.get("status") != "retracted":
+        parts.append("VAR check under way")
+    parts.append(status_words(card, audit, read_only))
+    return html.Div([html.Span("Verified" if verified else "Not verified", className="badge " + ("st-approved" if verified else "st-retracted")),
+                     html.Span(" · ".join(parts), className="summary-text")], className="summary")
+
+
 def writing_trace(doc: dict, read_only: bool) -> list:
     """The writing trace when the document carries it: one row per model attempt (`verification.attempts_log`: writer, verified, rejected, finish reason, tokens, latency), then for a producer only, folded under "Producer details", the error of each attempt, why the templates took over (`fallback_reason`, which can hold a service's error message) and the writer settings (`writer_config`). Nothing when the fields are missing."""
     v = doc.get("verification") if isinstance(doc.get("verification"), dict) else {}
@@ -219,7 +276,7 @@ def writing_trace(doc: dict, read_only: bool) -> list:
     if log:
         head = html.Tr([html.Th(h) for h in ("#", "writer", "verified", "rejected", "finish", "tokens in / out / reasoning", "latency")])
         rows = [html.Tr([html.Td(_num(a.get("attempt", i + 1))), html.Td(str(a.get("writer") or "?")), html.Td(_num(a.get("verified")) if a.get("verified") is not None else "-"),
-                         html.Td(_num(a.get("rejected")) if a.get("rejected") is not None else "-"), html.Td(str(a.get("finish_reason") or "-")), html.Td(_usage(a)),
+                         html.Td(_count(a.get("rejected"))), html.Td(str(a.get("finish_reason") or "-")), html.Td(_usage(a)),
                          html.Td(f"{a['latency_s']:.1f} s" if _is_num(a.get("latency_s")) else "-")])
                 for i, a in enumerate(log)]
         out.append(html.Table([html.Thead(head), html.Tbody(rows)], className="facts attempts"))
@@ -267,22 +324,29 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     facts, meanings = facts_of(card, teams)
     texts = shown_texts(card, lang)
     shown_lang = None if lang is None else (texts[0].get("lang") if texts else lang)
-    blocks = [language_block(card, t, verdicts, facts, meanings, style=bool(teams)) for t in texts] or [html.Div("Not written yet.", className="muted")]
+    blocks = [language_block(card, t, verdicts) for t in texts] or [html.Div("Not written yet.", className="muted")]
+    duo_lines = [d for t in texts for d in duo_of(card, t.get("lang", ""))]
+    rows = claim_rows(texts, duo_lines, facts, meanings)
+    checks = [checks_view(t.get("lang", ""), t, duo_of(card, t.get("lang", "")), facts, style=bool(teams)) for t in texts]
     v = card.get("verification") or {}
-    reps = v.get("repetition_warnings") or 0
-    verification = html.Div(
-        [html.Span("Verified" if v.get("verified") else "Not verified", className="badge " + ("st-approved" if v.get("verified") else "st-retracted")),
-         html.Span(f" when written: writer {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s), "
-                   + (f"{reps} repetition warning(s) (an opening, phrase or tic already used in this match)" if reps else "no repetition warning"), className="muted"),
-         *writing_trace(card, read_only)]
-    ) if v else html.Div("Not checked yet.", className="muted")
+    verified = bool(v.get("verified")) and (not teams or all(ok for ok, _ in checks))  # the check as it stands needs both clubs' names
+    checks = [c for _, c in checks]
     out = [card_head(card, read_only)] if head else []
+    out += [html.Div(blocks), summary_line(card, audit, rows, verified, read_only) if v or texts else html.Div("Not checked yet.", className="muted")]
     ruling = panels.duo_block({"id": card["id"], "duo": card.get("duo_ruling")}, lang=shown_lang) if card.get("duo_ruling") else None
     if ruling is not None:
         out += [html.H3("On the VAR ruling"), html.P("What the duo can say about the goal ruled out. Proposed text, never voiced.", className="muted small"), ruling]
     duo = panels.duo_block(card, lang=shown_lang, verdicts=verdicts, pane="d")
-    suggested = [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo] if duo is not None else []
-    out += [html.Div(blocks), *suggested, html.H3("Verification"), verification, html.H3("History"), history_view(card, audit, read_only)]
+    if duo is not None:
+        out += [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo]
+    out.append(claims_view(rows))
+    reps = v.get("repetition_warnings") or 0
+    when = html.Div(f"When written: {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s), "
+                    + (f"{reps} style note(s): an opening, phrase or tic already used in this match" if reps else "no style note"), className="muted small") if v else None
+    labelled = [html.Div([html.Span(LANG_NAMES.get(t.get("lang", ""), t.get("lang", "")), className="lang"), c], className="check-lang") for t, c in zip(texts, checks)] if len(texts) > 1 else checks
+    inside = [html.P("The Verifier's checks on the text as it stands, how it was written, and every decision on the card.", className="muted small"),
+              *labelled, *([when] if when is not None else []), *writing_trace(card, read_only), html.H3("History"), history_view(card, audit, read_only)]
+    out.append(html.Details([html.Summary("Verification and history"), *inside], open=False, className="fold fold-verification"))
     if not read_only:
         out += [html.H3("Producer feedback"), panels.fb_stats(feedback or [])]
     return html.Div(out)
@@ -596,8 +660,8 @@ def layout(user: str | None) -> html.Div:
                                                 title="The goal may still be ruled out: it goes on air now, the confirmation is audited"),
                                     html.Button("Edit", id="c-edit", className="btn", disabled=True),
                                     html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden),
-                          dcc.RadioItems(id="c-lang", options=LANG_OPTIONS, value=DEFAULT_LANG, className="view-switch lang-switch", inputClassName="view-radio",
-                                         labelClassName="view-label")], className="detail-bar"),
+                          html.Div([dcc.RadioItems(id="c-lang", options=LANG_OPTIONS, value=DEFAULT_LANG, className="view-switch", inputClassName="view-radio",
+                                                   labelClassName="view-label"), html.Span(LANG_NOTE, className="muted small")], className="lang-switch")], className="detail-bar"),
                 html.Div(id="c-message", className="message", role="status"),
                 html.Div(id="c-edit-panel", className="edit-panel"),
                 html.Div([html.Button("Approve edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],

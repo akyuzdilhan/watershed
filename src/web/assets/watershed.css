@@ -71,7 +71,14 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .detail-head { padding-bottom: 4px; }
 .detail-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .detail-bar .actions { margin-top: 10px; }
-.lang-switch { margin-top: 10px; margin-left: auto; }
+.lang-switch { margin-top: 10px; margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.summary { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; color: var(--ink-2); font-size: 13px; border-bottom: 1px solid var(--line); }
+.fold { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+.fold > summary { cursor: pointer; color: var(--ink-2); font-weight: 600; font-size: 13px; }
+.fold[open] > summary { margin-bottom: 6px; }
+.fold h3 { margin-top: 12px; }
+.check-lang { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.claims th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; padding: 1px 10px 1px 0; }
 .attempts { margin-top: 6px; font-size: 12px; }
 .attempts th { text-align: left; color: var(--muted); font-weight: 600; padding: 2px 12px 2px 0; }
 .btn { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px 16px; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }

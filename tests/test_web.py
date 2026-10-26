@@ -206,6 +206,10 @@ def text_blocks(view) -> list:
     return find(view, lambda c: getattr(c, "className", "") == "text-block")
 
 
+def folds(view, cls: str) -> list:
+    return find(view, lambda c: cls in (getattr(c, "className", "") or "").split())
+
+
 def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(desk):
     save, teams = card_at(desk, "72'"), desk.state(MATCH)["teams"]
     _, meanings = console.facts_of(save, teams)
@@ -216,20 +220,60 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
     for c in worth:
         assert f"{c['value']:g} {console.field_label(c['source_field'])} {meanings[c['source_field']]}" in text  # the number, its field in words, what the field means
     blocks = text_blocks(view)
-    assert len(blocks) == len(save["texts"])
-    for block, t in zip(blocks, save["texts"]):
-        shown = texts_in(block)
-        assert "Verifier: passes" in shown and "every number claimed" in shown and "claims match the facts" in shown
-        assert all(f"{c['value']:g} {console.field_label(c['source_field'])}" in shown for c in t["claims"])
-        assert {c.title for c in find(block, lambda c: getattr(c, "className", "") == "fact-key")} == {c["source_field"] for c in t["claims"]}  # the key on hover
-    assert "Facts" not in text  # the raw facts table is gone
+    assert len(blocks) == len(save["texts"]) and all("Verifier" not in texts_in(b) for b in blocks)  # the texts alone, the checks folded
+    claims, verification = folds(view, "fold-claims"), folds(view, "fold-verification")
+    assert len(claims) == len(verification) == 1 and claims[0].open is False and verification[0].open is False
+    assert {c.title for c in find(claims[0], lambda c: getattr(c, "className", "") == "fact-key")} == {c["source_field"] for t in save["texts"] for c in t["claims"]}  # the key on hover
+    inside = texts_in(verification[0])
+    assert inside.count("Verifier: passes") == len(save["texts"]) and "every number claimed" in inside and "claims match the facts" in inside and "History" in inside
     reps = save["verification"].get("repetition_warnings", 0)
-    assert (f"{reps} repetition warning(s)" if reps else "no repetition warning") in text
+    assert (f"{reps} style note(s)" if reps else "no style note") in inside and "repetition warning" not in text
+    assert "Facts" not in text  # the raw facts table is gone
     assert len(text_blocks(console.detail(save, [], [], teams))) == 1  # by default, English only
     edited = dict(save, texts=[dict(t, why=t["why"] + " 33%.") if t["lang"] == "en" else t for t in save["texts"]])  # a number no fact backs
-    blocks = text_blocks(console.detail(edited, [], [], teams, lang=None))
-    assert "Verifier: fails" in texts_in(blocks[0]) and "every number claimed: 33" in texts_in(blocks[0])
-    assert all("Verifier: passes" in texts_in(b) for b in blocks[1:])
+    shown = console.detail(edited, [], [], teams, lang=None)
+    checks = texts_in(folds(shown, "fold-verification"))
+    assert "Verifier: fails" in checks and "every number claimed: 33" in checks and checks.count("Verifier: passes") == len(save["texts"]) - 1
+    assert "Not verified" in texts_in(find(shown, lambda c: getattr(c, "className", "") == "summary"))
+
+
+def summary_of(view) -> str:
+    return texts_in(find(view, lambda c: getattr(c, "className", "") == "summary"))
+
+
+def test_the_summary_line_says_verified_traced_writer_time_and_status(desk):
+    teams = desk.state(MATCH)["teams"]
+    goal = card_at(desk, "66'")
+    en = next(t for t in goal["texts"] if t["lang"] == "en")
+    n = len({(f"{c['value']:g}", c["source_field"]) for c in en["claims"] + [c for d in goal["duo"] if d["lang"] == "en" for c in d["claims"]]})
+    line = summary_of(console.detail(goal, desk.audit(MATCH), [], teams))
+    assert line.startswith("Verified") and f"every number traced to a fact ({n})" in line and "written by the templates" in line and "waiting for a producer" in line
+    assert console.decide("approve", MATCH, goal["id"], "ana@example.com")[1]
+    goal = card_at(desk, "66'")
+    assert "on air, approved by Producer" in summary_of(console.detail(goal, desk.audit(MATCH), [], teams))
+    assert "on air, approved by a producer" in summary_of(console.detail(goal, desk.audit(MATCH), [], teams, read_only=True))
+    timed = dict(goal, writer="gpt-5.4-nano", verification=dict(goal["verification"], attempts_log=[{"attempt": 1, "latency_s": 20.1, "rejected": []}, {"attempt": 2, "latency_s": 2.5, "rejected": []}]))
+    line = summary_of(console.detail(timed, desk.audit(MATCH), [], teams, read_only=True))
+    assert "gpt-5.4-nano · 22.6 s · on air" in line and "ana@example.com" not in line
+    view = console.detail(timed, desk.audit(MATCH), [], teams, read_only=True)
+    assert "[]" not in texts_in(view) and "none" in texts_in(find(view, lambda c: "attempts" in (getattr(c, "className", "") or "")))  # an empty rejected list reads "none"
+    ruled = card_at(desk, "63'")
+    assert "retracted before air (VAR offside)" in summary_of(console.detail(ruled, desk.audit(MATCH), [], teams))
+    assert "VAR check under way" in summary_of(console.detail(dict(goal, under_review=True), [], [], teams))
+    assert "Not verified" in summary_of(console.detail(dict(goal, verification=dict(goal["verification"], verified=False)), [], [], teams))
+
+
+def test_claims_are_deduplicated_with_where_they_are_used():
+    texts = [{"lang": "en", "claims": [{"value": 58, "source_field": "a_pct"}, {"value": 28, "source_field": "swing_pts"}]}]
+    duo = [{"speaker": "joss", "lang": "en", "claims": [{"value": 58, "source_field": "a_pct"}, {"value": 30, "source_field": "b_pct"}]},
+           {"speaker": "joss", "lang": "en", "claims": [{"value": 58.0, "source_field": "a_pct"}]}]
+    rows = console.claim_rows(texts, duo, {"a_pct": 58, "swing_pts": 28, "b_pct": 30}, {"a_pct": "chance after"})
+    joss = console.speaker_name("joss")
+    assert [(r["value"], r["field"], r["where"]) for r in rows] == [("58", "a_pct", ["text", joss]), ("28", "swing_pts", ["text"]), ("30", "b_pct", [joss])]
+    fold = console.claims_view(rows)
+    assert fold.open is False and texts_in(fold.children[0]) == "Where each number comes from (3)" and console.CLAIMS_NOTE in texts_in(fold)
+    assert "Number Fact Meaning Used in" in texts_in(fold) and f"text, {joss}" in texts_in(fold)
+    assert "No number" in texts_in(console.claims_view([]))
 
 
 def test_a_scorer_correction_is_shown_in_the_console_and_on_the_overlay(desk):
@@ -886,7 +930,7 @@ def test_decision_buttons_sit_between_the_heading_and_the_texts():
         assert at("c-head") < at("c-approve") < at("c-edit-panel") < at("c-detail") and at("c-lang") == at("c-approve")  # one bar: decisions and language
         assert at("c-approve") == at("c-edit") == at("c-reject") and at("c-message") < at("c-detail")
         lang = find(page, lambda c: getattr(c, "id", None) == "c-lang")[0]
-        assert lang.value == "en" and [o["value"] for o in lang.options] == ["en", "fr", "es"]
+        assert lang.value == "en" and [o["value"] for o in lang.options] == ["en", "fr", "es"] and console.LANG_NOTE in texts_in(page)
         actions = find(page, lambda c: getattr(c, "className", "") == "actions" and "c-approve" in component_ids(c.children))[0]
         assert getattr(actions, "style", None) == ({"display": "none"} if user is None else None)  # read only: no decision button
         assert not find(page, lambda c: "c-lang" in component_ids(getattr(c, "children", None)) and getattr(c, "style", None) == {"display": "none"})  # the switch stays
