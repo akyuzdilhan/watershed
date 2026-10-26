@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from web.matchfeed import build, load
-from worker.analysis import (ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, dry_analyst, feed_actions, fill_note, note_scores,
+from worker.analysis import (ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, defenders_taken_out, dry_analyst, feed_actions, fill_note, note_scores,
                              parse_analysis, template_analysis, verify_analysis)
 from worker.desk import Desk
 from worker.pipeline import MemorySink, Pipeline
@@ -51,10 +51,24 @@ def test_every_goal_of_the_demo_has_its_facts_each_with_a_meaning(feed):
         assert all(isinstance(v, (str, int, float)) for v in facts.values())
 
 
+def test_defenders_taken_out_stay_credible_on_the_demo_goals(feed):
+    taken = {c["minute_label"]: analysis_facts(feed, c)[0].get("best_pass_defenders_taken_out") for c in goal_cards(feed)}
+    assert taken == {"14'": 2, "31'": 2, "52'": 3, "57'": 3, "63'": 2, "66'": 3, "69'": 2, "83'": 4, "88'": 3}
+
+
+def test_a_short_pass_takes_nobody_out():
+    frame = [{"player_id": "d1", "teammate": False, "location": [40.0, 30.0]}, {"player_id": "me", "teammate": True, "actor": True, "location": [30.0, 30.0]}]
+    after = [{"player_id": "d1", "teammate": False, "location": [36.0, 30.0]}, {"player_id": "you", "teammate": True, "actor": True, "location": [39.0, 30.0]}]
+    short = {"start_x": 30.0, "end_x": 39.0, "freeze_frame": frame}
+    longer = {"start_x": 30.0, "end_x": 41.0, "freeze_frame": frame}
+    reception = {"start_x": 39.0, "freeze_frame": after}
+    assert defenders_taken_out(short, reception) == [] and defenders_taken_out(longer, reception) == ["d1"]
+
+
 def test_the_52nd_minute_goal_is_measured_on_the_move(feed):
     facts, _ = facts_at(feed, "52'")
     assert (facts["team"], facts["opponent"], facts["regain_how"], facts["regain_zone"], facts["high_regain"]) == ("Varleigh", "Yarnford", "tackle", "own_third", False)
-    assert (facts["regain_from_own_goal_m"], facts["passes_in_move"], facts["move_duration_s"], facts["best_pass_defenders_bypassed"]) == (19, 5, 12, 5)
+    assert (facts["regain_from_own_goal_m"], facts["passes_in_move"], facts["move_duration_s"], facts["best_pass_defenders_taken_out"]) == (19, 5, 12, 3)
     assert facts["opponent_line_moved"] == "deeper" and facts["team_threat_trend"] == "up" and facts["team_threat_share_change_pts"] >= 15
 
 
@@ -99,8 +113,9 @@ def test_the_notes_are_the_strongest_facts_in_the_same_order_in_every_language(f
     texts = template_analysis(facts, LANGS)
     assert keys == ["threat_up", "counter"]
     for lang in LANGS:
-        assert [l["claims"][0]["source_field"] for l in texts[lang]] == ["team_threat_share_recent_pct", "regain_from_own_goal_m"]
-    assert "63%" in texts["en"][0]["line"] and "63 %" in texts["fr"][0]["line"] and "35 puntos" in texts["es"][0]["line"]
+        assert [sorted(c["source_field"] for c in l["claims"]) for l in texts[lang]] == [
+            ["team_threat_share_before_pct", "team_threat_share_recent_pct", "threat_window_min"], ["move_duration_s", "passes_in_move", "regain_from_own_goal_m"]]
+    assert "63%" in texts["en"][0]["line"] and "63 %" in texts["fr"][0]["line"] and "28%" in texts["es"][0]["line"]
 
 
 def test_french_and_spanish_decimals_use_a_comma():
@@ -113,7 +128,7 @@ def test_french_and_spanish_decimals_use_a_comma():
 def test_every_note_verifies_in_every_language_when_its_facts_are_there(feed):
     facts, _ = facts_at(feed, "52'")
     facts = facts | {"high_regain": True, "shooter_space_m": 6.1, "match_median_space_m": 2.3, "opponent_line_moved": "higher", "opponent_line_change_m": 4}
-    cases = [(key, how) for key in NOTES for how in (HOW["en"] if key in ("high_regain", "counter", "build_up") else ["tackle"])]
+    cases = [(key, how) for key in NOTES for how in (HOW["en"] if key in ("high_regain", "counter", "build_up", "quick") else ["tackle"])]
     for key, how in cases:
         for lang in LANGS:
             note = fill_note(NOTES[key][lang], facts | {"regain_how": how, "regain_player": "Otto Meyer"}, lang)
@@ -145,6 +160,14 @@ def good(feed):
     ("es", "Swing total para el Varleigh.", [], "forbidden_word"),
     ("fr", "La pression de l'Yarnford a cédé.", [], "article_before_team"),
     ("en", "Varleigh played it like Erling Haaland.", [], "unknown_names"),
+    ("en", "Varleigh's line played higher (34 m, 31 m).", [{"value": 34, "source_field": "regain_from_own_goal_m"}], "data_dump"),
+    ("en", "Varleigh had space against a 2.8 m match median.", [{"value": 2.8, "source_field": "match_median_space_m"}], "field_word"),
+    ("en", "Varleigh's recent line was deep.", [], "field_word"),
+    ("en", "Varleigh's line moved, change 3.", [{"value": 3, "source_field": "best_pass_defenders_taken_out"}], "field_word"),
+    ("en", "Varleigh's opponent_line_recent_m was low.", [], "field_word"),
+    ("fr", "Varleigh avait de l'espace, contre une médiane faible.", [], "field_word"),
+    ("en", "Varleigh won it 19 m out, then 5 passes in 12 s.", [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 5, "source_field": "passes_in_move"},
+                                                            {"value": 12, "source_field": "move_duration_s"}], "too_many_numbers"),
 ])
 def test_the_verifier_refuses_a_bad_analyst_line(feed, lang, line, claims, rule):
     facts, texts = good(feed)
@@ -173,6 +196,7 @@ def test_a_reply_has_its_em_dashes_normalised_like_every_model_text():
 
 
 def test_the_instructions_name_the_on_air_rules():
+    assert "never numbers in brackets" in ANALYST_INSTRUCTIONS and "At most 2 numbers in a sentence" in ANALYST_INSTRUCTIONS
     assert EM_DASH not in ANALYST_INSTRUCTIONS and "by a whisker" in ANALYST_INSTRUCTIONS and "d'un rien" in ANALYST_INSTRUCTIONS and "get_analysis_facts" in ANALYST_INSTRUCTIONS
     assert all(EM_DASH not in t for by_lang in NOTES.values() for t in by_lang.values())
 
@@ -282,7 +306,7 @@ def test_every_goal_and_the_save_get_verified_notes_and_the_red_card_none(demo):
     for c in cards:
         if "analysis" in c:
             a = c["analysis"]
-            assert a["verified"] and a["writer"] == "template" and a["card_version"] == c["version"] and a["facts_version"] == 1
+            assert a["verified"] and a["writer"] == "template" and a["card_version"] == c["version"] and a["facts_version"] == 2
             assert sorted(a["texts"]) == sorted(LANGS) and a["machine_translated"] == ["es"] and set(a["facts"]) == set(a["field_meanings"])
 
 
