@@ -331,6 +331,9 @@ def _in_view(a: dict, view: str, x: float, y: float) -> tuple[float, float]:
     return pitch.clamp(*((x, y) if a["team"] == view else (pitch.LENGTH - x, pitch.WIDTH - y)))
 
 
+STEP_NAMES = ("Delivery", "First contact", "What followed")
+
+
 def set_piece_figure(feed: dict, event_id: str, theme="dark", width: int | None = 900, duration_ms: int = 1300) -> go.Figure:
     """A corner or free kick in up to three animated steps: the delivery, the first contact, what the contact did. Arrows: delivery width by the value of where it landed, contact width by threat added (or xG for a shot)."""
     t = _t(theme)
@@ -372,11 +375,8 @@ def set_piece_figure(feed: dict, event_id: str, theme="dark", width: int | None 
     play = {"frame": {"duration": duration_ms, "redraw": True}, "transition": {"duration": int(duration_ms * 0.5)}, "fromcurrent": True}
     still = {"frame": {"duration": 0, "redraw": True}, "transition": {"duration": 0}, "mode": "immediate"}
     fig.update_layout(
-        title_text=frames[0].layout.title.text, annotations=frames[0].layout.annotations, margin={"b": 70},
-        updatemenus=[{"type": "buttons", "direction": "left", "x": 0.02, "y": -0.02, "xanchor": "left", "yanchor": "top", "bgcolor": t["paper"], "bordercolor": t["muted"],
-                      "font": {"color": t["text"]}, "buttons": [{"label": "Play", "method": "animate", "args": [None, play]}, {"label": "Pause", "method": "animate", "args": [[None], still]}]}],
-        sliders=[{"x": 0.25, "y": -0.02, "len": 0.7, "xanchor": "left", "yanchor": "top", "currentvalue": {"visible": False}, "font": {"color": t["muted"]},
-                  "steps": [{"label": str(k + 1), "method": "animate", "args": [[str(k)], still]} for k in range(len(frames))]}],
+        title_text=frames[0].layout.title.text, annotations=frames[0].layout.annotations, margin={"b": 80},
+        **pitch.play_controls(theme, [f"{k + 1} {STEP_NAMES[min(k, 2)]}" for k in range(len(frames))], play, still),
         meta={"steps": [a["event_id"] for a in steps[:len(frames)]]})
     if width:
         fig.update_layout(height=fig.layout.height + 60)

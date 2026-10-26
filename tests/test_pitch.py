@@ -223,6 +223,30 @@ def test_set_piece_animation_runs_from_delivery_to_first_contact(demo_feed):
         assert graphics.set_pieces_map(demo_feed, side).layout.title.text
 
 
+def _luminance(hex_color: str) -> float:
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in (r, g, b)]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_animation_controls_are_readable_and_the_steps_named(demo_feed):
+    corner = next(a for a in demo_feed["actions"] if a["action_type"] == "corner_crossed")
+    for theme in ("dark", "light"):
+        fig = graphics.set_piece_figure(demo_feed, corner["event_id"], theme)
+        menu, slider = fig.layout.updatemenus[0], fig.layout.sliders[0]
+        assert menu.showactive is False  # plotly paints the active button near white, under light text
+        assert contrast(menu.font.color, menu.bgcolor) >= 7 and contrast(slider.font.color, pitch.THEMES[theme]["paper"]) >= 7, theme
+        labels = [s.label for s in slider.steps]
+        assert labels[:2] == ["1 Delivery", "2 First contact"] and len(labels) == len(fig.frames) and (len(labels) < 3 or labels[2] == "3 What followed")
+        seq = pitch.sequence_figure(demo_feed["actions"][:4], theme=theme)
+        assert seq.layout.updatemenus[0].showactive is False and [s.label for s in seq.layout.sliders[0].steps] == ["1", "2", "3", "4"]
+
+
 def test_momentum_bars_sum_the_threat_added_and_carry_the_curve(demo_feed):
     series = graphics.momentum_series(demo_feed)
     total = sum(max(tactics.threat_added(a), 0) for a in demo_feed["actions"] if a["team"] == "home")

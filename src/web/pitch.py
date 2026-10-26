@@ -302,6 +302,28 @@ def buildup(actions: list[dict], event_id: str, n_min: int = 5, n_max: int = 8) 
     return ordered[j:i + 1]
 
 
+CONTROLS = {  # play button and step slider colours: light text on a dark button (or the reverse), the slider grip in the actor's colour
+    "dark": {"button": "#1e293b", "button_text": "#f8fafc", "border": "#94a3b8", "grip": "#facc15", "tick": "#94a3b8", "label": "#e6ebf0"},
+    "light": {"button": "#f1f5f9", "button_text": "#111827", "border": "#4b5563", "grip": "#b45309", "tick": "#4b5563", "label": "#111827"},
+}
+
+
+def play_controls(theme: str | dict, labels: list[str], play: dict, still: dict, frame_names: list[str] | None = None) -> dict:
+    """Layout `updatemenus` and `sliders` for an animation: Play and Pause buttons that stay readable (no active highlight, which plotly draws near white under light text) and a slider whose steps carry `labels`."""
+    t = _theme(theme)
+    c = CONTROLS["light" if t.get("paper", "").lower() in ("#ffffff", "#fff", "white") else "dark"]
+    names = frame_names or [str(k) for k in range(len(labels))]
+    return {
+        "updatemenus": [{"type": "buttons", "direction": "left", "x": 0.0, "y": -0.02, "xanchor": "left", "yanchor": "top", "pad": {"t": 6, "r": 6}, "showactive": False,
+                         "bgcolor": c["button"], "bordercolor": c["border"], "borderwidth": 1, "font": {"color": c["button_text"], "size": 13},
+                         "buttons": [{"label": "▶ Play", "method": "animate", "args": [None, play]}, {"label": "❚❚ Pause", "method": "animate", "args": [[None], still]}]}],
+        "sliders": [{"x": 0.24, "y": -0.02, "len": 0.66, "xanchor": "left", "yanchor": "top", "pad": {"t": 8}, "currentvalue": {"visible": False},
+                     "font": {"color": c["label"], "size": 12}, "bgcolor": c["grip"], "activebgcolor": c["label"], "bordercolor": c["border"], "borderwidth": 1,
+                     "tickcolor": c["tick"], "ticklen": 5,
+                     "steps": [{"label": label, "method": "animate", "args": [[name], still]} for label, name in zip(labels, names)]}],
+    }
+
+
 def sequence_frames(actions: list[dict], home_name: str = "Home", away_name: str = "Away", theme: str | dict = "dark", view: str | None = None,
                     names: dict | None = None) -> list[go.Frame]:
     """One plotly frame per action, all drawn with the same team attacking towards x = 105 (`view`, by default the team of the last action), so that players glide from one frame to the next."""
@@ -315,7 +337,6 @@ def sequence_frames(actions: list[dict], home_name: str = "Home", away_name: str
 def sequence_figure(actions: list[dict], home_name: str = "Home", away_name: str = "Away", theme: str | dict = "dark", view: str | None = None,
                     names: dict | None = None, duration_ms: int = 1100, width: int | None = 900) -> go.Figure:
     """The build-up as an animated figure with play and pause buttons and a slider."""
-    t = _theme(theme)
     frames = sequence_frames(actions, home_name, away_name, theme, view, names)
     fig = pitch_figure(theme, width)
     fig.add_traces(frames[0].data)
@@ -325,12 +346,7 @@ def sequence_figure(actions: list[dict], home_name: str = "Home", away_name: str
     fig.update_layout(
         title_text=frames[0].layout.title.text,
         margin={"b": 70},
-        updatemenus=[{"type": "buttons", "direction": "left", "x": 0.02, "y": -0.02, "xanchor": "left", "yanchor": "top", "pad": {"t": 4},
-                      "bgcolor": t["paper"], "bordercolor": t["muted"], "font": {"color": t["text"]},
-                      "buttons": [{"label": "Play", "method": "animate", "args": [None, play]}, {"label": "Pause", "method": "animate", "args": [[None], still]}]}],
-        sliders=[{"x": 0.2, "y": -0.02, "len": 0.78, "xanchor": "left", "yanchor": "top", "pad": {"t": 4}, "currentvalue": {"visible": False},
-                  "font": {"color": t["muted"]}, "bgcolor": t["muted"], "activebgcolor": t["actor"], "bordercolor": t["muted"],
-                  "steps": [{"label": str(k + 1), "method": "animate", "args": [[str(k)], still]} for k in range(len(actions))]}],
+        **play_controls(theme, [str(k + 1) for k in range(len(actions))], play, still),
     )
     if width:
         fig.update_layout(height=fig.layout.height + 60)
