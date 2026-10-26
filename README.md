@@ -236,7 +236,7 @@ How Watershed applies the twelve practices of Microsoft's [Best practices in clo
 
 | Well-Architected pillar | In Watershed | Accepted for the demo |
 |---|---|---|
-| Reliability | Ordered sessions, settle after write, dead-letter queue, idempotent upserts, retries; a failed or rejected model call never blocks a card (template fallback) | One region, no availability zones; one worker replica keeps a match in memory, so a restart mid-match loses that match |
+| Reliability | Ordered sessions, settle after write, dead-letter queue, idempotent upserts, retries; a failed or rejected model call never blocks a card (template fallback), and a circuit breaker pauses the model for 5 minutes after 3 drafts in a row whose calls all failed; HTTP probes on the web app | One region, no availability zones; one worker replica keeps a match in memory, so a restart mid-match loses that match |
 | Security | No data keys, one managed identity per app with built-in roles, producers signed in with Entra ID, visitors read only, secret scanning in CI | Public endpoints, no private networking; the web identity has data access on the whole Cosmos DB account |
 | Cost optimization | Scale to zero, Cosmos DB free tier, a cap on model attempts per match, a daily log cap, budget alerts | The kill switch is not deployed; budget data arrives hours after the spend |
 | Operational excellence | azd and Bicep, CI that builds the templates and both images, scripts to reset and replay a match, an audit trail, traces | The Foundry project and its deployment are configured by hand; no continuous deployment |
