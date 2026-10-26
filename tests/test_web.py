@@ -1467,6 +1467,8 @@ def test_before_kick_off_opens_the_rundown_and_gathers_what_was_analysed_before_
     assert "Win probability at kick-off" in text and f"Varleigh {first['home'] * 100:.0f}%" in text and f"Draw {first['draw'] * 100:.0f}%" in text
     assert "Yarnford relegation 34% (win 16%, draw 32%, loss 43%)" in text and "Varleigh: 17th, 29 pts" in text and "Yarnford: 18th, 28 pts" in text
     assert "58 meetings since 1976/77: Varleigh 29, draws 20, Yarnford 9" in text and "Varleigh WWWLD (10 pts from 5)" in text and "2 from 50 goals" in text
+    sl = dict(STORYLINE, players_to_watch=[dict(STORYLINE["players_to_watch"][0], milestone={"kind": "goals", "current": 48, "target": 50, "needed": 2})])
+    assert "Dominic Carter (Yarnford): 7 goals in 2025/26, 2 from 50 goals" in console.context_chips(sl, desk.state(MATCH)["teams"])[2]  # the milestone as the storyline writes it
     assert "A relegation six-pointer" not in text and "A relegation six-pointer" in texts_in(console.refresh(MATCH, console.PRE_MATCH, None, lang="en")[2])  # the threads: English only
     assert out[6:8] == (True, True)  # no Publish, no Edit
     assert console._approve_styles_cb(None, MATCH, console.PRE_MATCH) == ({"display": "none"},) * 3

@@ -1112,9 +1112,13 @@ def context_chips(storyline: dict, teams: dict) -> tuple[list[str], list[str], l
         if not isinstance(p, dict) or not p.get("name"):
             continue
         line = f"{p['name']} ({p.get('club', '')})" + (f": {_num(p['season_goals'])} goals in {p.get('season', 'last season')}" if p.get("season_goals") is not None else "")
-        need = facts.get(f"{p.get('fact_prefix')}_milestone_needed") if p.get("fact_prefix") else None
-        if p.get("milestone") and need is not None:
-            line += f", {_num(need)} from {p['milestone']}"
+        m = p.get("milestone")
+        if isinstance(m, dict):  # as `worker.storyline` writes it: {"kind": "goals", "target": 50, "needed": 2}
+            need, m = m.get("needed"), f"{_num(m.get('target', '?'))} {m.get('kind', '')}".strip()
+        else:
+            need = facts.get(f"{p.get('fact_prefix')}_milestone_needed") if p.get("fact_prefix") else None
+        if m and need is not None:
+            line += f", {_num(need)} from {m}"
         players.append(line)
     return form, h2h, players
 
