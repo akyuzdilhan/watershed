@@ -234,3 +234,8 @@ body:has(.ov-page) { background: #0b0b0b; }
 .col-middle .ctx-insight > summary::-webkit-details-marker { display: none; }
 .col-middle .ctx-insight > summary .detail-meta { margin-top: 2px; }
 .col-middle .ctx-insight[open] > .why { margin-top: 4px; }
+
+/* This moment on the pitch: tabs for the card's build-up and tactical details */
+.ctx-tabs { display: flex; gap: 4px; margin-bottom: 6px; border-bottom: 0 !important; }
+.ctx-tab.tab, .ctx-tab { background: transparent !important; color: var(--ink-2) !important; border: 1px solid var(--line) !important; border-radius: 6px !important; padding: 3px 10px !important; font-size: 12px; width: auto !important; flex: none !important; }
+.ctx-tab-on.tab--selected, .ctx-tab-on { background: var(--surface-2) !important; color: var(--ink) !important; border-color: var(--ink-2) !important; }

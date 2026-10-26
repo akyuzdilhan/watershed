@@ -1245,7 +1245,7 @@ def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_d
     assert tied and all(d["event_id"] == goal["event_id"] or (d.get("figure") or {}).get("goal_event_id") == goal["event_id"] for d in tied)
     out, sig = console.context(MATCH, goal["id"], "en", None, feed_desk)
     graphs = find(out, lambda c: type(c).__name__ == "Graph")
-    assert len(graphs) == 1 and len(graphs[0].figure.data) >= 1
+    assert len(graphs) == 1 + len(panels.card_tactics(feed_desk.feed(MATCH), goal)) and len(graphs[0].figure.data) >= 1  # the build-up, then one tab per tactical detail
     text = texts_in(out)
     assert "This moment on the pitch" in text and f"Detail {tied[0]['key']}" not in text and "Fourth against sixth" in text  # the insights are in the card's column
     view = console.refresh(MATCH, goal["id"], None)[2]
@@ -1262,6 +1262,23 @@ def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_d
     right = find(console.layout(None), lambda c: "col-right" in (getattr(c, "className", "") or "") and "c-wp" in component_ids(c.children))[0]
     assert "c-context" in component_ids(right.children)
     assert [v["label"] for v in panels.VIEWS] == ["Desk", "All graphics", "All insights and storyline"]
+
+
+def test_the_moment_on_the_pitch_has_tabs_for_the_card_s_tactical_details_without_the_margin(feed_desk):
+    feed, goal, red = feed_desk.feed(MATCH), card_at(feed_desk, "63'"), card_at(feed_desk, "78'")
+    tactics = panels.card_tactics(feed, goal)
+    assert tactics and [t for t, _ in tactics] == [t for t in panels.TACTIC_TABS if t in dict(tactics)] and panels.card_tactics(feed, red) == []
+    out = panels.moment_block(feed, goal)
+    tabs = find(out, lambda c: type(c).__name__ == "Tabs")
+    assert len(tabs) == 1 and tabs[0].value == "main"  # Build-up first, selected
+    labels = [t.label for t in tabs[0].children]
+    assert labels[0] == "Build-up" and labels[1:] == [panels.TACTIC_TABS[t] for t, _ in tactics]
+    figures = [g.figure for g in find(out, lambda c: type(c).__name__ == "Graph")]
+    assert len(figures) == len(labels)
+    for fig in figures:
+        assert "margin" not in json.dumps(fig.layout.meta or {}) and not any(k in json.dumps(fig.to_plotly_json()) for k in ("margin_m", "frame_margin_m"))
+    assert "margin" not in texts_in(out).lower()
+    assert not find(panels.moment_block(feed, red), lambda c: type(c).__name__ == "Tabs")
 
 
 def test_a_live_pitch_follows_the_replay_and_the_card_s_moment_comes_back_when_paused(feed_desk):

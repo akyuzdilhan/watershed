@@ -627,8 +627,37 @@ def live_block(feed: dict | None, t: float | None, shift: float = 0.0) -> list:
             dcc.Graph(figure=fig, config={"displayModeBar": False, "staticPlot": True}, className="ctx-figure live-figure"), html.P(LIVE_NOTE, className="muted small")]
 
 
+TACTIC_TABS = {"lb": "Line break", "run": "Run", "space": "Space at reception"}
+
+
+def card_tactics(feed: dict | None, card: dict | None) -> list[tuple[str, str]]:
+    """The tactical details tied to the card's goal or chance, as (tag, item of the "tactics" graphics): its line break, its run and the space at reception (`graphic_items`, `lead_to`), one of each at most, in that order."""
+    if not feed or not feed.get("actions") or not card:
+        return []
+    shot = card.get("shot_event_id") or card.get("event_id")
+    moments, acts = G.moments(feed), {a["event_id"]: a for a in feed["actions"]}
+    found: dict[str, str] = {}
+    for o in graphic_items(feed, "tactics"):
+        tag, _, rest = o["value"].partition(":")
+        if tag not in TACTIC_TABS or tag in found:
+            continue
+        event_id = rest.partition(":")[0]
+        if tag == "space":  # the shooter's room as the ball reached him: the item names the shot itself
+            tied = event_id == shot
+        else:
+            m = lead_to(moments, acts[event_id]) if event_id in acts else None
+            tied = m is not None and m["event_id"] == shot
+        if tied:
+            found[tag] = o["value"]
+    return [(tag, found[tag]) for tag in TACTIC_TABS if tag in found]
+
+
+def _graph(fig: go.Figure, note: str) -> list:
+    return [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(note, className="muted small")]
+
+
 def moment_block(feed: dict | None, card: dict) -> list:
-    """"This moment on the pitch": the match graphic of the card (`card_graphic`) with its note, or a line saying where the graphics are."""
+    """"This moment on the pitch": the match graphic of the card (`card_graphic`) with its note, and when the card has tactical details (`card_tactics`), tabs: Build-up first, then Line break, Run, Space at reception. A run is drawn without its offside margin; else a line saying where the graphics are."""
     out = [html.H3("This moment on the pitch")]
     kind, item = card_graphic(feed, card)
     if not kind:
@@ -640,7 +669,17 @@ def moment_block(feed: dict | None, card: dict) -> list:
     except (StopIteration, KeyError, ValueError, IndexError) as error:
         fig = empty_figure(f"Cannot draw this graphic: {error}")
     note = NOTES[kind].replace("(last 10 actions)", f"(last {COMPACT_BUILDUP} actions here, 10 under All graphics)") if kind == "buildups" else NOTES[kind]
-    return out + [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(note, className="muted small")]
+    tactics = card_tactics(feed, card)
+    if not tactics:
+        return out + _graph(fig, note)
+    tabs = [dcc.Tab(_graph(fig, note), label="Build-up" if kind == "buildups" else "The shot", value="main", className="ctx-tab", selected_className="ctx-tab-on")]
+    for tag, value in tactics:
+        try:
+            tfig = _sized(graphic_figure(feed, "tactics", value), 440)
+        except (StopIteration, KeyError, ValueError, IndexError) as error:
+            tfig = empty_figure(f"Cannot draw this graphic: {error}")
+        tabs.append(dcc.Tab(_graph(tfig, graphic_note(feed, "tactics", value)), label=TACTIC_TABS[tag], value=tag, className="ctx-tab", selected_className="ctx-tab-on"))
+    return out + [dcc.Tabs(tabs, value="main", className="ctx-tabs", parent_className="ctx-tabs-wrap")]
 
 
 def insight_fold(d: dict, lang: str | None) -> html.Details:
