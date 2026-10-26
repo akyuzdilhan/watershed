@@ -319,6 +319,20 @@ COMMON_CAPITALISED = frozenset({"VAR", "Premier", "League", "Monday", "Tuesday",
                                 "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"})
 
 
+# Real clubs, nicknames, broadcasters and the league: an error wherever they stand, first word of a sentence included (names_ok skips that word). Case-sensitive.
+REAL_NAMES = ("Premier League", "Arsenal", "Aston Villa", "Villa", "Bournemouth", "Brentford", "Brighton", "Burnley", "Chelsea", "Crystal Palace", "Everton", "Fulham",
+              "Leeds", "Liverpool", "Manchester", "Man City", "Man Utd", "Man United", "Newcastle", "Nottingham Forest", "Sunderland", "Tottenham", "Hotspur", "West Ham",
+              "Wolverhampton", "Wolves", "Leicester", "Ipswich", "Southampton", "Gunners", "Villans", "Cherries", "Seagulls", "Clarets", "Toffees", "Cottagers", "Spurs",
+              "Hammers", "Magpies", "Toon", "Black Cats", "Red Devils", "Citizens", "Foxes", "Tractor Boys", "Martin Tyler", "Peter Drury", "Gary Neville", "Jamie Carragher",
+              "Gary Lineker", "Alan Shearer", "Roy Keane", "Micah Richards", "Clive Tyldesley", "Guy Mowbray", "Jon Champion", "Jim Beglin", "Lineker", "Carragher", "Tyldesley")
+REAL_NAME = re.compile(r"(?<![\w])(?:" + "|".join(re.escape(n).replace(r"\ ", r"\s+") for n in sorted(REAL_NAMES, key=len, reverse=True)) + r")(?![\w])")
+
+
+def real_names(text: str) -> list[str]:
+    """Real clubs, nicknames, broadcasters and "Premier League" in a text, in order: the `real_name` rule of the Verifier."""
+    return [m.group(0) for m in REAL_NAME.finditer(normalise(text))]
+
+
 def names_ok(text: str, facts: dict, extra: set[str] | frozenset = frozenset()) -> list[str]:
     """Capitalised words that are neither in the facts nor at the start of a sentence: possible invented names. A Title Case headline lists its
     words too: the instructions ask for sentence case, and the retry note says so."""
@@ -406,6 +420,7 @@ STRUCTURAL_RULES = {
     "points_not_from_pts_field": ("error", None),  # "54 points" where 54 is a percentage
     "if_goal_as_start": ("error", None),  # "from 9%" where 9% is what the chance would have been had the shot gone in
     "card_kind_unbacked": ("error", None),  # "second yellow" or "straight red" when the card_kind fact does not say so
+    "real_name": ("error", None),  # a real club, nickname or broadcaster, or "Premier League" (REAL_NAMES), first word of a sentence included
     "player_not_named": ("error", None),  # a red card whose headline and why do not name the player (card texts only)
     "count_word_unbacked": ("warning", None),  # "fifth" when no whole-number fact is 5
     "too_long": ("warning", None),  # headline over 8 words or why over 25
@@ -450,6 +465,8 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
     for rule in ("signed_number", "decimal_percent", "em_dash", "not_available"):
         for m in re.finditer(STRUCTURAL_RULES[rule][1], body):
             add(rule, m.group(0))
+    for name in real_names(body):
+        add("real_name", name)
     for rule in ("headline_starts_with_number", "minute_in_headline"):
         found = re.search(STRUCTURAL_RULES[rule][1], headline)
         if found:
@@ -510,13 +527,13 @@ def style_issues(headline: str, why: str, lang: str, claims: list[dict], facts: 
 
 
 def air_issues(text: str, lang: str) -> list[dict]:
-    """The on-air rules that also hold for a text that is not a card (the post-match recap): `AIR_RULES` of the language, no "not available", and no em dash."""
+    """The on-air rules that also hold for a text that is not a card (the post-match recap): `AIR_RULES` of the language, no "not available", no em dash and no real name."""
     body = normalise(text)
     found = [{"rule": rule, "text": m.group(0)} for rule, _, pattern in LANGUAGE_RULES.get(lang, []) if rule in AIR_RULES for m in re.finditer(pattern, body)]
     found += [{"rule": "not_available", "text": m.group(0)} for m in re.finditer(STRUCTURAL_RULES["not_available"][1], body)]
     if EM_DASH in body:
         found.append({"rule": "em_dash", "text": EM_DASH})
-    return found
+    return found + [{"rule": "real_name", "text": n} for n in real_names(body)]
 
 
 def check_numbers(body: str, claims: list, facts: dict) -> dict:

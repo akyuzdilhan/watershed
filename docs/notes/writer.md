@@ -37,6 +37,7 @@ Rules are data: `LANGUAGE_RULES` (per language: code, severity, pattern; `{team}
 | `if_goal_as_start` (a value from an `_if_goal` field after from, de, del, d'; "au lieu de", "en lugar del", "en vez del" pass, and so do été, plus, moins, près, loin, autour, sido, paso, lejos, cerca, más, menos, alrededor, away, far before them, where the value is the value itself: "auraient été de 70 %", "a un paso del 70%", "a goal away from 70%") | all | error | "lifted Yarnford from 18% to 34%" when 18% is the chance had the shot gone in |
 | `card_kind_unbacked` (second yellow or straight red when the `card_kind` fact does not say so) | all | error | "Second yellow for X" on a card without `card_kind` |
 | `player_not_named` (a red card whose headline and why do not name the player) | all, card texts | error | "Yarnford down to ten" |
+| `real_name` (a current or recent Premier League club, a nickname, a well-known broadcaster or "Premier League", from `REAL_NAMES`, case-sensitive, at the start of a sentence too; also on duo lines and in the recap through `air_issues`) | all | error | "Arsenal would have loved that.", which `names_ok` lets through as the first word of a sentence |
 
 Also fixed: `unknown_names` now checks headline and why separately, so the first word of "why" is no longer reported as an invented name. Word counts treat "44 %" and "Varleigh :" as one word (`word_count`), so French is no longer penalised by its typography.
 

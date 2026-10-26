@@ -484,6 +484,25 @@ def test_a_real_name_fails_and_the_template_takes_over():
     assert not duo["verified"] and duo["lines"][0]["unknown_names"] == ["Martin", "Tyler"] and duo["lines"][1]["verified"]
 
 
+def test_a_real_club_or_broadcaster_fails_even_first_in_a_sentence():
+    scorer = make_card()["player"]["name"].split()[-1]
+    why = "Varleigh go from 30% to 54% to win, up 24 points."
+    _, report = verify(reply("en", f"{scorer} scores for Varleigh", why + " Arsenal would have loved that."), ["en"], GOAL_FACTS)
+    assert not report["verified"] and {"rule": "real_name", "text": "Arsenal"} in report["cards"][0]["style_errors"]
+    assert report["cards"][0]["unknown_names"] == []  # names_ok skips the first word of a sentence: the rule does not
+    assert verify(reply("en", f"{scorer} scores for Varleigh", why), ["en"], GOAL_FACTS)[1]["verified"]
+    fr = "Varleigh passe de 30 % à 54 % de chances de gagner, soit 24 points. Les Spurs de Gary  Neville, en Premier League."
+    assert [i["text"] for i in style_issues("", fr, "fr", GOAL_CLAIMS, GOAL_FACTS)[0] if i["rule"] == "real_name"] == ["Spurs", "Gary  Neville", "Premier League"]
+    lines = [{"speaker": "wren", "lang": "en", "line": "Arsenal would have loved that.", "claims": []},
+             {"speaker": "joss", "lang": "en", "line": why, "claims": GOAL_CLAIMS}]
+    duo = verify_duo(lines, ["en"], GOAL_FACTS)
+    assert not duo["verified"] and duo["lines"][0]["style_errors"] == [{"rule": "real_name", "text": "Arsenal"}] and duo["lines"][1]["verified"]
+    assert {"rule": "real_name", "text": "Arsenal"} in air_issues("Arsenal would have loved that.", "en")  # the recap
+    synthetic = "Varleigh beat Yarnford, Ashcombe Athletic and Caldermouth Harriers wait. Wren and Joss saw it, in the Synthetic League."
+    assert air_issues(synthetic, "en") == [] and not [i for i in style_issues("", synthetic, "en", [], GOAL_FACTS)[0] if i["rule"] == "real_name"]
+    assert "Gunners" in air_issues("Gunners fans, look away.", "en")[0]["text"] and air_issues("gunners and arsenals", "en") == []
+
+
 def test_a_title_case_headline_is_asked_again_in_sentence_case():
     scorer = make_card()["player"]["name"].split()[-1]
     why = "Varleigh go from 30% to 54% to win, up 24 points."
