@@ -50,7 +50,7 @@ The deployed demo shows a finished match. "Replay the match" in the header, for 
 Limits of the state at a minute, from what the store keeps:
 - The audit keeps a feed action's minute label, not its second: a hold, release or retraction is placed in the middle of its minute.
 - Approvals carry no match minute (only wall time): a card approved at any time shows as on air from its own minute, and a card a producer rejected shows as rejected from its minute.
-- A rewritten card (the 31' goal credited to another player) keeps its last version and texts before the rewrite; the score counts goal cards, so a goal without a card (none on the demo: 304/304 goals got one in the evaluation) would be missed.
+- A rewritten card (the 31' goal, credited to Dominic Carter at 33') shows as first credited until the feed's `rewrite_requested` in the audit: the previous scorer (`previous_player`) in the rundown and the heading, "v1", and in the detail a muted note in place of the texts (`as_first_note`: "As first credited: Honoré Haro. At 33' the provider credits Dominic Carter and the card is rewritten (version 2)."), because the texts of the first version are not stored; from the rewrite on, version 2 as stored. Without that audit entry, or without `previous_player`, the card shows its last version throughout. "On air now" still takes the stored texts before the rewrite. The score counts goal cards, so a goal without a card (none on the demo: 304/304 goals got one in the evaluation) would be missed.
 - Each step is a refresh request (about 120 a minute while playing), well under the per-IP limit with the desk's own 80.
 
 ## Second review (26/10): the judge's screen

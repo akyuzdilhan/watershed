@@ -333,6 +333,11 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     The offside margin and the writer's settings and errors are folded under "Producer details" for a producer. `lang` picks the language shown (None: every language); `head` puts the heading (`card_head`) on top, which the console draws apart, above the decision buttons. `insights` (the match's, as they stood at the replay's minute) gives "Insights on this moment" under the text and the summary line (`panels.moment_insights`)."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
+    if card.get("as_first"):  # a replay before the card's rewrite: the texts kept are those of the later version
+        out = [card_head(card, read_only)] if head else []
+        out.append(html.P(as_first_note(card), className="muted as-first"))
+        out += panels.moment_insights(insights or [], card, lang if lang in LANG_NAMES else DEFAULT_LANG) if insights is not None else []
+        return html.Div(out)
     verdicts = None  # no thumbs per line: one Feedback button per card (`feedback_lines`, `send_feedback`)
     facts, meanings = facts_of(card, teams)
     texts = shown_texts(card, lang)
@@ -471,7 +476,22 @@ def card_at(card: dict, entries: list[dict], t: float, x_of_label) -> dict:
             c.pop(k, None)
     flags = [e.get("action") == "hold" for e in past if e.get("action") in ("hold", "release", "retracted")]
     c["under_review"] = bool(flags and flags[-1]) and c["status"] != "retracted"
+    rewrite = next((e for x, e in reversed(feed) if e.get("action") == "rewrite_requested" and x is not None), None)
+    prev = previous_scorer(card)
+    if prev and rewrite is not None and x_of_label(rewrite.get("minute_label")) > t:
+        # before the provider credited another player: the scorer and the version as first credited; the texts of that version are not stored (`as_first`)
+        c["as_first"] = {"previous": prev, "player": (card.get("player") or {}).get("name", ""), "minute_label": rewrite.get("minute_label"), "version": card.get("version")}
+        c["player"] = dict(card.get("player") or {}, name=prev)
+        c["version"] = max(int(card.get("version") or 2) - 1, 1)
+        c.pop("previous_player", None)
     return c
+
+
+def as_first_note(card: dict) -> str:
+    """The detail of a rewritten card before its rewrite, in a replay: who was first credited, when and to whom the provider gives the goal."""
+    a = card.get("as_first") or {}
+    return (f"As first credited: {a.get('previous', '')}. At {a.get('minute_label', '')} the provider credits {a.get('player', '')} "
+            f"and the card is rewritten (version {a.get('version', 2)}).")
 
 
 def replay(cards: list[dict], state: dict | None, audit: list[dict], t: float | None) -> tuple[list[dict], dict | None, list[dict], float | None]:

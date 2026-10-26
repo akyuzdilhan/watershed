@@ -1374,6 +1374,30 @@ def auto_desk(tmp_path_factory):
     return store.FileStore(root)
 
 
+def test_the_replay_shows_a_rewritten_card_as_first_credited_until_its_rewrite(auto_desk):
+    s = auto_desk
+    s.cache_s = 0.0
+    card = next(c for c in s.cards(MATCH) if c.get("version", 1) >= 2 and c.get("previous_player"))
+    rewrite = next(e for e in s.audit(MATCH) if e.get("card_id") == card["id"] and e.get("action") == "rewrite_requested")
+    points, _, breaks = console.axis(s.state(MATCH)["wp_timeline"])
+    before, after = console.label_x(card["minute_label"], points, breaks) + 1, console.label_x(rewrite["minute_label"], points, breaks) + 1
+    assert before < after
+    out = console.refresh(MATCH, card["id"], None, store=s, t=before)
+    label = texts_in(next(o["label"] for o in out[0] if o["value"] == card["id"]))
+    assert card["previous_player"] in label and card["player"]["name"] not in label and "(v" not in label
+    head, view = texts_in(out[3]), texts_in(out[2])
+    assert "v1" in head and card["previous_player"] in head and "Scorer corrected" not in head
+    note = (f"As first credited: {card['previous_player']}. At {rewrite['minute_label']} the provider credits {card['player']['name']} "
+            f"and the card is rewritten (version {card['version']}).")
+    assert note in view and not any(t.get("headline") and t["headline"] in view for t in card.get("texts") or [])  # no text of the later version
+    out = console.refresh(MATCH, card["id"], None, store=s, t=after)
+    label, head = texts_in(next(o["label"] for o in out[0] if o["value"] == card["id"])), texts_in(out[3])
+    assert card["player"]["name"] in label and f"(v{card['version']})" in label and f"v{card['version']}" in head and "Scorer corrected" in head
+    assert "As first credited" not in texts_in(out[2])
+    plain = dict(card, previous_player=None)  # no previous scorer kept: shown as stored
+    assert "as_first" not in console.card_at(plain, [rewrite], before, lambda label: console.label_x(label, points, breaks) + 0.5)
+
+
 def test_the_replay_shows_the_desk_as_it_stood_at_a_minute_and_writes_nothing(auto_desk):
     s = auto_desk
     s.cache_s = 0.0
