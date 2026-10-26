@@ -48,5 +48,5 @@ The detail is in `docs/notes/agents.md` ("Not verified against the real API").
 - A right number can still be used with a misleading meaning, a number from a text fact included; human review stays.
 - The cap of 36 duo runs per match was set on the demo only.
 - With `--duo agents` a replay is not deterministic: a card VAR rules out while its job waits ends `cancelled`, `retracted` or with the agents' duo, depending on the timing.
-- The image deployed to Azure installs neither the `agentic` extra nor `data/history`: `--duo agents` and `--facts mcp` run locally only. Record the video locally with `--history`.
+- The image deployed to Azure does not install the `agentic` extra: `--duo agents` and `--facts mcp` run locally only.
 - In a replay, the end of the run waits for the queued duos (one at a time). Live with `--forever`, a duo that finishes after the last flush of a match waits for the next session.

@@ -159,7 +159,10 @@ def test_last_time_is_told_in_seasons_never_in_matches(hf, club):
             assert f[f"last_{key}_seasons_ago"] == hf.view.current_idx - hf.view.seasons.index(f[f"last_{key}_season"])
         else:
             assert f[f"last_{key}_season"] == "never in the history"
-        assert out["subject"] == ([club] if club else [])
+        if club:
+            assert out["subject"] == [club]
+        else:
+            assert out["subject"] == [s for s in (f.get(f"last_{key}_player"), f.get(f"last_{key}_club")) if s]
 
 
 def test_a_club_count_is_at_most_the_league_count(hf):

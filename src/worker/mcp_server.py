@@ -360,7 +360,10 @@ class HistoryFacts:
         else:
             facts[f"last_{key}_season"] = "never in the history"
             meanings[f"last_{key}_season"] = f"it never happened in the history that {what}"
-        return facts, meanings, [club] if club else []
+        if club:
+            return facts, meanings, [club]
+        # without a club, the last time is told about its club or its player, never as a rarity of the whole league
+        return facts, meanings, [s for s in (facts.get(f"last_{key}_player"), facts.get(f"last_{key}_club")) if s]
 
 
 # --- the server -----------------------------------------------------------------------------------------

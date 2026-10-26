@@ -176,6 +176,17 @@ def test_a_tool_number_is_told_with_its_subject():
     assert line_problems(alone, facts) == []  # without subjects (a card fact), no rule
 
 
+def test_a_last_time_without_a_club_is_told_about_its_club():
+    field = "last_comeback_win_from_two_down_seasons_ago"
+    facts = card_facts(goal_card(), TEAMS)[0] | {field: 6, "last_comeback_win_from_two_down_club": "Stellbury"}
+    subjects = {field: ["Stellbury"]}  # last_time with no club: its subject is the club of that last time
+    claim = [{"value": 6, "source_field": field}]
+    league = {"lang": "en", "line": "The last comeback from two down in this league was 6 seasons ago.", "claims": claim}
+    assert line_problems(league, facts, subjects=subjects) == [f"en: subject: {field} is about Stellbury: name it in the same sentence"]
+    anchored = {"lang": "en", "line": "Stellbury were the last side to turn two goals around, 6 seasons ago.", "claims": claim}
+    assert line_problems(anchored, facts, subjects=subjects) == []
+
+
 def test_the_exchange_is_a_group_chat_of_two_agents():
     from agent_framework import Agent, WorkflowViz
     from scripted_chat import ScriptedChatClient
