@@ -1300,3 +1300,27 @@ def test_the_replay_control_is_in_the_header_for_everyone():
         top = find(console.layout(user), lambda c: getattr(c, "className", "") == "top")[0]
         assert {"c-replay-play", "c-replay-t", "c-replay-tick", "c-replay"} <= component_ids(top.children) and "Replay the match" in texts_in(top)
     assert console.REPLAY_STEP_MS == 500
+
+
+def test_a_visitor_gets_a_one_line_intro_with_the_replay_and_the_var_retraction(desk):
+    intro = find(console.layout(None), lambda c: getattr(c, "id", None) == "c-intro")
+    assert len(intro) == 1 and console.INTRO in texts_in(intro[0]) and "Replay the match" in texts_in(intro[0])
+    assert {"c-intro-replay", "c-intro-var", "c-intro-close", "c-intro-closed", "c-intro-card"} <= component_ids(intro[0].children)
+    assert find(intro[0], lambda c: getattr(c, "id", None) == "c-intro-closed")[0].storage_type == "local"  # closed for good in that browser
+    assert not find(console.layout("producer-1"), lambda c: getattr(c, "id", None) == "c-intro")  # the producer's desk has none
+    cards = desk.cards(MATCH)
+    pulled = [c for c in cards if c.get("status") == "retracted" and c.get("retracted_on_air")]
+    label, style, card_id = console.intro_target(MATCH)
+    if pulled:
+        first = min(pulled, key=lambda c: c["clock_s"])
+        assert (label, style, card_id) == (f"See the VAR retraction ({first['minute_label']})", {}, first["id"])
+    else:
+        assert style == {"display": "none"} and card_id is None
+    assert console.intro_target(None) == ("See the VAR retraction", {"display": "none"}, None)
+
+
+def test_the_intro_points_at_the_first_card_pulled_off_air(desk):
+    cards = desk.cards(MATCH)
+    goal = card_at(desk, "63'")
+    fake = type("S", (), {"cards": lambda self, m: [dict(c, status="retracted", retracted_on_air=True) if c["id"] == goal["id"] else c for c in cards]})()
+    assert console.intro_target(MATCH, fake) == ("See the VAR retraction (63')", {}, goal["id"])

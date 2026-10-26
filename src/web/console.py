@@ -6,7 +6,7 @@ What stays with the producer (the offside margin, the writer settings, the error
 
 Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and suggested line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving. The suggested lines are the duo's proposals for the commentary team, never voiced.
 
-In public mode a visitor who is not signed in gets the same views read only: no decision button, no thumbs, reasons or notes, no producer identity, no offside margin, no writer settings, attempt errors or fallback reason. Every decision and feedback callback asks `security.producer()` again and refuses without writing. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
+In public mode a visitor who is not signed in gets the same views read only, under a one-line intro (`intro`: what the desk is, Replay the match, the card VAR pulled off air; closed for good in that browser): no decision button, no thumbs, reasons or notes, no producer identity, no offside margin, no writer settings, attempt errors or fallback reason. Every decision and feedback callback asks `security.producer()` again and refuses without writing. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
 """
 
 import hashlib
@@ -750,6 +750,35 @@ def viewer(user: str | None) -> html.Div:
     return html.Div(parts, className="who read-note")
 
 
+INTRO = ("A live football editorial desk on a synthetic match: an AI agent explains each key moment, code verifies every number, a producer approves, "
+         "VAR pulls cards off air.")
+# The intro's Replay the match: the replay from kick-off, playing (the state `REPLAY_STEP` leaves after Play), on the desk
+INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk']; }"
+# The intro's VAR retraction: the desk as it stands (the replay stopped at its right end), that card selected
+INTRO_RETRACTION = "function(n, cardId, max) { if (!cardId) { return window.dash_clientside.no_update; } return [cardId, max, null, true, 'Play', 'desk']; }"
+INTRO_HIDE = "function(closed) { return closed ? {'display': 'none'} : {}; }"
+
+
+def intro() -> html.Div:
+    """For a visitor of the read-only view, under the header: what the desk is in one line, Replay the match, the card VAR pulled off air (`intro_target`), and a close button remembered in this browser."""
+    return html.Div([html.Span(INTRO, className="intro-text"),
+                     html.Div([html.Button("Replay the match", id="c-intro-replay", className="btn btn-small btn-cta", n_clicks=0),
+                               html.Button("See the VAR retraction", id="c-intro-var", className="btn btn-small", n_clicks=0, style={"display": "none"}),
+                               html.Button("×", id="c-intro-close", className="intro-close", n_clicks=0, title="Hide this line", **{"aria-label": "Hide this line"})],
+                              className="intro-actions"),
+                     dcc.Store(id="c-intro-closed", storage_type="local"), dcc.Store(id="c-intro-card")], id="c-intro", className="intro")
+
+
+def intro_target(match_id: str | None, store=None) -> tuple[str, dict, str | None]:
+    """(label, style, card id) of the intro's retraction button: the first card VAR pulled off air ("See the VAR retraction (63')"), hidden when the match has none."""
+    cards = (store or get_store()).cards(match_id) if match_id else []
+    pulled = [c for c in cards if c.get("status") == "retracted" and c.get("retracted_on_air")]
+    if not pulled:
+        return "See the VAR retraction", {"display": "none"}, None
+    card = headline_card(pulled)
+    return f"See the VAR retraction ({card.get('minute_label', '')})", {}, card["id"]
+
+
 def layout(user: str | None) -> html.Div:
     """The console; without a user (a visitor in public mode) it is read only. The decision buttons stay in the page, hidden, because the refresh callback sets their state."""
     read_only = user is None
@@ -761,6 +790,7 @@ def layout(user: str | None) -> html.Div:
                      html.Div(id="c-score", className="scoreline"),
                      dcc.RadioItems(id="c-view", options=panels.VIEWS, value="desk", className="view-switch", inputClassName="view-radio", labelClassName="view-label"),
                      replay_bar(), viewer(user)], className="top"),
+        *([intro()] if read_only else []),
         panels.graphics_pane(),
         panels.insights_pane(),
         html.Main([
@@ -889,7 +919,8 @@ def register(app) -> None:
         State("c-sig", "data"), Input("c-replay", "data"))(_refresh_cb)
     app.callback(Output("c-replay-t", "max"), Output("c-replay-t", "marks"), Output("c-replay-t", "value"), Output("c-replay", "data", allow_duplicate=True),
                  Input("c-p-match", "data"), prevent_initial_call="initial_duplicate")(_replay_range_cb)
-    app.clientside_callback(REPLAY_STEP, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled"), Output("c-replay-play", "children"),
+    app.clientside_callback(REPLAY_STEP, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
+                            Output("c-replay-play", "children", allow_duplicate=True),
                             Input("c-replay-play", "n_clicks"), Input("c-replay-tick", "n_intervals"), State("c-replay-t", "value"), State("c-replay-t", "max"),
                             State("c-replay-tick", "disabled"), prevent_initial_call=True)
     app.clientside_callback(REPLAY_MINUTE, Output("c-replay", "data"), Input("c-replay-t", "value"), State("c-replay-t", "max"), prevent_initial_call=True)
@@ -908,4 +939,14 @@ def register(app) -> None:
     app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
     app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
                  State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"))(_context_cb)
+    app.callback(Output("c-intro-var", "children"), Output("c-intro-var", "style"), Output("c-intro-card", "data"), Input("c-p-match", "data"))(lambda m: intro_target(m))
+    app.clientside_callback("function(n) { return true; }", Output("c-intro-closed", "data"), Input("c-intro-close", "n_clicks"), prevent_initial_call=True)
+    app.clientside_callback(INTRO_HIDE, Output("c-intro", "style"), Input("c-intro-closed", "data"))
+    app.clientside_callback(INTRO_REPLAY, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
+                            Output("c-replay-play", "children", allow_duplicate=True), Output("c-view", "value", allow_duplicate=True),
+                            Input("c-intro-replay", "n_clicks"), prevent_initial_call=True)
+    app.clientside_callback(INTRO_RETRACTION, Output("c-rundown", "value", allow_duplicate=True), Output("c-replay-t", "value", allow_duplicate=True),
+                            Output("c-replay", "data", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
+                            Output("c-replay-play", "children", allow_duplicate=True), Output("c-view", "value", allow_duplicate=True),
+                            Input("c-intro-var", "n_clicks"), State("c-intro-card", "data"), State("c-replay-t", "max"), prevent_initial_call=True)
     panels.register(app)

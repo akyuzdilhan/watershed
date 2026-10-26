@@ -32,6 +32,13 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .replay-slider .dash-slider, .replay-slider .rc-slider { margin: 0; }
 .btn-small { padding: 3px 12px; font-size: 13px; }
 @media (max-width: 600px) { .replay { min-width: 100%; max-width: none; } .match-picker { min-width: 0; width: 100%; } }
+/* the visitor's intro line under the header (read-only view only) */
+.intro { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 16px 0; padding: 8px 12px; background: var(--surface-1); border: 1px solid var(--line); border-left: 3px solid var(--var); border-radius: 8px; }
+.intro-text { flex: 1 1 420px; color: var(--ink); }
+.intro-actions { display: flex; gap: 8px; align-items: center; }
+.btn.btn-cta { background: var(--var); border-color: var(--var); color: #fff; }
+.intro-close { background: transparent; border: 0; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; }
+.intro-close:hover { color: var(--ink); }
 .desk { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(360px, 1.5fr) minmax(360px, 1.5fr); gap: 12px; padding: 12px 16px; }
 @media (max-width: 1100px) { .desk { grid-template-columns: 1fr; } }
 .col { background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
