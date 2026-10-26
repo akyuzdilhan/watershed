@@ -37,6 +37,7 @@ All match data is synthetic, produced by the match engine in this repository. No
 | Insight engine: facts that surface live (a substitute's hat-trick, a comeback, a half-time lead lost), ranked by how rare they are in the history, updated or withdrawn as the match goes on, and a stat of the match at full time; written from checked templates | Done, tested | [`src/worker/insights.py`](src/worker/insights.py), [`docs/notes/insights.md`](docs/notes/insights.md) |
 | Storyline: table, relegation stakes, form and head-to-head before kick-off; what the result changed after it | Done, tested | [`src/worker/storyline.py`](src/worker/storyline.py) |
 | Commentary duo: two fictional commentators, in three languages, with a per-match memory against repetition | Deployed: the model writes the lines with each card; templates write the lines on a VAR ruling | [`src/worker/duo.py`](src/worker/duo.py), [`docs/notes/duo.md`](docs/notes/duo.md) |
+| Agents and MCP: a read-only MCP server over the desk and the league history, the Writer reading its facts through it, and an optional commentary duo by two agents in an Agent Framework GroupChat | Built and tested offline with scripted models, behind options; not in the deployed image | [`src/worker/mcp_server.py`](src/worker/mcp_server.py), [`src/worker/duo_agents.py`](src/worker/duo_agents.py), [`docs/notes/agentic.md`](docs/notes/agentic.md) |
 | Match graphics (shot map, goal build-ups, animated set pieces, momentum) and tactical details from the 360 frames | Built | [`src/web/graphics.py`](src/web/graphics.py), [`src/worker/tactics.py`](src/worker/tactics.py) |
 
 **Live run, 26/10/2026, in Azure.** The reference replay of the demo match went through the deployed pipeline in judging mode (auto-approve): the model wrote all 12 card writes (11 cards and one rewrite), 11 verified at the first attempt and 1 at the second; the recap agent's two drafts failed the Verifier (numbers without a claim, then an invalid reply) and the template wrote the recap. 15 model calls of the 40 allowed per match, no HTTP 429, 24.4 s per card attempt at the median (31.5 s at p95), 139,586 input and 42,044 output tokens for the cards. Measures in [`docs/evaluation.md`](docs/evaluation.md#live-run-production-prompt) ("Live run, production prompt"), documents as stored in [`docs/samples/`](docs/samples/).
@@ -76,9 +77,25 @@ pytest                                     # optional, about 5 minutes
 1. `league history` writes the 50 seasons of the fictional league to `data/history/9` in under 10 seconds ("History of seed 9: 1976/77 to 2025/26, 19000 matches, 4000 players").
 2. `worker` replays the demo match offline with the template writer, so no model is called (about 10 seconds). It prints the 11 cards in English, French and Spanish, a hold then a retract on the 63' and 69' goals, the rewrite of the 31' goal at 33', the facts of the insight engine, the recap in three languages, the final score 5-2, and a report against the ground truth with `"recall": 1.0`, `"precision": 1.0` and `"card_actions_correct": true`. It writes the desk, recap included, to `data/desk/demo-0007/`.
 3. `web.app` serves the console at http://127.0.0.1:8050 and the overlay at http://127.0.0.1:8050/overlay. Locally you are the producer: open the 66' goal card, click Edit, change a number and approve the edit: the Verifier refuses it.
-4. `pytest` runs the 635 tests without Azure and without model calls.
+4. `pytest` runs the 726 tests without Azure and without model calls.
 
 To replay the match again, first clear its desk: `python -m worker.reset --match demo-0007 --desk-dir data/desk --yes` (the worker appends to the audit trail). To write with the model instead of the templates, add `--writer foundry` and set `FOUNDRY_PROJECT_ENDPOINT` and `FOUNDRY_MODEL` in `.env` (see `.env.example`), with an `az login` account allowed to call the Foundry project; that calls the model up to 40 times for the match. `python -m worker.recap data/desk/demo-0007` writes the recap again on its own.
+
+### Agents and MCP (optional, local)
+
+Three pieces sit behind options of the worker, off by default; without them the worker does not import them and writes the same outputs byte for byte. They need the `agentic` extra (`pip install -e ".[azure,agents,agentic,dev]"`), which the deployed image does not install, so the deployed demo runs without them.
+
+- **The desk's MCP server**, `watershed-desk` (`src/worker/mcp_server.py`): seven read-only tools, the facts of a card (`get_moment`), the match so far, the pre-match storyline, and the league history (a player, a club, head-to-head, the last time something happened). Any MCP host can open it on stdio over a folder the worker wrote: `python -m worker.mcp_server --desk-dir data/desk --history data/history/9`.
+- **The Writer through MCP** (`--writer foundry --facts mcp`): the Writer reads `get_moment` from that server instead of its local tool, with the same message, Verifier, retry and budget, and falls back to the local tool if the connection cannot open.
+- **The duo by two agents** (`--duo agents`): Wren and Joss as two Agent Framework agents in a GroupChat whose running order is set by code, each with its own MCP tools. They run after the card is on the desk with its template duo, off the card's path, each turn checked by the Verifier before the other agent hears it. Their lines replace the template duo only when the whole exchange passes; otherwise the template duo stays and the audit says why. The lines remain text suggestions for the human commentators.
+
+Offline, with a scripted model for Wren and Joss (no Azure, no cost):
+
+```
+python -m worker data/replay/demo-0007.jsonl.gz --writer template --duo agents --duo-dry --history data/history/9 --league-seed 9 --desk-dir data/desk
+```
+
+Each eligible card then prints a line such as `duo agents:dry: wren, joss (player_history), wren, joss: 4 runs, 0.2 s`, and the run ends with `duo agents (dry): 9 written, {} template, 27 of 36 runs`. The duo has a budget of its own (`--duo-calls`, 36 runs per match), apart from the Writer's 40. Design, budget, latency and what is not yet verified against the real model: [`docs/notes/agents.md`](docs/notes/agents.md); fields and tools: [`docs/contracts.md`](docs/contracts.md#agents-and-mcp-behind-options).
 
 ## Why it matters
 
@@ -282,7 +299,7 @@ Corners (9.2) and offsides (4.0) are only checked against approximate figures, p
 
 - **Private networking.** For an enterprise deployment: Service Bus Premium with a private endpoint, private endpoints for Cosmos DB and Foundry with public network access disabled, and a VNet-integrated Container Apps environment. The demo stays public on purpose: synthetic data, Entra ID only, no ingress on the worker.
 - **A versioned agent and continuous evaluation.** Publish the Writer as a versioned Foundry agent, one version per prompt change, and run scheduled evaluations on a sample of traces (coherence, fluency, groundedness, tool call accuracy) with a judge from another model; the deterministic Verifier stays the hard gate.
-- **Workflow and MCP.** Run Writer, Verifier, template and producer approval as an Agent Framework workflow (`request_info`, checkpoints), and expose the desk read-only over MCP (list cards, get a card, the insights, the recap).
+- **Workflow and MCP in the deployed image.** Run Writer, Verifier, template and producer approval as an Agent Framework workflow (`request_info`, checkpoints), and ship the desk's MCP server and the duo by agents (local today, see "Agents and MCP") in the worker image once a real-model run has measured their fallback rate and latency.
 - **A match resumed after a restart.** Rebuild a match in progress from the Cosmos DB events after a worker restart, with the desk muted until it catches up.
 - **Continuous deployment.** Deploy from GitHub Actions with a federated identity (OIDC) and a production environment with a required reviewer, and replay the evaluation on the live model before each release.
 - **Producer feedback online.** Rebuild the feedback profile from Cosmos DB in the worker, so that online feedback reaches the Writer prompt as it does in local runs.
@@ -336,7 +353,7 @@ A new role assignment can take 5 to 10 minutes to apply; the publisher says so i
 
 ## Tests
 
-`pytest` runs 635 tests in about 5 minutes (some parametrised over 20 matches, the generator checks over 200), without Azure and without model calls: the Writer is replaced by the template, or by scripted replies where the retry, the time limits and the trace are tested. The main files:
+`pytest` runs 726 tests in about 5 minutes (some parametrised over 20 matches, the generator checks over 200), without Azure and without model calls: the Writer is replaced by the template, or by scripted replies where the retry, the time limits and the trace are tested. The main files:
 
 | File | What it proves |
 |---|---|
@@ -347,6 +364,7 @@ A new role assignment can take 5 to 10 minutes to apply; the publisher says so i
 | `tests/test_writer.py` | Style and on-air rules per language; a real name fails and the template takes over; a hostile producer note stays quoted; a slow call is cut and a transient failure is not retried; the trace is written on the card |
 | `tests/test_web.py` | The read-only console and the refusals through real Dash requests; an edit refused by the Verifier; the overlay tags and the retraction; the overlay imports nothing that can call a model |
 | `tests/test_evaluate.py`, `tests/test_telemetry.py`, `tests/test_killswitch.py` | The evaluation report and its perturbations; traces without texts; the kill switch and its restore against fakes of the Azure API |
+| `tests/test_mcp_server.py`, `tests/test_mcp_writer.py`, `tests/test_duo_agents.py`, `tests/test_agent_desk.py` | Every MCP tool in process and on stdio, read-only; the Writer's `get_moment` the same through MCP as local; the duo's running order, the Verifier at each turn (names, number words, off-air counts, em dash, league points verbs), the budget, the deadline, the template kept on failure; without the options nothing of it is imported |
 
 The deployed run with `gpt-5.4-nano` is measured in [`docs/evaluation.md`](docs/evaluation.md#live-run-production-prompt), not in the test suite.
 

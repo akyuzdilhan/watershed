@@ -71,9 +71,10 @@ One entry per step, each written once:
 | Spotter, without a desk | `{id, match_id, card_id, event_id, action, cause, message_id, minute_label}` | `hold`, `release`, `retract`, `rewrite` |
 | Desk, for a card action from the feed | `{id, match_id, card_id, action, by: "feed", version, at, event_id, message_id, minute_label, cause}`, plus `was_on_air` on `retracted` | `hold`, `release`, `retracted`, `rewrite_requested` |
 | Desk, for a draft or a decision | `{id, match_id, card_id, action, by, version, at}`, plus `verified`, `attempts`, `attempts_log`, `fallback_reason` and `writer_config` on `written` (the writer trace; the `feedback` entry is described under producer feedback) | `written`, `approved`, `edited`, `rejected`, `feedback` |
+| Desk with the duo by agents (`--duo agents`, see "Agents and MCP") | `{id, match_id, card_id, action, by: "agents:<model>", version, at, cause}`, plus `turns`, `runs`, `ms`, `tools` on `duo_written`, `reason` on `duo_fallback` | `duo_written`, `duo_fallback` |
 | Insight engine | `{id, match_id, card_id (the insight id), action, by: "insights", version, at}`, plus `cause`, `superseded_by` and `was_on_air` on `superseded` | `proposed`, `updated`, `revived`, `superseded` |
 
-With a desk the Spotter's own line is not written: the desk's entry for the same card action carries its fields. `by` is a model name, `template`, `feed`, `insights`, `auto-approve` or the producer's identity. The `cause` of a superseded insight is `updated` (a new level of the fact), `goal ruled out` (a goal it counted was voided), `no longer true` (the score moved on), `correction` or `outranked` (the cap per period). With a desk, the audit entries of a card or an insight are the steps of its `history`, in the same order (a `feedback` entry leaves the judged document as it was).
+With a desk the Spotter's own line is not written: the desk's entry for the same card action carries its fields. `by` is a model name, `template`, `feed`, `insights`, `auto-approve`, `agents:<model>` or the producer's identity. The `cause` of a superseded insight is `updated` (a new level of the fact), `goal ruled out` (a goal it counted was voided), `no longer true` (the score moved on), `correction` or `outranked` (the cap per period). With a desk, the audit entries of a card or an insight are the steps of its `history`, in the same order (a `feedback` entry leaves the judged document as it was).
 
 ## Producer decisions
 
@@ -159,3 +160,49 @@ A producer's thumbs up or down on one sentence of a card, an insight or the stor
 Audit entry: `{id, match_id, card_id, action: "feedback", by, version, at, target, verdict, reasons}`. The console calls it through `Store.feedback`; like approve, it is refused without a signed-in producer in public mode.
 
 The producer profile (written to `FEEDBACK_PROFILE`, default `data/feedback/profile.json`; the worker reads it only when `FEEDBACK_PROFILE` is set), built by `worker.feedback.build_profile` from every feedback of every match: `{version, built_at, votes, approval_rate, rules: [{rule, source, count, last_at}], examples: {rejected, approved}: [{text, part, lang, moment, family, reasons, note, at}], families and moments: {name: {up, votes, rate, weight}}, demoted: [pattern]}`. Insights whose family the feedback weighs carry `feedback_weight` (their `value` is already weighted). The dataset export (`python -m worker.feedback export`) writes `record: "judgement"` lines (the feedback without `by`) then `record: "pair"` lines `{doc_id, part, lang, facts, field_meanings, chosen, rejected, rejected_reasons, ...}`.
+
+## Agents and MCP (behind options)
+
+Nothing in this section runs by default: without `--facts mcp` or `--duo agents`, the worker neither imports nor starts any of it, and its outputs are unchanged.
+
+### The desk's MCP server (`worker.mcp_server`, server name `watershed-desk`)
+
+Read-only tools over what the desk has written and over the league history. Every value is computed by code. A tool returns text content only (no output schema): the JSON `{"facts": {field: value}, "field_meanings": {field: meaning}, "subject": [club or player names]}`, at most 40 facts, each value a string or a number (never a bool, a list or null), or `{"error": message}`. `get_moment` returns exactly the JSON of the Writer's local `get_moment` tool (`{"facts", "field_meanings"}`, no subject). Every tool is annotated `readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false`; an argument outside its enum or over its length (in brackets) is refused before the tool runs.
+
+| Tool | Arguments | Fields | Read-only | Transport |
+|---|---|---|---|---|
+| `get_moment` | `card_id` | the facts of a card, an insight or the storyline, as the Writer gets them (`card_facts`, `insight_facts`) | yes | in process (`--facts mcp`); stdio |
+| `get_match_state` | `card_id` (120) | `match_minute`, `match_score_now`, `match_goal_log`, `match_<club>_goals`, `match_<club>_red_cards`, `match_<club>_largest_deficit` (goals ruled out not counted) | yes | in process (`--duo agents`); stdio |
+| `get_storyline` | `match_id` (120) | `story_thread<i>_angle`, `story_<storyline field>` (no league points, no `_pts` field, no list), `history_through` | yes | in process (`--duo agents`); stdio |
+| `player_history` | `name` (80), `club` (60, optional) | `player_<name>_name`, `_league_goals`, `_appearances`, `_sub_appearances`, `_first_season`, `_clubs`, `_goals_last_season`, `_best_season`, `_best_season_goals`, `history_through` | yes | in process (`--duo agents` with `--history`); stdio with `--history` |
+| `club_history` | `club` (60) | `club_<club>_titles`, `_seasons_in_league`, `_best_finish`, `_founded_season`, `_last_title_season`, `_seasons_since_last_title`, `history_through` | yes | as above |
+| `head_to_head` | `club_a`, `club_b` (60) | `h2h_<a>_<b>_meetings`, `_draws`, `_first_season`, `_<club>_wins`, `_last_meeting`, `_biggest_<club>_win`, `history_through`; the clubs in alphabetical order, so the text is the same both ways | yes | as above |
+| `last_time` | `kind` (`hat_trick`, `hat_trick_by_substitute`, `brace_by_substitute`, `comeback_win_from_two_down`), `club` (60, optional) | `<key>_count`, `<key>_seasons_with_one`, `last_<key>_season` (or `never in the history`), `last_<key>_match`, `last_<key>_seasons_ago`, `last_<key>_club`, `last_<key>_player`, `history_seasons`, `history_since`, `history_through`; `<key>` is the kind, followed by the club's slug when one is given; `<key>_count` and the league-wide `<kind>_seasons_with_one` are context for the agents, refused on air by their Verifier | yes | as above |
+
+Stdio: `python -m worker.mcp_server --desk-dir D [--history H]` serves the same tools for any MCP host over a folder written by the worker with `--desk-dir` (cards, insights, storyline and state are read again at each call; `get_moment` gives the same JSON as in process; a `match_id` that is not a folder right under `D` reads nothing). Nothing but the protocol goes to stdout.
+
+The history facts stop at `history_through`: the current season and the match in progress are never in them. Rarity is told in seasons, never as a number of matches, and no value lies between 0 and 1 (the Verifier reads such a number as a misused probability).
+
+### The duo by two agents (`--duo agents`, `worker.duo_agents`, `worker.agent_desk`)
+
+The card is written, checked and stored as by the plain desk, with the template duo. For a card worth it (moment goal, save, red card or chance, not `on_air_priority: low`, `value_pts` at least `--duo-min-value`), the Writer writes the texts only; then Wren and Joss, two agents with their own MCP tools (Wren `get_match_state`, `get_storyline`; Joss the four history tools), speak in a running order fixed by code, each turn checked by the Verifier before the other hears it. When the exchange passes, its lines replace the template duo; the texts and the producer's decisions (`status`, `texts`, `history`, `retracted_on_air`, read back from the store) are kept. When it does not, the template duo stays. `duo_ruling` (VAR) is never written by the agents.
+
+| Field (cards) | Type | Meaning |
+|---|---|---|
+| `duo_writer` | string | also `agents:<model>` (`agents:dry` offline) when the agents' duo replaced the template |
+| `duo_trace` | object | `{model, plan: [[speaker, role]], turns: [{slot, speaker, role, attempts, ms, tools: [{name, args, fields, error}], rejected, verified}], runs, ms, tool_facts: {field: {value, tool, args}}, conflicts, applied, reason, repetition_warnings}`; set when the agents ran, or were skipped for the budget or a failed hand-over, for the current version only (a rewrite drops the trace of the version before). `tool_facts`: the tool facts the lines rely on (claimed, holding a name a line says, or backing a number word); `conflicts`: tool values that differed from a fact of the card or of an earlier tool result, set aside |
+
+Re-verification: a duo written by the agents passes `verify_duo(duo, languages, card_facts ∪ {field: value of tool_facts})`, and every number of a line is claimed against those facts. On top of the Writer's duo checks, each line was refused for a capitalised word absent from the facts and tool results (Wren, Joss and VAR aside), at the start of a sentence too, where only a common word of the language may stand; a number word without a whole-number fact of that value (three, trois, tres, tercer, tercera, a number in several words read whole such as dix-sept, and the words for a player's goals in a match: hat-trick, brace, doublé, triplé, doblete, triplete, póker); at the table turn, no `season_` claim; a tool number in a sentence that does not name what the tool result is about (its `subject`; a player's surname is enough); and a claim on a tool's `_count` field or on `last_time`'s league-wide `<kind>_seasons_with_one`, which also back no number word.
+
+Audit entries: `duo_written` (`by: agents:<model>`, with `cause` (who spoke, the tools called, runs and seconds), `turns`, `runs`, `ms`, `tools` such as `player_history(Marijn Scarpetta)`), or `duo_fallback` (`by: agents:<model>`, with `reason` and `cause`), the reason one of `numbers`, `style`, `names`, `table`, `subject`, `format`, `final`, `budget`, `timeout`, `stale`, `cancelled`, `retracted`, `rejected`, `error:<type>`. A job for a version of the card that was rewritten since writes nothing.
+
+Options of `python -m worker` (all off by default):
+
+| Option | Effect |
+|---|---|
+| `--facts mcp` | with `--writer foundry`: `get_moment` is read through the desk's MCP server in process (`worker.mcp_writer.McpWriter`); same prompt, tool and JSON |
+| `--duo agents` | the duo by Wren and Joss after the card; needs `--writer template` or `--writer foundry` |
+| `--duo-dry` | with `--duo agents`: an offline model that speaks the template lines (no Azure, no cost) |
+| `--duo-calls` | agent runs per match for the duo (default 36), apart from the Writer's 40; a turn or a retry is one run; a job reserves the runs of its turns when it is submitted, and is not submitted (`budget`) when they are not free |
+| `--duo-min-value` | minimum `value_pts` of a card for the agents (default 10) |
+| `--duo-deadline` | seconds for one exchange from its start (default 30); beyond, the template duo stays |
