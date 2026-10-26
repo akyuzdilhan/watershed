@@ -132,20 +132,20 @@ The generator is a small match engine, stepped like a state machine: `Clock` (ma
 
 | | Generator | Real reference |
 |---|---|---|
-| Goals | 3.00 | 2.87, Premier League 2024/25 |
-| Expected goals (xG) | 2.97 | 2.89, Premier League 2024/25 (FotMob) |
-| Shots | 25.1 | about 26, Premier League 2024/25 (Opta) |
+| Goals | 2.94 | 2.87, Premier League 2024/25 |
+| Expected goals (xG) | 2.94 | 2.89, Premier League 2024/25 (FotMob) |
+| Shots | 24.9 | about 26, Premier League 2024/25 (Opta) |
 | Shots from outside the box | 33 % | 31.7 %, Premier League 2024/25 (Opta) |
 | Passes, throw-ins excluded | 979 | about 893, Premier League 2024/25 (FootballCritic, FotMob) |
 | Pass completion | 84 % | 83.7 %, Premier League 2024/25 (FotMob) |
 | Pass length | 20.8 m | 20.5 m, our computation on 38 matches of StatsBomb open data, Premier League 2015/16 |
-| Fouls | 21.4 | 25, same StatsBomb sample |
-| Yellow cards | 3.4 | 4.2, Premier League 2023/24 (Opta) |
-| Tackles | 41.1 | 35 (FotMob 2024/25) to 42 (StatsBomb 2015/16) |
+| Fouls | 21.5 | 25, same StatsBomb sample |
+| Yellow cards | 3.5 | 4.2, Premier League 2023/24 (Opta) |
+| Tackles | 40.9 | 35 (FotMob 2024/25) to 42 (StatsBomb 2015/16) |
 | Interceptions | 14.5 | 16 (FotMob 2024/25) to 24 (StatsBomb 2015/16) |
-| Added time | 9.4 min (3.4 + 6.0) | 9:44 (2024/25) and 10:35 (2025/26, first seven matchdays): average match length minus 90 minutes (Opta) |
+| Added time | 9.5 min (3.5 + 6.0) | 9:44 (2024/25) and 10:35 (2025/26, first seven matchdays): average match length minus 90 minutes (Opta) |
 
-Corners (9.0) and offsides (3.8) are only checked against approximate figures, and the split of added time between the halves is an estimate. `python -m generator --calibrate 200` prints the table; `tests/test_generator.py` checks that each mean stays inside its band (`src/generator/calibration.py`).
+Corners (9.2) and offsides (4.0) are only checked against approximate figures, and the split of added time between the halves is an estimate. `python -m generator --calibrate 200` prints the table; `tests/test_generator.py` checks that each mean stays inside its band (`src/generator/calibration.py`).
 
 ## Modelling principles
 
