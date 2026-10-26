@@ -931,7 +931,6 @@ def live_figure(feed: dict, seq: list[dict], theme="dark", width: int | None = N
         fig.add_trace(go.Scatter(x=[bx], y=[by], mode="markers", hoverinfo="skip", showlegend=False, meta={"live": "ball"},
                                  marker={"size": 15, "color": t["ball"], "line": {"color": t[last["team"]], "width": 3}}))
     teams = team_names(feed.get("info"))
-    fig.update_layout(title_text=_title(f"Live {seq[-1].get('minute_label', '') if seq else ''}",
-                                        f"<span style='color:{t['home']}'>{teams['home']}</span> attacks right, <span style='color:{t['away']}'>{teams['away']}</span> left"),
-                      showlegend=False, meta={"live": [a["event_id"] for a in seq]})
+    fig.update_layout(title_text=f"<b>{seq[-1].get('minute_label', '') if seq else ''}</b>  <span style='font-size:12px'><span style='color:{t['home']}'>{teams['home']}</span> attacks right, "
+                                 f"<span style='color:{t['away']}'>{teams['away']}</span> left</span>", showlegend=False, meta={"live": [a["event_id"] for a in seq]})
     return fig

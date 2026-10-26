@@ -1333,6 +1333,8 @@ def test_a_live_pitch_follows_the_replay_and_the_card_s_moment_comes_back_when_p
     assert "This moment on the pitch" in texts_in(paused)  # paused next to the card: its moment
     far, _ = console.context(MATCH, goal["id"], "en", None, feed_desk, t=20.0, playing=False)
     assert "Live" in texts_in(far) and "This moment on the pitch" not in texts_in(far)  # paused far from the card: the live pitch
+    clicked, _ = console.context(MATCH, goal["id"], "en", None, feed_desk, t=20.0, playing=False, picked=True)
+    assert "This moment on the pitch" in texts_in(clicked)  # unless the viewer clicked that card
     assert console.show_live(None, None, True) is False and console.live_minute({"final": True, "wp_timeline": []}, None) is None
     assert "margin" not in texts_in(playing).lower()
 

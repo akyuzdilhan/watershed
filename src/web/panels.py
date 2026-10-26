@@ -635,7 +635,7 @@ def live_block(feed: dict | None, t: float | None, shift: float = 0.0) -> list:
     if not seq:
         return [html.H3("Live"), html.P("Kick-off: no action yet.", className="muted small")]
     fig = _sized(G.live_figure(feed, seq, THEME, None), 300)
-    fig.update_layout(margin={"l": 6, "r": 6, "t": 48, "b": 6})
+    fig.update_layout(margin={"l": 6, "r": 6, "t": 30, "b": 6}, title={"y": 0.98, "yanchor": "top", "font": {"size": 13}})
     return [html.H3("Live"), html.Div(" · ".join(G.ticker(feed, seq)), className="ticker", **{"aria-live": "polite"}),
             dcc.Graph(figure=fig, config={"displayModeBar": False, "staticPlot": True}, className="ctx-figure live-figure"), html.P(LIVE_NOTE, className="muted small")]
 
