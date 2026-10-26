@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from web.matchfeed import build, load
-from worker.analysis import (ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, defenders_taken_out, dry_analyst, feed_actions, fill_note, note_scores,
+from worker.analysis import (ANALYST_EXAMPLE, ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, defenders_taken_out, dry_analyst, feed_actions, fill_note, note_scores,
                              parse_analysis, template_analysis, verify_analysis)
 from worker.desk import Desk
 from worker.pipeline import MemorySink, Pipeline
@@ -46,7 +47,8 @@ def test_every_goal_of_the_demo_has_its_facts_each_with_a_meaning(feed):
     assert [c["minute_label"] for c in cards] == GOAL_MINUTES
     for card in cards:
         facts, meanings = analysis_facts(feed, card)
-        assert set(facts) == set(meanings) and facts["minute"] == card["minute_label"] and facts["moment"] == "goal"
+        assert set(facts) == set(meanings) and "minute" not in facts and facts["moment"] == "goal"
+        assert not any(w in k or w in m for k, m in meanings.items() for w in ("median", "recent", "window"))  # no field invites a word the Verifier refuses
         assert facts["passes_in_move"] >= 2 and facts["move_duration_s"] > 0 and 0 < facts["xg_pct"] < 100
         assert all(isinstance(v, (str, int, float)) for v in facts.values())
 
@@ -69,7 +71,7 @@ def test_the_52nd_minute_goal_is_measured_on_the_move(feed):
     facts, _ = facts_at(feed, "52'")
     assert (facts["team"], facts["opponent"], facts["regain_how"], facts["regain_zone"], facts["high_regain"]) == ("Varleigh", "Yarnford", "tackle", "own_third", False)
     assert (facts["regain_from_own_goal_m"], facts["passes_in_move"], facts["move_duration_s"], facts["best_pass_defenders_taken_out"]) == (19, 5, 12, 3)
-    assert facts["opponent_line_moved"] == "deeper" and facts["team_threat_trend"] == "up" and facts["team_threat_share_change_pts"] >= 15
+    assert facts["opponent_line_moved"] == "deeper" and facts["team_threat_trend"] == "up" and facts["team_threat_share_shift_pts"] >= 15
 
 
 def test_only_the_actions_before_the_shot_count(feed):
@@ -114,12 +116,12 @@ def test_the_notes_are_the_strongest_facts_in_the_same_order_in_every_language(f
     assert keys == ["threat_up", "counter"]
     for lang in LANGS:
         assert [sorted(c["source_field"] for c in l["claims"]) for l in texts[lang]] == [
-            ["team_threat_share_before_pct", "team_threat_share_recent_pct", "threat_window_min"], ["move_duration_s", "passes_in_move", "regain_from_own_goal_m"]]
+            ["team_threat_share_before_shot_pct", "team_threat_share_earlier_pct"], ["move_duration_s", "passes_in_move", "regain_from_own_goal_m"]]
     assert "63%" in texts["en"][0]["line"] and "63 %" in texts["fr"][0]["line"] and "28%" in texts["es"][0]["line"]
 
 
 def test_french_and_spanish_decimals_use_a_comma():
-    facts = {"shooter": "Ari Holt", "shooter_space_m": 6.1, "match_median_space_m": 2.3, "home_team": "Varleigh", "away_team": "Yarnford"}
+    facts = {"shooter": "Ari Holt", "shooter_space_m": 6.1, "typical_space_m": 2.3, "home_team": "Varleigh", "away_team": "Yarnford"}
     lines = {lang: template_analysis(facts, [lang], count=1)[lang][0]["line"] for lang in LANGS}
     assert "6.1 m" in lines["en"] and "6,1 m" in lines["fr"] and "6,1 m" in lines["es"]
     assert all(verify_analysis({lang: template_analysis(facts, [lang], count=2)[lang]}, [lang], facts)["languages"][lang]["count_ok"] is False for lang in LANGS)
@@ -127,7 +129,7 @@ def test_french_and_spanish_decimals_use_a_comma():
 
 def test_every_note_verifies_in_every_language_when_its_facts_are_there(feed):
     facts, _ = facts_at(feed, "52'")
-    facts = facts | {"high_regain": True, "shooter_space_m": 6.1, "match_median_space_m": 2.3, "opponent_line_moved": "higher", "opponent_line_change_m": 4}
+    facts = facts | {"high_regain": True, "shooter_space_m": 6.1, "typical_space_m": 2.3, "opponent_line_moved": "higher", "opponent_line_gap_m": 4}
     cases = [(key, how) for key in NOTES for how in (HOW["en"] if key in ("high_regain", "counter", "build_up", "quick") else ["tackle"])]
     for key, how in cases:
         for lang in LANGS:
@@ -149,10 +151,10 @@ def good(feed):
     ("en", f"Varleigh broke fast {EM_DASH} 12 s to the shot.", [{"value": 12, "source_field": "move_duration_s"}], "em_dash"),
     ("en", "Varleigh were onside, the runner offside by 12 cm before.", [{"value": 12, "source_field": "move_duration_s"}], "offside_margin"),
     ("fr", "Varleigh, hors-jeu de 12 m avant.", [{"value": 12, "source_field": "move_duration_s"}], "offside_margin"),
-    ("en", "Varleigh take 35 points from this spell.", [{"value": 35, "source_field": "team_threat_share_change_pts"}], "league_points_verb"),
-    ("fr", "Varleigh va prendre 35 points sur cette période.", [{"value": 35, "source_field": "team_threat_share_change_pts"}], "league_points_verb"),
-    ("es", "El Varleigh puede ganar 35 puntos aquí.", [{"value": 35, "source_field": "team_threat_share_change_pts"}], "league_points_verb"),
-    ("en", "Varleigh were 63 points ahead.", [{"value": 63, "source_field": "team_threat_share_recent_pct"}], "points_not_from_pts_field"),
+    ("en", "Varleigh take 35 points from this spell.", [{"value": 35, "source_field": "team_threat_share_shift_pts"}], "league_points_verb"),
+    ("fr", "Varleigh va prendre 35 points sur cette période.", [{"value": 35, "source_field": "team_threat_share_shift_pts"}], "league_points_verb"),
+    ("es", "El Varleigh puede ganar 35 puntos aquí.", [{"value": 35, "source_field": "team_threat_share_shift_pts"}], "league_points_verb"),
+    ("en", "Varleigh were 63 points ahead.", [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}], "points_not_from_pts_field"),
     ("en", "A move like that comes once in 12 matches for Varleigh.", [{"value": 12, "source_field": "move_duration_s"}], "league_rate"),
     ("en", "Varleigh were 5 times rarer than that.", [{"value": 5, "source_field": "passes_in_move"}], "league_rate"),
     ("en", "That move is worth 5 bits for Varleigh.", [{"value": 5, "source_field": "passes_in_move"}], "league_rate"),
@@ -161,10 +163,10 @@ def good(feed):
     ("fr", "La pression de l'Yarnford a cédé.", [], "article_before_team"),
     ("en", "Varleigh played it like Erling Haaland.", [], "unknown_names"),
     ("en", "Varleigh's line played higher (34 m, 31 m).", [{"value": 34, "source_field": "regain_from_own_goal_m"}], "data_dump"),
-    ("en", "Varleigh had space against a 2.8 m match median.", [{"value": 2.8, "source_field": "match_median_space_m"}], "field_word"),
+    ("en", "Varleigh had space against a 2.8 m match median.", [{"value": 2.8, "source_field": "typical_space_m"}], "field_word"),
     ("en", "Varleigh's recent line was deep.", [], "field_word"),
     ("en", "Varleigh's line moved, change 3.", [{"value": 3, "source_field": "best_pass_defenders_taken_out"}], "field_word"),
-    ("en", "Varleigh's opponent_line_recent_m was low.", [], "field_word"),
+    ("en", "Varleigh's opponent_line_before_shot_m was low.", [], "field_word"),
     ("fr", "Varleigh avait de l'espace, contre une médiane faible.", [], "field_word"),
     ("en", "Varleigh won it 19 m out, then 5 passes in 12 s.", [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 5, "source_field": "passes_in_move"},
                                                             {"value": 12, "source_field": "move_duration_s"}], "too_many_numbers"),
@@ -196,7 +198,15 @@ def test_a_reply_has_its_em_dashes_normalised_like_every_model_text():
 
 
 def test_the_instructions_name_the_on_air_rules():
-    assert "never numbers in brackets" in ANALYST_INSTRUCTIONS and "At most 2 numbers in a sentence" in ANALYST_INSTRUCTIONS
+    from worker.writer import WRITER_INSTRUCTIONS
+
+    for rule in ("At most 2 numbers in a sentence", "Never write the minute", "Never the words median, médiane, mediana, recent", "Never numbers in brackets",
+                 "There is no minute field"):
+        assert rule in ANALYST_INSTRUCTIONS, rule
+    for lang in ("fr", "es"):  # the Writer's rule on clubs, word for word
+        line = next(l for l in WRITER_INSTRUCTIONS.splitlines() if l.startswith(f"- {lang}:"))
+        assert line in ANALYST_INSTRUCTIONS
+    assert "<writer_rules>" not in ANALYST_INSTRUCTIONS and json.dumps(ANALYST_EXAMPLE, ensure_ascii=False) in ANALYST_INSTRUCTIONS
     assert EM_DASH not in ANALYST_INSTRUCTIONS and "by a whisker" in ANALYST_INSTRUCTIONS and "d'un rien" in ANALYST_INSTRUCTIONS and "get_analysis_facts" in ANALYST_INSTRUCTIONS
     assert all(EM_DASH not in t for by_lang in NOTES.values() for t in by_lang.values())
 
@@ -254,6 +264,25 @@ def test_a_timeout_goes_to_the_template_at_once(feed):
     assert doc["writer"] == "template" and doc["verification"]["attempts"] == 1 and doc["verification"]["fallback_reason"] == "timeout" and len(agent.prompts) == 1
 
 
+def test_the_example_of_the_instructions_passes_the_verifier_on_the_real_facts(feed):
+    facts, _ = facts_at(feed, "52'")
+    report = verify_analysis(ANALYST_EXAMPLE, LANGS, facts)
+    assert report["verified"], [e for e in report["lines"] if not e["verified"]]
+    assert all(len(re.findall(r"[.!?](?:\s|$)", l["line"])) <= 2 for lines in ANALYST_EXAMPLE.values() for l in lines)
+    assert all(sum(len(re.findall(r"[.!?](?:\s|$)", l["line"])) for l in lines) == 3 for lines in ANALYST_EXAMPLE.values())
+
+
+def test_the_retry_carries_every_problem_and_what_the_rule_means(feed):
+    facts, texts = good(feed)
+    bad = {**texts, "en": [texts["en"][0], {"line": "At 52', Varleigh went 19 m in 12 s with 5 passes.", "claims": [{"value": "52'", "source_field": "minute"}]}],
+           "fr": [texts["fr"][0], {"line": "Le Yarnford recule face à Varleigh.", "claims": []}]}
+    doc, agent, _ = run_analysis(feed, json.dumps(bad, ensure_ascii=False), json.dumps(texts, ensure_ascii=False))
+    note = agent.prompts[1]
+    assert doc["verified"] and doc["verification"]["attempts"] == 2
+    assert "en line 2" in note and "too_many_numbers" in note and "article_before_team: Le Yarnford" in note and "unclaimed_numbers" in note
+    assert "Fix: " in note and "every digit group counted" in note and "never write the minute" in note and "make the club the subject" in note
+
+
 def test_the_analyst_takes_its_own_model_effort_and_budget(monkeypatch):
     for key in ("FOUNDRY_MODEL", "FOUNDRY_REASONING_EFFORT", "FOUNDRY_MAX_TOKENS", "FOUNDRY_ANALYST_MODEL", "FOUNDRY_ANALYST_REASONING_EFFORT", "FOUNDRY_ANALYST_MAX_TOKENS"):
         monkeypatch.delenv(key, raising=False)
@@ -306,7 +335,7 @@ def test_every_goal_and_the_save_get_verified_notes_and_the_red_card_none(demo):
     for c in cards:
         if "analysis" in c:
             a = c["analysis"]
-            assert a["verified"] and a["writer"] == "template" and a["card_version"] == c["version"] and a["facts_version"] == 2
+            assert a["verified"] and a["writer"] == "template" and a["card_version"] == c["version"] and a["facts_version"] == 3
             assert sorted(a["texts"]) == sorted(LANGS) and a["machine_translated"] == ["es"] and set(a["facts"]) == set(a["field_meanings"])
 
 
@@ -346,11 +375,34 @@ def test_the_dry_analyst_runs_the_model_path_off_the_critical_path(messages):
 
 
 def test_the_analyst_has_a_budget_of_its_own(messages):
-    sink, desk = run_demo(messages, dry_analyst(), calls=2)
+    sink, desk = run_demo(messages, dry_analyst(), calls=3)
     notes = [c["analysis"] for c in sink.cards.values() if "analysis" in c]
     by_model = [a for a in notes if a["writer"] == "dry"]
-    assert 1 <= len(by_model) <= 2 and desk.analyst_calls["demo-0007"] <= 2 and desk.calls.get("demo-0007", 0) == 0
+    assert desk.analyst_calls["demo-0007"] == 3 and desk.calls.get("demo-0007", 0) == 0  # one call each: nothing held for a retry
+    assert 2 <= len(by_model) <= 3  # a call made for the 31' card before the feed rewrote it is spent on a version that is dropped
     assert all(a["verification"]["fallback_reason"] == "budget" for a in notes if a["writer"] == "template")
+
+
+class Refused:
+    """A model whose replies the Verifier always refuses: every job spends both its calls, when it has two."""
+
+    name = "refused"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def write_async(self, card_id, facts, languages, note=None, max_tokens=None):
+        self.calls += 1
+        return "not json"
+
+
+def test_a_call_counts_when_it_is_made_and_the_cap_holds(messages):
+    writer = Refused()
+    sink, desk = run_demo(messages, writer, calls=3)
+    notes = sorted((c["analysis"] for c in sink.cards.values() if "analysis" in c), key=lambda a: a["verification"]["attempts"], reverse=True)
+    assert writer.calls == 3 and desk.analyst_calls["demo-0007"] == 3
+    assert notes[0]["verification"]["attempts"] == 2 and sum(a["verification"]["attempts"] for a in notes) <= 3 and all(a["writer"] == "template" for a in notes)
+    assert sum(1 for a in notes if a["verification"]["fallback_reason"] == "budget") >= len(notes) - 2
 
 
 def test_notes_finished_after_a_retraction_are_marked_retracted(feed):

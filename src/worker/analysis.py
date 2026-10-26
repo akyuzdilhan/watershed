@@ -19,12 +19,12 @@ from typing import Any
 
 from worker import tactics as T
 from worker.duo import fr_de, fr_typography
-from worker.writer import (EM_DASH, LANGUAGES, MACHINE_TRANSLATED, AgentWriter, check_numbers, model_attempts, names_ok, no_em_dash, normalise, numbers_in, style_issues,
+from worker.writer import (EM_DASH, LANGUAGES, WRITER_INSTRUCTIONS, MACHINE_TRANSLATED, AgentWriter, check_numbers, model_attempts, names_ok, no_em_dash, normalise, numbers_in, style_issues,
                            word_count)
 
 log = logging.getLogger(__name__)
 
-FACTS_VERSION = 2  # 2: defenders taken out by the stricter rule (goal-side at the pass, behind the receiver at reception)
+FACTS_VERSION = 3  # 3: no minute, no field named after a median or a window; 2: defenders taken out goal-side at the pass, behind the receiver at reception
 ANALYSIS_MOMENTS = ("goal", "chance", "save")
 PATIENT_S = 25  # a move this long is build-up, a shorter one a quick break
 MIN_PROGRESS_M = 10.0  # a pass that gains less ground takes nobody out
@@ -97,7 +97,7 @@ def analysis_facts(feed: list[dict], card: dict, teams: dict[str, str] | None = 
     team, opponent = names[side], names[opp]
     regain_x = T.actor_location(first)[0]
     how = _regain_how(feed, first)
-    facts: dict[str, Any] = {"minute": card.get("minute_label") or shot.get("minute_label"), "moment": card["moment"], "team": team, "opponent": opponent,
+    facts: dict[str, Any] = {"moment": card["moment"], "team": team, "opponent": opponent,
                              "home_team": names["home"], "away_team": names["away"], "shooter": shot["player"]["name"],
                              "xg_pct": round(100 * shot["shot"]["xg"]) if shot.get("shot") else None,
                              "regain_how": how, "regain_player": first["player"]["name"], "regain_from_own_goal_m": round(regain_x),
@@ -107,7 +107,7 @@ def analysis_facts(feed: list[dict], card: dict, teams: dict[str, str] | None = 
                              "passes_in_move": sum(1 for a in move[:-1] if a.get("action_type") in T.PASS_TYPES),
                              "carries_in_move": sum(1 for a in move[:-1] if a.get("action_type") in CARRIES),
                              "players_in_move": len({a["player"]["id"] for a in move}), "move_duration_s": round(shot["clock_s"] - first["clock_s"])}
-    meanings = {"minute": "match minute of the shot", "moment": "what the card is about: goal, chance (a shot that missed) or save (a shot the keeper stopped)",
+    meanings = {"moment": "what the card is about: goal, chance (a shot that missed) or save (a shot the keeper stopped)",
                 "team": "the attacking team, whose possession ended in the shot", "opponent": "the defending team", "home_team": "home club of the match",
                 "away_team": "away club of the match", "shooter": "player who took the shot", "xg_pct": "chance the shot had of being a goal (expected goals), in %",
                 "regain_how": "how the attacking team won the ball at the start of the possession: tackle, interception, keeper (a catch), a restart (throw_in, goal_kick, free_kick, corner, penalty), clearance (picked up after an opponent's clearance), misplaced_pass (an opponent's pass that went astray) or loose_ball",
@@ -133,28 +133,26 @@ def analysis_facts(feed: list[dict], card: dict, teams: dict[str, str] | None = 
         facts["shooter_space_m"] = round(mine[-1]["space_m"], 1)
         meanings["shooter_space_m"] = "distance in metres from the shooter to the nearest opponent (keeper included) when the ball reached him in this move"
         if spaces:
-            facts["match_median_space_m"] = round(statistics.median(s["space_m"] for s in spaces), 1)
-            meanings["match_median_space_m"] = "median of the same distance over every reception of the match so far, both teams"
+            facts["typical_space_m"] = round(statistics.median(s["space_m"] for s in spaces), 1)
+            meanings["typical_space_m"] = "the space a player usually had when receiving the ball in this match so far, both teams (half the receptions had less): say \"far more than usual\", never name how it is computed"
     heights = [r for r in T.line_heights(before) if r["in_possession"] == side]
     recent = [r[opp] for r in heights if shot["clock_s"] - LINE_WINDOW_S <= r["clock_s"] < shot["clock_s"]]
     if recent and len(heights) > len(recent):
         last, usual = round(statistics.median(recent)), round(statistics.median(r[opp] for r in heights))
-        facts |= {"line_window_min": LINE_WINDOW_S // 60, "opponent_line_recent_m": last, "opponent_line_match_m": usual, "opponent_line_change_m": abs(last - usual),
+        facts |= {"opponent_line_before_shot_m": last, "opponent_line_usual_m": usual, "opponent_line_gap_m": abs(last - usual),
                   "opponent_line_moved": "higher" if last > usual else "deeper" if last < usual else "same"}
-        meanings |= {"line_window_min": "length in minutes of the window before the shot",
-                     "opponent_line_recent_m": "median distance in metres from the defending team's goal line to its deepest outfield player while the attacking team had the ball, in that window",
-                     "opponent_line_match_m": "the same median over the match so far", "opponent_line_change_m": "difference between the two, in metres",
-                     "opponent_line_moved": "how the defending team's line sat in that window against its match median: higher, deeper or same"}
+        meanings |= {"opponent_line_before_shot_m": "how far in metres the defending team's last outfield defender usually stood from its own goal line while the attacking team had the ball, in the 5 minutes before the shot",
+                     "opponent_line_usual_m": "the same over the whole match so far, \"on average\"", "opponent_line_gap_m": "difference between the two, in metres",
+                     "opponent_line_moved": "how the defending team's line sat in the 5 minutes before the shot against the rest of the match: higher, deeper or same"}
     t = shot["clock_s"]
     last_share = _shares(before, side, t - THREAT_WINDOW_S, t)
     prev_share = _shares(before, side, t - 2 * THREAT_WINDOW_S, t - THREAT_WINDOW_S)
     if last_share is not None and prev_share is not None and t >= 2 * THREAT_WINDOW_S:
-        facts |= {"threat_window_min": THREAT_WINDOW_S // 60, "team_threat_share_recent_pct": last_share, "team_threat_share_before_pct": prev_share,
-                  "team_threat_share_change_pts": abs(last_share - prev_share), "team_threat_trend": "up" if last_share > prev_share else "down" if last_share < prev_share else "level"}
-        meanings |= {"threat_window_min": "length in minutes of each window",
-                     "team_threat_share_recent_pct": "attacking team's share of the threat both teams created in the window just before the shot, in %; threat is the gain in shot value (xG of a shot from there) of completed passes and carries",
-                     "team_threat_share_before_pct": "the same share in the window before that, in %",
-                     "team_threat_share_change_pts": "difference between the two shares, in percentage points", "team_threat_trend": "direction of that change for the attacking team: up, down or level"}
+        facts |= {"team_threat_share_before_shot_pct": last_share, "team_threat_share_earlier_pct": prev_share,
+                  "team_threat_share_shift_pts": abs(last_share - prev_share), "team_threat_trend": "up" if last_share > prev_share else "down" if last_share < prev_share else "level"}
+        meanings |= {"team_threat_share_before_shot_pct": "attacking team's share of the threat both teams created in the ten minutes before the shot (say \"in the last ten minutes\", in words), in %; threat is the gain in shot value (xG of a shot from there) of completed passes and carries",
+                     "team_threat_share_earlier_pct": "the same share in the ten minutes before that, in %",
+                     "team_threat_share_shift_pts": "difference between the two shares, in percentage points", "team_threat_trend": "direction of that change for the attacking team: up, down or level"}
     facts = {k: v for k, v in facts.items() if v is not None}
     return facts, {k: v for k, v in meanings.items() if k in facts}
 
@@ -197,18 +195,18 @@ NOTES = {  # pundit sentences: at most 2 numbers in each (analysis_issues), and 
     "space": {"en": "{shooter} had {shooter_space_m} m of space when the ball arrived, far more than anyone usually gets in this match. Nobody was close enough to block.",
               "fr": "{shooter} reçoit avec {shooter_space_m} m d'espace, bien plus que d'habitude dans ce match. Personne n'est assez près pour contrer.",
               "es": "{shooter} recibe con {shooter_space_m} m de espacio, mucho más de lo habitual en este partido. Nadie llega a tiempo para tapar el tiro."},
-    "line_higher": {"en": "{opponent} had pushed their back line up in the last {line_window_min} minutes. Their last defender sat {opponent_line_recent_m} m from goal against {opponent_line_match_m} m on average, leaving space in behind.",
-                    "fr": "{opponent} avait remonté sa ligne sur les {line_window_min} dernières minutes. Son dernier défenseur était à {opponent_line_recent_m} m de son but, contre {opponent_line_match_m} m en moyenne : de l'espace dans le dos.",
-                    "es": "El {opponent} había adelantado su línea en los últimos {line_window_min} minutos. Su último defensor estaba a {opponent_line_recent_m} m de su portería, frente a {opponent_line_match_m} m de media: espacio a la espalda."},
-    "line_deeper": {"en": "{opponent} had dropped deep in the last {line_window_min} minutes. Their last defender sat {opponent_line_recent_m} m from goal against {opponent_line_match_m} m on average, inviting pressure they could not hold.",
-                    "fr": "{opponent} avait reculé sur les {line_window_min} dernières minutes. Son dernier défenseur était à {opponent_line_recent_m} m de son but, contre {opponent_line_match_m} m en moyenne, et la pression a fini par payer.",
-                    "es": "El {opponent} se había hundido en los últimos {line_window_min} minutos. Su último defensor estaba a {opponent_line_recent_m} m de su portería, frente a {opponent_line_match_m} m de media, y la presión acabó pagando."},
-    "threat_up": {"en": "{team} had taken over in the last {threat_window_min} minutes, creating {team_threat_share_recent_pct}% of the threat. Before that they had only {team_threat_share_before_pct}%, so this had been coming.",
-                  "fr": "{team} avait pris l'ascendant sur les {threat_window_min} dernières minutes, avec {team_threat_share_recent_pct} % de la menace. Avant, seulement {team_threat_share_before_pct} % : ce but se préparait.",
-                  "es": "El {team} se había adueñado del partido en los últimos {threat_window_min} minutos, con el {team_threat_share_recent_pct}% de la amenaza. Antes solo tenía el {team_threat_share_before_pct}%: este gol se veía venir."},
-    "threat_down": {"en": "Against the run of play: {team} had only {team_threat_share_recent_pct}% of the threat in the last {threat_window_min} minutes. They had {team_threat_share_before_pct}% before that, and one attack was enough.",
-                    "fr": "Contre le cours du jeu : {team} n'avait que {team_threat_share_recent_pct} % de la menace sur les {threat_window_min} dernières minutes. Avant, {team_threat_share_before_pct} %, et une seule attaque a suffi.",
-                    "es": "Contra la corriente del partido: el {team} solo tenía el {team_threat_share_recent_pct}% de la amenaza en los últimos {threat_window_min} minutos. Antes tenía el {team_threat_share_before_pct}%, y bastó un ataque."},
+    "line_higher": {"en": "{opponent} had pushed their back line up in the minutes before the shot. Their last defender sat {opponent_line_before_shot_m} m from goal against {opponent_line_usual_m} m on average, leaving space in behind.",
+                    "fr": "{opponent} avait remonté sa ligne dans les minutes avant le tir. Son dernier défenseur était à {opponent_line_before_shot_m} m de son but, contre {opponent_line_usual_m} m en moyenne : de l'espace dans le dos.",
+                    "es": "El {opponent} había adelantado su línea en los minutos previos al tiro. Su último defensor estaba a {opponent_line_before_shot_m} m de su portería, frente a {opponent_line_usual_m} m de media: espacio a la espalda."},
+    "line_deeper": {"en": "{opponent} had dropped deep in the minutes before the shot. Their last defender sat {opponent_line_before_shot_m} m from goal against {opponent_line_usual_m} m on average, inviting pressure they could not hold.",
+                    "fr": "{opponent} avait reculé dans les minutes avant le tir. Son dernier défenseur était à {opponent_line_before_shot_m} m de son but, contre {opponent_line_usual_m} m en moyenne, et la pression a fini par payer.",
+                    "es": "El {opponent} se había hundido en los minutos previos al tiro. Su último defensor estaba a {opponent_line_before_shot_m} m de su portería, frente a {opponent_line_usual_m} m de media, y la presión acabó pagando."},
+    "threat_up": {"en": "{team} had taken over in the last ten minutes, creating {team_threat_share_before_shot_pct}% of the threat. Before that they had only {team_threat_share_earlier_pct}%, so this had been coming.",
+                  "fr": "{team} avait pris l'ascendant sur les dix dernières minutes, avec {team_threat_share_before_shot_pct} % de la menace. Avant, seulement {team_threat_share_earlier_pct} % : ce but se préparait.",
+                  "es": "El {team} se había adueñado del partido en los últimos diez minutos, con el {team_threat_share_before_shot_pct}% de la amenaza. Antes solo tenía el {team_threat_share_earlier_pct}%: este gol se veía venir."},
+    "threat_down": {"en": "Against the run of play: {team} had only {team_threat_share_before_shot_pct}% of the threat in the last ten minutes. They had {team_threat_share_earlier_pct}% before that, and one attack was enough.",
+                    "fr": "Contre le cours du jeu : {team} n'avait que {team_threat_share_before_shot_pct} % de la menace sur les dix dernières minutes. Avant, {team_threat_share_earlier_pct} %, et une seule attaque a suffi.",
+                    "es": "Contra la corriente del partido: el {team} solo tenía el {team_threat_share_before_shot_pct}% de la amenaza en los últimos diez minutos. Antes tenía el {team_threat_share_earlier_pct}%, y bastó un ataque."},
     "move": {"en": "A move of {passes_in_move} passes in {move_duration_s} s. It ended in a {xg_pct}% chance (expected goals).",
              "fr": "Une action de {passes_in_move} passes en {move_duration_s} s. Elle se conclut sur une occasion à {xg_pct} % de but (expected goals).",
              "es": "Una jugada de {passes_in_move} pases en {move_duration_s} s. Termina en una ocasión del {xg_pct}% de gol esperado."},
@@ -232,12 +230,12 @@ def note_scores(facts: dict) -> list[tuple[int, str]]:
             out.append((40, "build_up") if f("move_duration_s", 0) >= PATIENT_S else (45, "quick"))
     if f("best_pass_defenders_taken_out", 0) >= 3:
         out.append((45 + 10 * facts["best_pass_defenders_taken_out"], "line_break"))
-    if f("shooter_space_m", 0) >= 3 and f("match_median_space_m") and facts["shooter_space_m"] >= 2 * facts["match_median_space_m"]:
+    if f("shooter_space_m", 0) >= 3 and f("typical_space_m") and facts["shooter_space_m"] >= 2 * facts["typical_space_m"]:
         out.append((round(55 + 3 * facts["shooter_space_m"]), "space"))
-    if f("opponent_line_change_m", 0) >= 4 and f("opponent_line_moved") in ("higher", "deeper"):
-        out.append((45 + 3 * facts["opponent_line_change_m"], f"line_{facts['opponent_line_moved']}"))
-    if f("team_threat_share_change_pts", 0) >= 15 and f("team_threat_trend") in ("up", "down"):
-        out.append((45 + facts["team_threat_share_change_pts"], f"threat_{facts['team_threat_trend']}"))
+    if f("opponent_line_gap_m", 0) >= 4 and f("opponent_line_moved") in ("higher", "deeper"):
+        out.append((45 + 3 * facts["opponent_line_gap_m"], f"line_{facts['opponent_line_moved']}"))
+    if f("team_threat_share_shift_pts", 0) >= 15 and f("team_threat_trend") in ("up", "down"):
+        out.append((45 + facts["team_threat_share_shift_pts"], f"threat_{facts['team_threat_trend']}"))
     if f("passes_in_move", 0) >= 2 and "xg_pct" in facts:
         out.append((20, "move"))
     if "xg_pct" in facts:
@@ -377,26 +375,82 @@ def analysis_feedback(report: dict, json_valid: bool = True) -> list[str]:
     return lines
 
 
+RULE_HINTS = {  # what each refusal means, in the retry note
+    "too_many_numbers": "at most 2 numbers in a sentence, every digit group counted (metres, seconds, %): split the sentence or drop a number",
+    "field_word": "never median, médiane, mediana, recent, \"change 3\" or a field name: say \"far more than usual\", \"on average\", \"in the last ten minutes\"",
+    "data_dump": "never numbers in brackets: write a sentence",
+    "article_before_team": "French: no article before a club name (never le Yarnford, du Varleigh, l'Yarnford, d'Yarnford): make the club the subject",
+    "bad_claims": "each claim is a number field of get_analysis_facts with its exact value; there is no minute field: never write the minute",
+    "unclaimed_numbers": "every number written needs a claim with its field; never write the minute",
+    "wrong_unit": "% only for a field ending in _pct",
+    "unknown_names": "no capitalised word that is not a name from the facts; sentence case",
+    "offside_margin": "an offside is by a whisker or clear, never a distance",
+    "league_points_verb": "points never with take, gain, win, prendre, gagner, ganar, sumar",
+    "points_not_from_pts_field": "the word points only after a number from a field ending in _pts",
+    "signed_number": "no + or - before a number: say up or down",
+    "em_dash": "never the long dash",
+    "forbidden_word": "never swing or momentum in French or Spanish",
+    "probability_without_team": "French chance(s), Spanish probabilidad, opciones, posibilidades only in a sentence that names a club; say occasion, ocasión",
+}
+
+
+def retry_note(rejected: list[str]) -> str:
+    """The Verifier's note for the retry: every problem it found, then what each refused rule means."""
+    seen = [rule for rule in RULE_HINTS if any(rule in line for line in rejected)]
+    hints = "; ".join(f"{rule}: {RULE_HINTS[rule]}" for rule in seen)
+    return "rejected (" + " | ".join(rejected)[:1500] + ")." + (f" Fix: {hints}." if hints else "") + " Write all the notes again following the rules."
+
+
 # --- the agent ------------------------------------------------------------------------------------
+
+def _writer_rule(lang: str) -> str:
+    """The Writer's language rule for `lang`, word for word (writer.WRITER_INSTRUCTIONS), so both agents get the same rule on clubs."""
+    return next(line for line in WRITER_INSTRUCTIONS.splitlines() if line.startswith(f"- {lang}:"))
+
+
+# A compliant reply for the 52' goal of the demo match, kept as data so that a test runs it through the Verifier against the real facts.
+ANALYST_EXAMPLE = {
+    "en": [{"line": "Varleigh had taken over in the last ten minutes, creating 63% of the threat.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]},
+           {"line": "It started deep, with Brett Rivero's tackle 19 m from his own goal. From there it took 12 s and 5 passes to get the shot away, a proper counter.",
+            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}, {"value": 5, "source_field": "passes_in_move"}]}],
+    "fr": [{"line": "Varleigh avait pris l'ascendant sur les dix dernières minutes, avec 63 % de la menace.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]},
+           {"line": "Tout part de loin, avec le tacle de Brett Rivero à 19 m de son propre but. Il ne faut ensuite que 12 s et 5 passes pour frapper : un vrai contre.",
+            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}, {"value": 5, "source_field": "passes_in_move"}]}],
+    "es": [{"line": "El Varleigh se había adueñado del partido en los últimos diez minutos, con el 63% de la amenaza.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]},
+           {"line": "Todo empieza atrás, con la entrada de Brett Rivero a 19 m de su propia portería. Luego bastan 12 s y 5 pases para rematar: un contragolpe de manual.",
+            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}, {"value": 5, "source_field": "passes_in_move"}]}],
+}
 
 ANALYST_INSTRUCTIONS = """You are the Analyst of a live football broadcast: for a goal or a big chance, you write 2 or 3 short tactical notes for the producer and the commentators, the way a TV pundit or a coach would explain the move. They are read in the control room, never voiced.
 
 Facts: call the get_analysis_facts tool with the card_id. Use ONLY those facts: where and how the ball was won, the passes and the time it took, the pass that took the most defenders out, the shooter's space, the defending team's line, the share of the threat before the shot. Never invent a statistic, a name or a fact; never name a person who is not in the facts. Leave out what is not in the facts.
 
-What to write: what is not obvious from the replay. Pick the 2 or 3 strongest facts. Each note is 1 or 2 full sentences, at most 40 words: say what happened, then why it matters for the game (a high regain caught the defence unset, a counter from deep, a pass that broke the lines, a defender left too far from the shooter, a line pushed up and caught behind, a team that had taken over or scored against the run of play). At most 2 numbers in a sentence. Never a list of numbers, never numbers in brackets, never the words of the field names: no "median", "recent", "match average 31", "change 3", no underscores. Say "far more than usual in this match", "against 26 m on average", "in the last 5 minutes".
+What to write: what is not obvious from the replay. Pick the 2 or 3 strongest facts. Each note is 1 or 2 full sentences, at most 40 words: say what happened, then why it matters for the game (a high regain caught the defence unset, a counter from deep, a pass that broke the lines, a defender left too far from the shooter, a line pushed up and caught behind, a team that had taken over or scored against the run of play).
 
-Good and bad notes (Yarnford's last defender 39 m from goal in the 5 minutes before the shot, 26 m on average):
-- good: "Yarnford had pushed their back line up in the last 5 minutes. Their last defender sat 39 m from goal against 26 m on average, leaving space in behind."
+Rules. The Verifier refuses a note that breaks any of them, and one refused note sends all of them back:
+1. At most 2 numbers in a sentence. Every group of digits counts: metres, seconds, percentages, passes. "Went from 20 m to the Varleigh goal in 13 s using 5 passes" has 3 numbers and is refused; write "It started 20 m from the Varleigh goal. It took 13 s to reach the shot."
+2. Never write the minute ("at 52'", "à la 52'", "al 52'"): the console shows it. There is no minute field to claim.
+3. Never the words median, médiane, mediana, recent, "match median", "change 3", and never a field name or a word with an underscore. Say "far more than usual in this match", "against 26 m on average", "in the last ten minutes" (the windows in words, never as a number).
+4. Never numbers in brackets, never a list of numbers: full sentences only.
+5. Every number in claims, with the field of get_analysis_facts it comes from and its exact value. Write each number as given, never compute a new one, no sign (never +30). Fields ending in _pct take a % sign; _m are metres ("6.1 m", French and Spanish "6,1 m"); _s are seconds; _pts are percentage points: the word points (puntos) right after the number, never with take, gain, win, earn, prendre, gagner, ganar, sumar.
+6. Never a count of matches, a rate across the league, a ratio ("3 times more") or bits. An offside is "by a whisker" ("d'un rien", "por muy poco") or "clear" ("net", "claro"), never a distance; no centimetres.
+7. Sentence case: a capital on the first word and on names from the facts only. Never the long dash (em dash).
+8. French: never "chance" or "chances" in a sentence that does not name a club (say "occasion"). Spanish: never "probabilidad", "opciones" or "posibilidades" in a sentence that does not name a club (say "ocasión").
+9. Clubs, as for the cards:
+<writer_rules>
+
+Bad and good:
 - bad: "Yarnford's line played higher (39 m recent, 26 m match, change 13)." (numbers in brackets, field words, no reason)
-- good: "Méndez had 4.2 m of space when the ball arrived, far more than anyone usually gets in this match. Nobody was close enough to block."
+- good: "Yarnford had pushed their back line up in the minutes before the shot. Their last defender sat 39 m from goal against 26 m on average, leaving space in behind."
 - bad: "Méndez had 4.2 m of space versus a 2.9 m match median." (field word, no reason)
+- good: "Méndez had 4.2 m of space when the ball arrived, far more than usual in this match. Nobody was close enough to block."
+- bad (French): "Le Yarnford presse, et la défense du Varleigh recule." good: "Yarnford presse, et Varleigh recule."
 
-Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...], "es": [...]} with the requested languages, each a list of 2 or 3 notes {"line": string, "claims": [{"value": number, "source_field": string}]}. claims lists every number of the line with the field of get_analysis_facts it comes from (a number taken from the minute claims "minute"). The same notes in every language, each written natively, not translated word for word.
-
-Numbers: write each number exactly as given, never compute a new one, no sign (never +12). Fields ending in _pct take a % sign; fields ending in _m are metres ("6.1 m", French and Spanish "6,1 m"); fields ending in _s are seconds; fields ending in _pts are percentage points: write the word points (puntos) right after the number, and never with a verb of league points (take, gain, win, earn, prendre, gagner, ganar, sumar). Never a count of matches, a rate across the league, a ratio ("3 times more") or bits. An offside is "by a whisker" ("d'un rien", "por muy poco") or "clear" ("net", "claro"), never a distance. No centimetres.
-
-Style: sentence case, a capital on the first word and on names from the facts only. Punctuation: never the long dash (em dash). French: never "chance" or "chances" in a sentence that does not name a club (say "occasion"); club names without article ("Varleigh", "pour Yarnford", never "le Varleigh" or "d'Yarnford"; make the club the subject if an article would fall before it), a space before % and :, never "swing" or "momentum". Spanish: never "probabilidad", "opciones" or "posibilidades" in a sentence that does not name a club (say "ocasión"); the article before a club name ("el Varleigh", "del Yarnford"), never "swing" or "momentum".
+Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...], "es": [...]} with the requested languages, each a list of 2 or 3 notes {"line": string, "claims": [{"value": number, "source_field": string}]}. The same notes in every language, each written natively, not translated word for word. A compliant reply for a goal (Varleigh, ball won by Brett Rivero's tackle 19 m from his own goal, 5 passes in 12 s, 63% of the threat in the ten minutes before the shot):
+<example>
 """
+ANALYST_INSTRUCTIONS = ANALYST_INSTRUCTIONS.replace("<writer_rules>", "\n".join(_writer_rule(lang) for lang in ("fr", "es"))).replace(
+    "<example>", json.dumps(ANALYST_EXAMPLE, ensure_ascii=False))
 ANALYST_REPLY_RULE = "Reply with the JSON object only; every number in claims, from get_analysis_facts only."
 
 
@@ -470,7 +524,7 @@ async def analyse_async(card: dict, facts: dict, meanings: dict, writer=None, la
             if ok:
                 texts = {lang: parsed[lang] for lang in languages}
             rejected = analysis_feedback(report, valid)
-            return ok, rejected, "rejected (" + " | ".join(rejected)[:600] + "). Write it again following the rules."
+            return ok, rejected, retry_note(rejected)
 
         log, reason = await model_attempts(writer, calls_left, call, check)
         if reason is None:
@@ -541,7 +595,8 @@ class AnalystDesk:
         self.analyst_feed = feed
         self.analyst = analyst
         self.analyst_max_calls = max_calls_per_match
-        self.analyst_calls: dict[str, int] = {}  # match id -> model calls made or reserved
+        self.analyst_calls: dict[str, int] = {}  # match id -> model calls made (written on the Analyst's thread)
+        self.analyst_lock = threading.Lock()
         self.analyst_live: dict[str, dict] = {}  # card id -> the card, while its analysis runs
         self.analyst_runner = AnalystRunner() if analyst is not None else None
 
@@ -572,24 +627,36 @@ class AnalystDesk:
             return
         facts, meanings = got
         match_id = card["match_id"]
-        left = max(self.analyst_max_calls - self.analyst_calls.get(match_id, 0), 0)
-        if self.analyst_runner is None or left == 0:
-            doc = analysis_doc(card, facts, meanings, self.desk.languages, reason="budget" if self.analyst_runner is not None else None)
-            self._attach(card, doc)
+        if self.analyst_runner is None:
+            self._attach(card, analysis_doc(card, facts, meanings, self.desk.languages))
             return
-        reserved = min(2, left)
-        self.analyst_calls[match_id] = self.analyst_calls.get(match_id, 0) + reserved
         self.analyst_live[card["id"]] = card
-        self.analyst_runner.submit((card["id"], card.get("version", 1), match_id, reserved),
-                           analyse_async(copy.deepcopy(card), facts, meanings, self.analyst, self.desk.languages, calls_left=reserved))
+        self.analyst_runner.submit((card["id"], card.get("version", 1), match_id), self._job(copy.deepcopy(card), facts, meanings, match_id))
+
+    async def _job(self, card: dict, facts: dict, meanings: dict, match_id: str) -> dict:
+        """One analysis on the Analyst's thread. The jobs run one at a time, so the calls left are those the jobs before really made: a call counts when it is made, never reserved, and the cap holds."""
+        live = self.analyst_live.get(card["id"])
+        if live is None or live.get("version", 1) != card.get("version", 1):
+            return analysis_doc(card, facts, meanings, self.desk.languages, reason="superseded")  # rewritten meanwhile: dropped at poll, no call spent
+        with self.analyst_lock:
+            left = max(self.analyst_max_calls - self.analyst_calls.get(match_id, 0), 0)
+        if left == 0:
+            return analysis_doc(card, facts, meanings, self.desk.languages, reason="budget")
+        try:
+            doc = await analyse_async(card, facts, meanings, self.analyst, self.desk.languages, calls_left=min(2, left))
+        except Exception:
+            with self.analyst_lock:
+                self.analyst_calls[match_id] = self.analyst_calls.get(match_id, 0) + min(2, left)  # unknown: counted as spent
+            raise
+        with self.analyst_lock:
+            self.analyst_calls[match_id] = self.analyst_calls.get(match_id, 0) + doc["verification"]["attempts"]
+        return doc
 
     def poll(self) -> int:
         """Applies the analyses finished since the last call, on the pipeline's thread, then the desk's own background work."""
         applied = 0
-        for (card_id, version, match_id, reserved), doc, error in self.analyst_runner.results() if self.analyst_runner is not None else []:
+        for (card_id, version, match_id), doc, error in self.analyst_runner.results() if self.analyst_runner is not None else []:
             card = self.analyst_live.get(card_id)
-            if doc is not None:
-                self.analyst_calls[match_id] = self.analyst_calls.get(match_id, 0) - reserved + doc["verification"]["attempts"]
             if card is None or card.get("version", 1) != version:
                 continue  # a new version has its own analysis
             self.analyst_live.pop(card_id, None)

@@ -218,13 +218,13 @@ Written by `worker.analysis.AnalystDesk` after the card is stored (docs/notes/an
 | `status` | `proposed` or `retracted` | `retracted` once VAR rules the goal out: the notes are withdrawn, never used |
 | `retracted_cause` | string | the cause of the retraction (`var_offside`, `var_handball`...); only when retracted |
 | `card_version` | int | the card version the notes were written for; a rewrite gets new notes |
-| `facts_version` | int | version of `analysis_facts` (2: defenders taken out counted goal-side at the pass and behind the receiver at reception) |
+| `facts_version` | int | version of `analysis_facts` (3: no minute, no field named after a median or a window; 2: defenders taken out counted goal-side at the pass and behind the receiver at reception) |
 | `texts` | `{lang: [{line, claims: [{value, source_field}]}]}` | 2 or 3 notes per language (`en`, `fr`, `es`), each claim a field of `facts` |
 | `writer` | string | the Analyst's model name, `dry` offline, or `template` |
 | `verified` | bool | the Verifier passed every note (`verify_analysis`) |
 | `machine_translated` | array of language codes | `es`, as on the card |
 | `facts`, `field_meanings` | object | the facts the notes were checked against and the meaning of each field |
-| `verification` | `{attempts, attempts_log, fallback_reason, report}` | the writer trace, as on a card; `fallback_reason` also `budget` (the Analyst's calls per match, `--analyst-calls`, were spent) or `error:<type>` (the job failed) |
+| `verification` | `{attempts, attempts_log, fallback_reason, report}` | the writer trace, as on a card; `fallback_reason` also `budget` (the Analyst's calls per match, `--analyst-calls`, were spent; a call counts when it is made) or `error:<type>` (the job failed) |
 | `writer_config` | `{deployment, effort, max_tokens, prompt_sha}` or null | as on a card; null without a model call |
 
 The Analyst's tool, `get_analysis_facts(card_id)`, returns `{"facts", "field_meanings"}` as JSON, like `get_moment`, or `{"error": message}`.
