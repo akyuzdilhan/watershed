@@ -1041,9 +1041,11 @@ def layout(user: str | None) -> html.Div:
                 html.Div([html.Button("Publish edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
                          id="c-edit-actions", className="actions", style={"display": "none"}),
                 html.Div(id="c-detail")], className="col col-middle"),
-            html.Section([html.Div(id="c-onair", className="onair"), dcc.Store(id="c-onair-sig"), html.H3("Win probability"), dcc.Graph(id="c-wp", figure=panels.empty_figure("Loading."), config={"displayModeBar": False}),
-                          html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small"),
-                          html.Div(id="c-context", className="context"), dcc.Store(id="c-ctx-sig")], className="col col-right"),
+            # the right column: what is on air, then the moment on the pitch, then the curve (the least read of the three)
+            html.Section([html.Div(id="c-onair", className="onair"), dcc.Store(id="c-onair-sig"),
+                          html.Div(id="c-context", className="context"), dcc.Store(id="c-ctx-sig"),
+                          html.H3("Win probability", className="wp-title"), dcc.Graph(id="c-wp", figure=panels.empty_figure("Loading."), config={"displayModeBar": False}),
+                          html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small")], className="col col-right"),
         ], id="c-pane-desk", className="desk"),
     ], className="console read-only" if read_only else "console")
 

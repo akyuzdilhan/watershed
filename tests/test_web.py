@@ -1424,6 +1424,14 @@ def test_on_air_now_shows_the_overlay_s_lower_third_at_the_replay_s_minute(auto_
     assert right.children[0].id == "c-onair"  # at the top of the right column
 
 
+def test_the_right_column_reads_on_air_then_the_moment_then_the_curve():
+    right = find(console.layout(None), lambda c: "col-right" in (getattr(c, "className", "") or "") and "c-wp" in component_ids(c.children))[0]
+    ids = [getattr(c, "id", None) for c in right.children]
+    assert ids.index("c-onair") < ids.index("c-context") < ids.index("c-wp")  # the win probability last, the least read
+    title = next(c for c in right.children if type(c).__name__ == "H3")
+    assert title.children == "Win probability" and right.children.index(title) == ids.index("c-wp") - 1
+
+
 def test_the_replay_control_is_in_the_header_for_everyone():
     for user in ("producer-1", None):
         top = find(console.layout(user), lambda c: getattr(c, "className", "") == "top")[0]

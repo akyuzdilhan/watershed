@@ -145,7 +145,8 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .duo-line { margin: 2px 0; color: var(--ink-2); }
 .duo-speaker { color: var(--ink); font-weight: 600; }
 .facts td.small { max-width: 320px; }
-.context { margin-top: 4px; }
+.context { margin: 4px 0 14px; }
+.col-right h3.wp-title { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 .ctx-insight { padding: 6px 0; border-bottom: 1px solid var(--line); }
 .ctx-headline { font-weight: 600; color: var(--ink); }
 
