@@ -553,13 +553,15 @@ def headline_card(cards: list[dict]) -> dict | None:
     return max(cards, key=lambda c: (c.get("value_pts") or 0, -(c.get("clock_s") or 0)), default=None)
 
 
+def latest_card(cards: list[dict]) -> dict | None:
+    """The most recent card of the match in time (its clock, then its version), whatever its status; None without a card."""
+    return max(cards, key=lambda c: (c.get("clock_s") or 0, c.get("version") or 1), default=None)
+
+
 def default_pick(cards: list[dict], final: bool = False) -> str | None:
-    """The card selected when none is: the top of the rundown when it waits for a decision; else, the match finished, its headline story (`headline_card`); else, live, the most recent card (the rundown is in match order)."""
-    if not cards:
-        return None
-    if cards[0].get("status") == "pending":
-        return cards[0]["id"]
-    return headline_card(cards)["id"] if final else cards[-1]["id"]
+    """The card selected when none is, and while the desk follows live (`refresh(follow=True)`): the most recent card in time (`latest_card`), live, in a replay and at full time alike. `final` is kept for callers that still pass it."""
+    card = latest_card(cards)
+    return card["id"] if card else None
 
 
 def match_options(current: str | None, store=None) -> tuple[list[dict], str | None]:
@@ -574,10 +576,10 @@ REFRESH_OUTPUTS = 10
 
 
 def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, rev: int | None = None, store=None, read_only: bool = False, lang: str | None = DEFAULT_LANG,
-            t: float | None = None):
+            t: float | None = None, follow: bool = False):
     """(rundown options, selected card, detail, heading, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed.
 
-    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the earliest waiting card is picked, else the headline story at full time, else the most recent (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
+    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection, or while the desk follows live (`follow`), the most recent card in time is picked (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
     store = store or get_store()
     lang = lang if lang in LANG_NAMES else DEFAULT_LANG
     if not match_id:
@@ -585,7 +587,7 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     cards, state, audit, x_max = replay(store.cards(match_id), store.state(match_id), store.audit(match_id), t)
     cards, fb_docs = rundown_order(cards), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
-    picked = selected if selected in ids else default_pick(cards, bool((state or {}).get("final")))
+    picked = selected if selected in ids and not follow else default_pick(cards)
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
@@ -753,7 +755,7 @@ def viewer(user: str | None) -> html.Div:
 INTRO = ("A live football editorial desk on a synthetic match: an AI agent explains each key moment, code verifies every number, a producer approves, "
          "VAR pulls cards off air.")
 # The intro's Replay the match: the replay from kick-off, playing (the state `REPLAY_STEP` leaves after Play), on the desk
-INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk']; }"
+INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk', true]; }"
 # The intro's VAR retraction: the desk as it stands (the replay stopped at its right end), that card selected
 INTRO_RETRACTION = "function(n, cardId, max) { if (!cardId) { return window.dash_clientside.no_update; } return [cardId, max, null, true, 'Play', 'desk']; }"
 INTRO_HIDE = "function(closed) { return closed ? {'display': 'none'} : {}; }"
@@ -784,7 +786,7 @@ def layout(user: str | None) -> html.Div:
     read_only = user is None
     hidden = {"style": {"display": "none"}} if read_only else {}
     return html.Div([
-        dcc.Interval(id="c-tick", interval=1500), dcc.Store(id="c-sig"), dcc.Store(id="c-rev", data=0), dcc.Store(id="c-editing", data=False),
+        dcc.Interval(id="c-tick", interval=1500), dcc.Store(id="c-sig"), dcc.Store(id="c-rev", data=0), dcc.Store(id="c-follow", data=True), dcc.Store(id="c-editing", data=False),
         html.Header([html.Div([html.Span("Watershed", className="brand"), html.Span("producer desk", className="muted")]),
                      dcc.Dropdown(id="c-match", clearable=False, className="match-picker", placeholder="Match"),
                      html.Div(id="c-score", className="scoreline"),
@@ -794,7 +796,7 @@ def layout(user: str | None) -> html.Div:
         panels.graphics_pane(),
         panels.insights_pane(),
         html.Main([
-            html.Section([html.H3("Rundown"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
+            html.Section([html.Div([html.H3("Rundown"), follow_button()], className="col-head"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
             html.Section([
                 html.Div(id="c-head"),
                 html.Div([html.Div([html.Button("Approve", id="c-approve", className="btn btn-approve", disabled=True),
@@ -814,6 +816,18 @@ def layout(user: str | None) -> html.Div:
                           html.Div(id="c-context", className="context"), dcc.Store(id="c-ctx-sig")], className="col col-right"),
         ], id="c-pane-desk", className="desk"),
     ], className="console read-only" if read_only else "console")
+
+
+FOLLOW_LIVE = "Follow live"
+FOLLOWING = "Following live"
+# The Follow live button reads what the desk does: following the latest card (on), or kept on the card the viewer clicked (off, a click follows again)
+FOLLOW_VIEW = ("function(on) { on = on !== false; return on ? ['" + FOLLOWING + "', 'btn btn-small follow follow-on', 'The detail follows the latest card; click a card to keep it'] "
+               ": ['" + FOLLOW_LIVE + "', 'btn btn-small follow', 'Follow the latest card again']; }")
+
+
+def follow_button() -> html.Button:
+    """Follow live, next to the rundown's heading: the detail follows the latest card in time until a card is clicked; a click on the button follows again."""
+    return html.Button(FOLLOWING, id="c-follow-live", className="btn btn-small follow follow-on", n_clicks=0)
 
 
 REPLAY_STEP_MS = 500  # one match minute every half second: a 95-minute match in about 48 s
@@ -865,8 +879,20 @@ def replay_bar() -> html.Div:
                      dcc.Interval(id="c-replay-tick", interval=REPLAY_STEP_MS, disabled=True), dcc.Store(id="c-replay", data=None)], className="replay")
 
 
-def _refresh_cb(_n, rev, match_id, selected, lang, last_sig, t=None):
-    return refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None, lang=lang, t=t)
+def following(trigger, follow) -> bool:
+    """Whether the desk follows the latest card: until the viewer clicks a card in the rundown (or on the curve), again after Follow live; on by default."""
+    if trigger == "c-rundown":
+        return False
+    return follow is not False
+
+
+def _refresh_cb(_n, rev, match_id, selected, lang, last_sig, t=None, follow=False):
+    try:
+        trigger = ctx.triggered_id
+    except Exception:  # noqa: BLE001  (called outside a callback, by the tests)
+        trigger = None
+    follow = following(trigger, follow)
+    return (*refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None, lang=lang, t=t, follow=follow), follow)
 
 
 def _edit_cb(_edit, _cancel, _rev, card_id, match_id):
@@ -925,8 +951,11 @@ def register(app) -> None:
     app.callback(
         Output("c-rundown", "options"), Output("c-rundown", "value"), Output("c-detail", "children"), Output("c-head", "children"), Output("c-wp", "figure"),
         Output("c-score", "children"), Output("c-approve", "disabled"), Output("c-edit", "disabled"), Output("c-reject", "disabled"), Output("c-sig", "data"),
+        Output("c-follow", "data"),
         Input("c-tick", "n_intervals"), Input("c-rev", "data"), Input("c-match", "value"), Input("c-rundown", "value"), Input("c-lang", "value"),
-        State("c-sig", "data"), Input("c-replay", "data"))(_refresh_cb)
+        State("c-sig", "data"), Input("c-replay", "data"), Input("c-follow", "data"))(_refresh_cb)
+    app.clientside_callback("function(n) { return true; }", Output("c-follow", "data", allow_duplicate=True), Input("c-follow-live", "n_clicks"), prevent_initial_call=True)
+    app.clientside_callback(FOLLOW_VIEW, Output("c-follow-live", "children"), Output("c-follow-live", "className"), Output("c-follow-live", "title"), Input("c-follow", "data"))
     app.callback(Output("c-replay-t", "max"), Output("c-replay-t", "marks"), Output("c-replay-t", "value"), Output("c-replay", "data", allow_duplicate=True),
                  Input("c-p-match", "data"), prevent_initial_call="initial_duplicate")(_replay_range_cb)
     app.clientside_callback(REPLAY_STEP, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
@@ -955,7 +984,7 @@ def register(app) -> None:
     app.clientside_callback(INTRO_HIDE, Output("c-intro", "style"), Input("c-intro-closed", "data"))
     app.clientside_callback(INTRO_REPLAY, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
                             Output("c-replay-play", "children", allow_duplicate=True), Output("c-view", "value", allow_duplicate=True),
-                            Input("c-intro-replay", "n_clicks"), prevent_initial_call=True)
+                            Output("c-follow", "data", allow_duplicate=True), Input("c-intro-replay", "n_clicks"), prevent_initial_call=True)
     app.clientside_callback(INTRO_RETRACTION, Output("c-rundown", "value", allow_duplicate=True), Output("c-replay-t", "value", allow_duplicate=True),
                             Output("c-replay", "data", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
                             Output("c-replay-play", "children", allow_duplicate=True), Output("c-view", "value", allow_duplicate=True),

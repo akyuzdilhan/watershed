@@ -175,7 +175,8 @@ def test_refresh_lists_the_rundown_and_draws_the_curve(desk):
     waiting = [c for c in order if c["status"] == "pending"]
     assert len(rundown) == 11 and waiting and order[:len(waiting)] == waiting  # the cards waiting for a decision on top
     assert all(a["clock_s"] <= b["clock_s"] for group in (waiting, order[len(waiting):]) for a, b in zip(group, group[1:]))  # each group in match order
-    assert selected == waiting[0]["id"] and waiting[0]["minute_label"] in texts_in(head)
+    latest = console.latest_card(list(cards.values()))
+    assert selected == latest["id"] and latest["minute_label"] in texts_in(head)  # the most recent card in time
     assert "Retracted" in texts_in([o["label"] for o in rundown])
     assert len(text_blocks(detail)) == 1 and "English" in texts_in(detail)  # one language at a time, English first
     assert [t.name for t in fig.data[:3]] == ["Varleigh win", "Draw", "Yarnford win"]
@@ -685,7 +686,8 @@ VISITOR = {"X-Forwarded-For": "203.0.113.7"}
 def refresh_body(card_id: str, sig=None, n: int = 1, lang: str = "en") -> tuple[list, list, list]:
     inputs = [{"id": "c-tick", "property": "n_intervals", "value": n}, {"id": "c-rev", "property": "data", "value": 0},
               {"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card_id},
-              {"id": "c-lang", "property": "value", "value": lang}, {"id": "c-replay", "property": "data", "value": None}]
+              {"id": "c-lang", "property": "value", "value": lang}, {"id": "c-replay", "property": "data", "value": None},
+              {"id": "c-follow", "property": "data", "value": False}]
     return inputs, [{"id": "c-sig", "property": "data", "value": sig}], ["c-tick.n_intervals"]
 
 
@@ -696,7 +698,7 @@ def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypa
     monkeypatch.setenv("PUBLIC_MODE", "1")
     monkeypatch.setenv("EASY_AUTH_ENABLED", "true")
     with app.server.test_request_context("/"):
-        rundown, _, detail, head, fig, score, approve_off, edit_off, reject_off, _ = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)
+        rundown, _, detail, head, fig, score, approve_off, edit_off, reject_off, _, _ = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)
     text = texts_in(detail) + texts_in(head)
     en = next(t for t in goal["texts"] if t["lang"] == "en")
     assert len(rundown) == 11 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
@@ -992,35 +994,41 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
     assert after[:len(waiting)] == waiting and picked["id"] not in [c["id"] for c in waiting]  # decided: out of the waiting group
     rest = after[len(waiting):]
     assert [c["clock_s"] for c in rest] == sorted(c["clock_s"] for c in rest) and picked["id"] in [c["id"] for c in rest]
-    assert console.refresh(MATCH, None, None)[1] == waiting[0]["id"]  # nothing selected: the top waiting card
+    assert console.refresh(MATCH, None, None)[1] == console.latest_card(after)["id"]  # nothing selected: the most recent card in time
     options = console.rundown_options(after)
     assert ["ru-waiting" in o["label"].className for o in options] == [c["status"] == "pending" for c in after]
 
 
-def test_without_a_card_waiting_the_headline_story_is_selected_at_full_time(desk):
-    waiting = [c for c in desk.cards(MATCH) if c["status"] == "pending"]
-    assert waiting and console.refresh(MATCH, None, None)[1] == console.rundown_order(desk.cards(MATCH))[0]["id"]  # the earliest waiting card first
-    for c in waiting:
-        assert console.decide("reject", MATCH, c["id"], "producer-1")[1]
+def test_the_latest_card_in_time_is_selected_until_the_viewer_clicks_one(desk):
     cards = desk.cards(MATCH)
-    assert not any(c["status"] == "pending" for c in cards) and desk.state(MATCH)["final"]
-    picked = next(c for c in cards if c["id"] == console.refresh(MATCH, None, None)[1])
-    assert picked["id"] == console.headline_card(cards)["id"]
-    earliest = min(cards, key=lambda c: c.get("clock_s") or 0)
-    assert earliest["id"] != picked["id"] and console.refresh(MATCH, earliest["id"], None)[1] is no_update  # a selection is kept
+    latest = max(cards, key=lambda c: c["clock_s"])
+    assert desk.state(MATCH)["final"] and console.refresh(MATCH, None, None)[1] == latest["id"]  # at full time too, not the headline story
+    earliest = min(cards, key=lambda c: c["clock_s"])
+    assert console.refresh(MATCH, earliest["id"], None)[1] is no_update  # a clicked card is kept
+    assert console.refresh(MATCH, earliest["id"], None, follow=True)[1] == latest["id"]  # following live: back to the latest
+    assert console.following("c-rundown", True) is False and console.following("c-tick", False) is False  # a click stops following, a tick does not resume it
+    assert console.following("c-follow", True) is True and console.following("c-tick", None) is True  # on by default, again after Follow live
     assert console.default_pick([]) is None
+
+
+def test_follow_live_sits_next_to_the_rundown_and_the_replay_follows_again():
+    for user in ("producer-1", None):
+        page = console.layout(user)
+        assert find(page, lambda c: getattr(c, "id", None) == "c-follow")[0].data is True
+        assert texts_in(find(page, lambda c: getattr(c, "id", None) == "c-follow-live")) == console.FOLLOWING
+    assert console.INTRO_REPLAY.endswith("'desk', true]; }") and console.FOLLOW_LIVE in console.FOLLOW_VIEW
 
 
 def test_the_headline_story_is_the_first_card_pulled_off_air_else_the_highest_value():
     cards = [{"id": "a", "status": "approved", "clock_s": 100, "value_pts": 30}, {"id": "b", "status": "approved", "clock_s": 200, "value_pts": 60},
              {"id": "c", "status": "approved", "clock_s": 300, "value_pts": 0}]
-    assert console.default_pick(cards, final=True) == "b"  # the highest value, not the last card
-    assert console.default_pick(cards, final=False) == "c"  # live: the most recent
+    assert console.headline_card(cards)["id"] == "b"  # the highest value, not the last card
+    assert console.default_pick(cards, final=True) == console.default_pick(cards) == "c"  # selected: the most recent, at full time too
     pulled = cards + [{"id": "d", "status": "retracted", "retracted_on_air": True, "clock_s": 250, "value_pts": 10},
                       {"id": "e", "status": "retracted", "retracted_on_air": True, "clock_s": 280, "value_pts": 90},
                       {"id": "f", "status": "retracted", "clock_s": 150, "value_pts": 95}]
-    assert console.default_pick(pulled, final=True) == "d"  # the first VAR retraction on air
-    assert console.default_pick([{"id": "w", "status": "pending"}, *pulled], final=True) == "w"  # a card waiting for a producer comes first
+    assert console.headline_card(pulled)["id"] == "d"  # the first VAR retraction on air, which the intro points at
+    assert console.default_pick([{"id": "w", "status": "pending", "clock_s": 10}, *pulled]) == "c"  # the latest in time, waiting or not
 
 
 def test_a_rundown_entry_holds_two_lines_with_its_badges_and_the_impact_explained(desk):

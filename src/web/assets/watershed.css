@@ -187,3 +187,10 @@ body:has(.ov-page) { background: #0b0b0b; }
 
 /* every graph sits on the dark surface before and while Plotly draws it: never a white flash */
 .dash-graph, .js-plotly-plot, .js-plotly-plot .plot-container { background: var(--surface-1); }
+
+/* Follow live, next to the rundown's heading */
+.col-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.col-head h3 { margin: 0; }
+.btn.follow { padding: 2px 10px; font-size: 12px; border-radius: 10px; color: var(--ink-2); }
+.btn.follow-on { border-color: var(--ok); color: var(--ok); }
+.btn.follow-on::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
