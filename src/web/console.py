@@ -830,6 +830,15 @@ REPLAY_STEP = """function(play, tick, value, max, paused) {
 }"""
 # The slider's minute, or null at its right end: the desk as it stands (full time, or live)
 REPLAY_MINUTE = "function(value, max) { return value === null || value === undefined || value >= max ? null : value; }"
+# The match minute next to Play while the replay stands before its right end, as the clock says it (the minute under way: 0 to 1 is 1'): the slider is on the continuous
+# axis, so after the HT mark the first half's added time is taken off
+REPLAY_NOW = """function(value, max, marks) {
+    if (value === null || value === undefined || value >= max) { return ""; }
+    var ht = null;
+    Object.keys(marks || {}).forEach(function(k) { if (marks[k] === "HT") { ht = Number(k); } });
+    var second = ht !== null && value >= ht, m = second ? value - ht + 45 : value, end = second ? 90 : 45;
+    return m >= end ? end + "+" + (m - end + 1) + "'" : (m + 1) + "'";
+}"""
 
 
 def replay_range(match_id: str | None, store=None) -> tuple[int, dict, int, None]:
@@ -851,6 +860,7 @@ def _replay_range_cb(match_id):
 def replay_bar() -> html.Div:
     """Replay the match: Play and a minute slider, for everyone (read only too); the console shows the desk as it stood at that minute, the store is never written."""
     return html.Div([html.Span("Replay the match", className="muted small"), html.Button("Play", id="c-replay-play", className="btn btn-small", n_clicks=0),
+                     html.Span(id="c-replay-now", className="replay-now", **{"aria-live": "polite"}),
                      html.Div(dcc.Slider(id="c-replay-t", min=0, max=100, step=1, value=100, marks={0: "0'", 100: "FT"}, allow_direct_input=False), className="replay-slider"),
                      dcc.Interval(id="c-replay-tick", interval=REPLAY_STEP_MS, disabled=True), dcc.Store(id="c-replay", data=None)], className="replay")
 
@@ -924,6 +934,7 @@ def register(app) -> None:
                             Input("c-replay-play", "n_clicks"), Input("c-replay-tick", "n_intervals"), State("c-replay-t", "value"), State("c-replay-t", "max"),
                             State("c-replay-tick", "disabled"), prevent_initial_call=True)
     app.clientside_callback(REPLAY_MINUTE, Output("c-replay", "data"), Input("c-replay-t", "value"), State("c-replay-t", "max"), prevent_initial_call=True)
+    app.clientside_callback(REPLAY_NOW, Output("c-replay-now", "children"), Input("c-replay-t", "value"), State("c-replay-t", "max"), State("c-replay-t", "marks"))
     app.callback(Output("c-edit-panel", "children"), Output("c-edit-actions", "style"),
                  Input("c-edit", "n_clicks"), Input("c-cancel-edit", "n_clicks"), Input("c-rev", "data"), Input("c-rundown", "value"), State("c-match", "value"),
                  prevent_initial_call=True)(_edit_cb)
