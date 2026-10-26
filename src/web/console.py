@@ -516,7 +516,10 @@ def approve_styles(card: dict | None) -> tuple[dict, dict]:
 
 
 def _approve_styles_cb(_sig, match_id, card_id):
-    return approve_styles((get_store().card(match_id, card_id) if match_id and card_id else None))
+    """(Publish, Publish during VAR check, Edit) styles: Before kick-off and Full time are views, with none of them."""
+    if card_id in PHASES:
+        return {"display": "none"}, {"display": "none"}, {"display": "none"}
+    return (*approve_styles((get_store().card(match_id, card_id) if match_id and card_id else None)), {})
 
 
 LIVE_FAR_MIN = 5.0  # minutes between the selected card and the minute shown beyond which the live pitch replaces the card's moment
@@ -623,23 +626,30 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     cards, state, audit, x_max = replay(store.cards(match_id), full_state, store.audit(match_id), t)
     cards, fb_docs = rundown_order(cards), store.feedback_docs(match_id)
     docs = insights_at(store.insights(match_id), full_state, t)
-    ids = [c["id"] for c in cards]
-    picked = selected if selected in ids and not follow else default_pick(cards)
+    ids = [PRE_MATCH, *(c["id"] for c in cards)]
+    picked = selected if selected in ids and not follow else follow_pick(cards)
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
     tied = panels.tied_insights(docs, card)
-    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang, x_max is not None, tied)
+    storyline = store.storyline(match_id) if picked == PRE_MATCH else None
+    phase = (storyline, [d for d in docs if not d.get("clock_s")], (full_state or {}).get("wp_timeline", [])[:1]) if picked in PHASES else None
+    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang, x_max is not None, tied, phase)
     sig = _sig(detail_sig, cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), (state or {}).get("final"), len(audit))
     last = last_sig if isinstance(last_sig, dict) else {}
     if sig == last.get("all"):
         return (no_update,) * REFRESH_OUTPUTS
     changed = detail_sig != last.get("detail")
-    view = detail(card, audit, fb_docs, teams, read_only, lang=lang, head=False, insights=tied) if changed else no_update
-    head = card_head(card, read_only) if changed else no_update
-    buttons = (True, True, True) if read_only or x_max is not None else button_states(card)  # a replay decides nothing
+    if picked == PRE_MATCH:
+        view = prematch_view(storyline, full_state, docs, lang) if changed else no_update
+        head = phase_head(PRE_MATCH, full_state, storyline) if changed else no_update
+    else:
+        view = detail(card, audit, fb_docs, teams, read_only, lang=lang, head=False, insights=tied) if changed else no_update
+        head = card_head(card, read_only) if changed else no_update
+    buttons = (True, True, True) if read_only or x_max is not None else button_states(card)  # a replay decides nothing, nor does a view that is not a card
+    options = [phase_option(PRE_MATCH, state), *rundown_options(cards)]
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
-    return (rundown_options(cards), picked if picked != selected else no_update, view, head, figure(state, cards, picked, x_max), scoreline(state), *buttons,
+    return (options, picked if picked != selected else no_update, view, head, figure(state, cards, picked, x_max), scoreline(state), *buttons,
             {"all": sig, "detail": detail_sig})
 
 
@@ -890,8 +900,8 @@ def story_strip(state: dict | None, docs: list[dict], storyline: dict | None, re
     return "none", []
 
 
-def story(match_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None):
-    """(the strip's children, its style, signature) for the match at minute `t` of a replay (None: as it stands); no_update for all three when nothing changed."""
+def story(match_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None, selected: str | None = None):
+    """(the strip's children, its style, signature) for the match at minute `t` of a replay (None: as it stands); no_update for all three when nothing changed. Hidden when it would repeat the entry selected (`selected`): the stakes under Before kick-off, the recap under Full time."""
     store = store or get_store()
     if not match_id:
         return [], {"display": "none"}, None
@@ -902,6 +912,8 @@ def story(match_id: str | None, lang: str | None, last_sig: str | None, store=No
     if recap is not None and not panels.same_match(recap, full):
         recap = None
     phase, children = story_strip(state, docs, store.storyline(match_id), recap, lang, None if x_max is None else t)
+    if (phase, selected) in (("before", PRE_MATCH), ("after", FULL_TIME)):
+        children = []  # the entry selected says it in full
     sig = _sig(match_id, lang, phase, [c.to_plotly_json() if hasattr(c, "to_plotly_json") else c for c in children])
     if sig == last_sig:
         return no_update, no_update, no_update
@@ -910,8 +922,8 @@ def story(match_id: str | None, lang: str | None, last_sig: str | None, store=No
     return [html.Span(STORY_TITLE, className="story-title"), *children], {}, sig
 
 
-def _story_cb(_sig, match_id, lang, last_sig, t=None):
-    return story(match_id, lang, last_sig, t=t)
+def _story_cb(_sig, match_id, lang, last_sig, t=None, selected=None):
+    return story(match_id, lang, last_sig, t=t, selected=selected)
 
 
 # A chip of the story opens its insight under All insights and storyline
@@ -921,6 +933,151 @@ STORY_OPEN = """function(clicks) {
     var id = JSON.parse(trig.prop_id.split(".")[0]).id;
     return ["insights", id];
 }"""
+
+
+# --- Before kick-off and Full time: two entries of the rundown built from the storyline, the insights, the recap and the state ---
+# They are views, not producer cards: nothing is written to the store, no Publish, no Edit, no Feedback.
+
+PRE_MATCH = "phase:before"
+FULL_TIME = "phase:after"
+PHASES = (PRE_MATCH, FULL_TIME)
+STAKE_WORDS = {"relegation": "relegation", "title": "title", "top4": "top four"}
+
+
+def ordinal(n) -> str:
+    if not _is_num(n):
+        return str(n)
+    n = int(n)
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def club_slug(club: str) -> str:
+    """The prefix of a club's facts in the storyline and the recap ("varleigh_rank"), as `worker.storyline.slug` writes it."""
+    return (club or "").lower().replace(" ", "_")
+
+
+def phase_option(kind: str, state: dict | None) -> dict:
+    """The rundown entry of Before kick-off (first, at 0') or Full time (last, at FT): a muted accent and no status, since nobody publishes it."""
+    teams, score = (state or {}).get("teams") or {}, (state or {}).get("score") or {}
+    if kind == PRE_MATCH:
+        minute, name, who, tag = "0'", "Before kick-off", "the stakes, the odds, the head-to-head", "pre-match"
+    else:
+        minute, name, tag = "FT", "Full time", "recap"
+        who = f"{teams.get('home', '')} {score.get('home', 0)}-{score.get('away', 0)} {teams.get('away', '')}" if teams else "the recap"
+    return {"value": kind, "label": html.Div([
+        html.Div([html.Span(minute, className="ru-minute"), html.Span(name, className="ru-moment"), html.Span(who, className="ru-who")], className="ru-top"),
+        html.Div([html.Span(tag, className="badge st-phase")], className="ru-badges")], className="ru-item ru-phase")}
+
+
+def follow_pick(cards: list[dict]) -> str:
+    """What Follow live selects: the latest card in time, else Before kick-off."""
+    return default_pick(cards) or PRE_MATCH
+
+
+def _chips(title: str, chips: list[str]) -> list:
+    chips = [c for c in chips if c]
+    return [html.H3(title), html.Div([html.Span(c, className="phase-chip") for c in chips], className="phase-chips")] if chips else []
+
+
+def kickoff_odds(state: dict | None) -> list[str]:
+    """The win probabilities at kick-off, the first point of the curve: "Varleigh 44%", "Draw 25%", "Yarnford 30%"."""
+    points = sorted((state or {}).get("wp_timeline") or [], key=lambda p: p["seq"])
+    teams = (state or {}).get("teams") or {}
+    if not points or not teams:
+        return []
+    p = points[0]
+    return [f"{teams['home']} {p['home'] * 100:.0f}%", f"Draw {p['draw'] * 100:.0f}%", f"{teams['away']} {p['away'] * 100:.0f}%"]
+
+
+def stake_chips(storyline: dict, teams: dict) -> list[str]:
+    """Each club's place and what the match is worth to it, from the storyline's facts: "Yarnford: 18th, 28 pts", "Yarnford relegation 34% (win 16%, draw 32%, loss 43%)". The stake is the storyline's focus for the club, else the one the match moves most."""
+    facts, focus, out = storyline.get("facts") or {}, storyline.get("focus") or {}, []
+    for side in ("home", "away"):
+        club = teams.get(side) or storyline.get(side)
+        s = club_slug(club)
+        if not club or f"{s}_rank" not in facts:
+            continue
+        out.append(f"{club}: {ordinal(facts[f'{s}_rank'])}, {_num(facts.get(f'{s}_points', '?'))} pts")
+        stake = focus.get(club) if focus.get(club) in STAKE_WORDS else max(STAKE_WORDS, key=lambda e: facts.get(f"{s}_{e}_stake_pts") or 0)
+        chance = facts.get(f"{s}_{stake}_chance_pct")
+        if chance is not None:
+            ifs = [f"{w} {_num(facts[f'{s}_{stake}_chance_if_{w}_pct'])}%" for w in ("win", "draw", "loss") if facts.get(f"{s}_{stake}_chance_if_{w}_pct") is not None]
+            out.append(f"{club} {STAKE_WORDS[stake]} {_num(chance)}%" + (f" ({', '.join(ifs)})" if ifs else ""))
+    return out
+
+
+def context_chips(storyline: dict, teams: dict) -> tuple[list[str], list[str], list[str]]:
+    """(form, head-to-head, players to watch) of the storyline, as short chips."""
+    facts = storyline.get("facts") or {}
+    form = []
+    for side in ("home", "away"):
+        club = teams.get(side) or storyline.get(side)
+        s = club_slug(club)
+        if facts.get(f"{s}_form"):
+            form.append(f"{club} {facts[f'{s}_form']}" + (f" ({_num(facts[f'{s}_form_points'])} pts from 5)" if facts.get(f"{s}_form_points") is not None else ""))
+    h2h = []
+    home, away = club_slug(teams.get("home")), club_slug(teams.get("away"))
+    if facts.get("h2h_meetings"):
+        h2h.append(f"{_num(facts['h2h_meetings'])} meetings since {facts.get('h2h_first_season', '?')}: {teams.get('home')} {_num(facts.get(f'h2h_{home}_wins', 0))}, "
+                   f"draws {_num(facts.get('h2h_draws', 0))}, {teams.get('away')} {_num(facts.get(f'h2h_{away}_wins', 0))}")
+    if facts.get("h2h_last_meeting"):
+        h2h.append(f"Last meeting {facts['h2h_last_meeting']}")
+    if facts.get("reverse_fixture"):
+        h2h.append(f"This season {facts['reverse_fixture']}")
+    players = []
+    for p in storyline.get("players_to_watch") or []:
+        if not isinstance(p, dict) or not p.get("name"):
+            continue
+        line = f"{p['name']} ({p.get('club', '')})" + (f": {_num(p['season_goals'])} goals in {p.get('season', 'last season')}" if p.get("season_goals") is not None else "")
+        need = facts.get(f"{p.get('fact_prefix')}_milestone_needed") if p.get("fact_prefix") else None
+        if p.get("milestone") and need is not None:
+            line += f", {_num(need)} from {p['milestone']}"
+        players.append(line)
+    return form, h2h, players
+
+
+def text_head(doc: dict, t: dict) -> list:
+    """A document's text in one language as the card detail shows it: the language (with "AI-written, not reviewed" when no native review), the headline, the why."""
+    lang = t.get("lang", "")
+    return [html.Div([panels.lang_row(lang, set(doc.get("machine_translated") or []))]), html.Div(t.get("headline", ""), className="headline"),
+            *([html.Div(t["why"], className="why")] if t.get("why") else [])]
+
+
+def prematch_view(storyline: dict | None, state: dict | None, docs: list[dict], lang: str | None) -> html.Div:
+    """Before kick-off, in the card's column: the storyline's headline and why in the language picked, then as chips the win probabilities at kick-off, what is at stake, the form, the head-to-head and the players to watch, the duo's lines before kick-off and the insights written before it, if any. The story threads are the desk's own briefs, in English: shown in English only."""
+    lang = lang if lang in LANG_NAMES else DEFAULT_LANG
+    teams = (state or {}).get("teams") or ({"home": storyline.get("home"), "away": storyline.get("away")} if storyline else {})
+    out = []
+    t = panels.text_in(storyline, lang) if storyline else None
+    out += [html.Div(text_head(storyline, t), className="text-block phase-lead")] if t else [html.Div("No storyline for this match yet.", className="muted")]
+    out += _chips("Win probability at kick-off", kickoff_odds(state))
+    if storyline:
+        form, h2h, players = context_chips(storyline, teams)
+        out += _chips("What is at stake", stake_chips(storyline, teams)) + _chips("Form", form) + _chips("Head-to-head", h2h) + _chips("Players to watch", players)
+        threads = [th.get("angle") for th in storyline.get("threads") or [] if isinstance(th, dict) and th.get("angle")]
+        if threads and lang == "en":
+            out += [html.H3("Story threads"), html.Ul([html.Li(a) for a in threads], className="phase-threads")]
+        duo = panels.duo_block(storyline, lang=(t or {}).get("lang", lang))
+        if duo is not None:
+            out += [html.H3("Suggested lines before kick-off"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo]
+    early = [d for d in docs if not d.get("clock_s") and d.get("status") in ("approved", "pending")]
+    if early:
+        out += [html.H3("Insights before kick-off"), *[panels.insight_fold(d, lang) for d in early]]
+    out.append(html.P("Built from the storyline and the win-probability model before kick-off: nothing to publish here.", className="muted small phase-note"))
+    return html.Div(out, className="phase-view")
+
+
+def phase_head(kind: str, state: dict | None, storyline: dict | None) -> html.Div:
+    """The heading of Before kick-off ("Before kick-off: Varleigh v Yarnford", the competition and matchday) or Full time."""
+    teams, score = (state or {}).get("teams") or {}, (state or {}).get("score") or {}
+    home, away = teams.get("home") or (storyline or {}).get("home", ""), teams.get("away") or (storyline or {}).get("away", "")
+    if kind == PRE_MATCH:
+        sl = storyline or {}
+        meta = " · ".join(str(x) for x in (sl.get("competition"), sl.get("season"), f"matchday {sl['matchday']}" if sl.get("matchday") else None) if x)
+        return html.Div([html.H2(f"Before kick-off: {home} v {away}"), html.Div([html.Span(meta, className="muted"), html.Span("pre-match", className="badge st-phase")],
+                                                                            className="detail-meta")], className="detail-head phase-head")
+    return html.Div([html.H2(f"Full time: {home} {score.get('home', 0)}-{score.get('away', 0)} {away}"),
+                     html.Div([html.Span("recap", className="badge st-phase")], className="detail-meta")], className="detail-head phase-head")
 
 
 # --- On air now: the overlay's lower-third, at the top of the right column ------------------------------
@@ -1224,7 +1381,7 @@ def register(app) -> None:
                  Input({"type": "fb", "p": ALL, "k": ALL, "v": ALL}, "n_clicks"), Input({"type": "fb-r", "p": ALL, "k": ALL, "r": ALL}, "n_clicks"),
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
     app.callback(Output("c-story", "children"), Output("c-story", "style"), Output("c-story-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), Input("c-lang", "value"),
-                 State("c-story-sig", "data"), State("c-replay", "data"))(_story_cb)
+                 State("c-story-sig", "data"), State("c-replay", "data"), State("c-rundown", "value"))(_story_cb)
     app.clientside_callback(STORY_OPEN, Output("c-view", "value", allow_duplicate=True), Output("c-i-list", "value", allow_duplicate=True),
                             Input({"type": "c-story-chip", "id": ALL}, "n_clicks"), prevent_initial_call=True)
     app.callback(Output("c-onair", "children"), Output("c-onair-sig", "data"), Input("c-sig", "data"), Input("c-lang", "value"), State("c-match", "value"),
@@ -1232,7 +1389,8 @@ def register(app) -> None:
     app.callback(Output("c-fb-line", "options"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"), State("c-lang", "value"))(_fb_lines_cb)
     app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-fb-note", "value"), Input("c-fb-send", "n_clicks"), State("c-match", "value"), State("c-fb-line", "value"),
                  State("c-fb-verdict", "value"), State("c-fb-reasons", "value"), State("c-fb-note", "value"), prevent_initial_call=True)(_fb_send_cb)
-    app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
+    app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Output("c-edit", "style"), Input("c-sig", "data"), State("c-match", "value"),
+                 State("c-rundown", "value"))(_approve_styles_cb)
     app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
                  State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"), Input("c-replay-tick", "disabled"), Input("c-follow", "data"))(_context_cb)
     app.callback(Output("c-intro-var", "children"), Output("c-intro-var", "style"), Output("c-intro-card", "data"), Input("c-p-match", "data"))(lambda m: intro_target(m))

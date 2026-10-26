@@ -272,3 +272,18 @@ body:has(.ov-page) { background: #0b0b0b; }
 .tl-during { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .tl-line { display: flex; gap: 6px; color: var(--ink-2); font-size: 13px; }
 .fold-facts { margin-top: 12px; }
+
+/* Before kick-off and Full time: views built from the storyline, the insights and the recap, not cards; a muted accent in the rundown */
+.rundown .dash-options-list-option:has(.ru-phase) { background: transparent; border: 1px dashed var(--line); border-left: 3px solid var(--muted); }
+.rundown .dash-options-list-option.selected:has(.ru-phase) { border-color: var(--ink-2); border-left-color: var(--ink-2); }
+.ru-phase .ru-moment { color: var(--ink-2); }
+.st-phase { color: var(--muted); font-weight: 400; text-transform: lowercase; }
+.phase-head h2 { margin-bottom: 4px; }
+.phase-lead .headline { font-size: 18px; }
+.phase-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.phase-chip { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.phase-threads { margin: 0; padding-left: 18px; color: var(--ink-2); }
+.phase-threads li { margin: 2px 0; }
+.phase-para { margin: 6px 0; color: var(--ink-2); line-height: 1.45; }
+.phase-para .duo-speaker { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.phase-note { margin-top: 14px; }

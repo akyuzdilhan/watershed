@@ -172,9 +172,9 @@ def test_refresh_lists_the_rundown_and_draws_the_curve(desk):
     assert len(out) == console.REFRESH_OUTPUTS
     rundown, selected, detail, head, fig, score, approve_off, edit_off, reject_off, sig = out
     cards = {c["id"]: c for c in desk.cards(MATCH)}
-    order = [cards[o["value"]] for o in rundown]
+    order = [cards[o["value"]] for o in rundown if o["value"] not in console.PHASES]
     waiting = [c for c in order if c["status"] == "pending"]
-    assert len(rundown) == 11 and waiting and order[:len(waiting)] == waiting  # the cards waiting for a decision on top
+    assert len(order) == 11 and rundown[0]["value"] == console.PRE_MATCH and waiting and order[:len(waiting)] == waiting  # the cards waiting for a decision on top
     assert all(a["clock_s"] <= b["clock_s"] for group in (waiting, order[len(waiting):]) for a, b in zip(group, group[1:]))  # each group in match order
     latest = console.latest_card(list(cards.values()))
     assert selected == latest["id"] and latest["minute_label"] in texts_in(head)  # the most recent card in time
@@ -703,7 +703,7 @@ def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypa
         rundown, _, detail, head, fig, score, approve_off, edit_off, _, _ = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)
     text = texts_in(detail) + texts_in(head)
     en = next(t for t in goal["texts"] if t["lang"] == "en")
-    assert len(rundown) == 11 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
+    assert len(rundown) == 12 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
     assert approve_off and edit_off
     assert not feedback_ids(detail) and not feedback_ids(detail, "fb-r") and not feedback_ids(detail, "fb-n")  # no thumbs, reasons or notes
     history = texts_in(find(detail, lambda c: getattr(c, "className", "") == "history"))
@@ -791,7 +791,7 @@ def test_public_console_never_loads_a_model(desk):
     env.update(PYTHONPATH=str(SRC), PUBLIC_MODE="1", EASY_AUTH_ENABLED="true", DESK_DIR=str(desk.root))
     out = subprocess.run([sys.executable, "-c", code, MATCH], capture_output=True, text=True, check=True, env=env).stdout
     result = json.loads(out.strip().splitlines()[-1])
-    assert result == {"read_only": True, "rundown": 11, "loaded": []}
+    assert result == {"read_only": True, "rundown": 12, "loaded": []}  # the 11 cards and Before kick-off
 
 
 # --- match graphics, insights and storyline -------------------------------------------------------
@@ -990,7 +990,7 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
     def order() -> list[dict]:
         rundown = console.refresh(MATCH, None, None)[0]
         cards = {c["id"]: c for c in desk.cards(MATCH)}
-        return [cards[o["value"]] for o in rundown]
+        return [cards[o["value"]] for o in rundown if o["value"] not in console.PHASES]
 
     first = order()
     assert [c["status"] for c in first][:2] == ["pending", "pending"] and first[-1]["status"] != "pending"
@@ -1002,7 +1002,7 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
     rest = after[len(waiting):]
     assert [c["clock_s"] for c in rest] == sorted(c["clock_s"] for c in rest) and picked["id"] in [c["id"] for c in rest]
     assert console.refresh(MATCH, None, None)[1] == console.latest_card(after)["id"]  # nothing selected: the most recent card in time
-    options = console.rundown_options(after)
+    options = console.rundown_options(after)  # the cards' entries, between Before kick-off and Full time
     assert ["ru-waiting" in o["label"].className for o in options] == [c["status"] == "pending" for c in after]
 
 
@@ -1380,7 +1380,7 @@ def test_the_replay_shows_the_desk_as_it_stood_at_a_minute_and_writes_nothing(au
     def shown(label: str):
         out = console.refresh(MATCH, None, None, store=s, t=at(label))
         cards = {c["id"]: c for c in s.cards(MATCH)}
-        return out, {cards[o["value"]]["minute_label"]: o["label"] for o in out[0]}
+        return out, {cards[o["value"]]["minute_label"]: o["label"] for o in out[0] if o["value"] not in console.PHASES}
 
     out, rundown = shown("50'")
     assert sorted(rundown) == ["14'", "31'"] and out[5].startswith("Varleigh 0-2 Yarnford") and "FT" not in out[5]
@@ -1430,6 +1430,50 @@ def test_the_right_column_reads_on_air_then_the_moment_then_the_curve():
     assert ids.index("c-onair") < ids.index("c-context") < ids.index("c-wp")  # the win probability last, the least read
     title = next(c for c in right.children if type(c).__name__ == "H3")
     assert title.children == "Win probability" and right.children.index(title) == ids.index("c-wp") - 1
+
+
+STORYLINE = {"id": f"storyline-{MATCH}", "type": "storyline", "match_id": MATCH, "status": "approved", "competition": "Synthetic League", "season": "2026/27", "matchday": 30,
+             "home": "Varleigh", "away": "Yarnford", "focus": {"Varleigh": "relegation", "Yarnford": "relegation"}, "machine_translated": ["es"],
+             "facts": {"varleigh_rank": 17, "varleigh_points": 29, "yarnford_rank": 18, "yarnford_points": 28,
+                       "varleigh_relegation_chance_pct": 11, "varleigh_relegation_chance_if_win_pct": 5, "varleigh_relegation_chance_if_draw_pct": 13, "varleigh_relegation_chance_if_loss_pct": 22,
+                       "yarnford_relegation_chance_pct": 34, "yarnford_relegation_chance_if_win_pct": 16, "yarnford_relegation_chance_if_draw_pct": 32, "yarnford_relegation_chance_if_loss_pct": 43,
+                       "varleigh_form": "WWWLD", "varleigh_form_points": 10, "yarnford_form": "LWLLD", "yarnford_form_points": 4,
+                       "h2h_meetings": 58, "h2h_varleigh_wins": 29, "h2h_draws": 20, "h2h_yarnford_wins": 9, "h2h_first_season": "1976/77",
+                       "h2h_last_meeting": "2025/26: Varleigh 3-0 Yarnford", "reverse_fixture": "matchday 24: Yarnford 0-3 Varleigh", "yarnford_player2_milestone_needed": 2},
+             "players_to_watch": [{"name": "Dominic Carter", "club": "Yarnford", "season": "2025/26", "season_goals": 7, "milestone": "50 goals", "fact_prefix": "yarnford_player2"}],
+             "threads": [{"key": "relegation_six_pointer", "kind": "stakes", "angle": "A relegation six-pointer"}],
+             "texts": [{"lang": "en", "headline": "Varleigh v Yarnford: a relegation battle", "why": "Yarnford are on 34% to go down."},
+                       {"lang": "fr", "headline": "Varleigh - Yarnford, duel pour le maintien", "why": "Yarnford a 34 % de risques de descendre."}],
+             "duo": [{"speaker": "wren", "lang": "en", "line": "Tonight is about staying up, Joss."}, {"speaker": "wren", "lang": "fr", "line": "Ce soir, on joue le maintien, Joss."}]}
+
+
+def test_before_kick_off_opens_the_rundown_and_gathers_what_was_analysed_before_the_match(desk):
+    folder = desk.root / MATCH
+    (folder / "storyline.json").write_text(json.dumps(STORYLINE), encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    out = console.refresh(MATCH, console.PRE_MATCH, None, lang="fr")
+    rundown, selected, view, head = out[:4]
+    assert rundown[0]["value"] == console.PRE_MATCH and "ru-phase" in rundown[0]["label"].className and "Before kick-off" in texts_in(rundown[0]["label"])
+    assert "0'" in texts_in(rundown[0]["label"]) and "Pending" not in texts_in(rundown[0]["label"])  # first, at 0', with no status: nobody publishes it
+    assert selected is no_update and texts_in(head).startswith("Before kick-off: Varleigh v Yarnford") and "matchday 30" in texts_in(head)
+    text = texts_in(view)
+    assert "Varleigh - Yarnford, duel pour le maintien" in text and "a relegation battle" not in text and "Ce soir, on joue le maintien" in text  # the language picked
+    first = min(desk.state(MATCH)["wp_timeline"], key=lambda p: p["seq"])
+    assert "Win probability at kick-off" in text and f"Varleigh {first['home'] * 100:.0f}%" in text and f"Draw {first['draw'] * 100:.0f}%" in text
+    assert "Yarnford relegation 34% (win 16%, draw 32%, loss 43%)" in text and "Varleigh: 17th, 29 pts" in text and "Yarnford: 18th, 28 pts" in text
+    assert "58 meetings since 1976/77: Varleigh 29, draws 20, Yarnford 9" in text and "Varleigh WWWLD (10 pts from 5)" in text and "2 from 50 goals" in text
+    assert "A relegation six-pointer" not in text and "A relegation six-pointer" in texts_in(console.refresh(MATCH, console.PRE_MATCH, None, lang="en")[2])  # the threads: English only
+    assert out[6:8] == (True, True)  # no Publish, no Edit
+    assert console._approve_styles_cb(None, MATCH, console.PRE_MATCH) == ({"display": "none"},) * 3
+    assert console._approve_styles_cb(None, MATCH, card_at(desk, "14'")["id"])[2] == {}
+    points, _, breaks = console.axis(desk.state(MATCH)["wp_timeline"])
+    assert console.refresh(MATCH, None, None, t=1.0, follow=True)[1] == console.PRE_MATCH  # the replay before the first card: Before kick-off, never an empty detail
+    assert console.refresh(MATCH, None, None, t=console.label_x("20'", points, breaks), follow=True)[1] == card_at(desk, "14'")["id"]
+    assert console.refresh(MATCH, console.PRE_MATCH, None, t=40.0)[1] is no_update  # clicked: kept during the replay
+    shown, style, _ = console.story(MATCH, "en", None, desk, t=1.0)
+    assert style == {} and "a relegation battle" in texts_in(shown)
+    assert console.story(MATCH, "en", None, desk, t=1.0, selected=console.PRE_MATCH)[1] == {"display": "none"}  # the strip would repeat the stakes
+    assert {p.name: p.read_bytes() for p in folder.iterdir()} == before  # a view: nothing written
 
 
 def test_the_replay_control_is_in_the_header_for_everyone():
