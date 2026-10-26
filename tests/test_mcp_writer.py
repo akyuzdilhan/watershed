@@ -115,6 +115,24 @@ def test_without_mcp_the_same_tool_is_served_locally(monkeypatch):
     assert client.requests[1]["results"] == [registry.moment(card["id"])]
 
 
+def test_a_close_error_keeps_the_reply(monkeypatch, caplog):
+    from mcp import Client
+
+    class ClosesBadly(Client):
+        async def __aexit__(self, *exc):
+            await super().__aexit__(*exc)
+            raise RuntimeError("closed badly")
+
+    card = make_card()
+    w, _ = scripted_writer(card, FactRegistry())
+    clean = asyncio.run(draft(card, TEAMS, w, LANGS))
+    monkeypatch.setattr(worker.mcp_writer, "Client", ClosesBadly)
+    w, _ = scripted_writer(card, FactRegistry())
+    d = asyncio.run(draft(card, TEAMS, w, LANGS))
+    assert (d.writer, d.attempts, d.texts) == ("scripted", 1, clean.texts) and w.transports == {"mcp": 1}
+    assert "not closed cleanly" in caplog.text
+
+
 def test_the_default_path_imports_none_of_it():
     code = ("import sys, worker.__main__, worker.desk, worker.pipeline; print(sorted(m for m in ('mcp', 'agent_framework_orchestrations', 'worker.mcp_server', "
             "'worker.duo_agents', 'worker.agent_desk', 'worker.mcp_writer') if m in sys.modules))")

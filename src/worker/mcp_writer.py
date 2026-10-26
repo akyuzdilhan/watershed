@@ -48,7 +48,8 @@ class McpWriter(FoundryWriter):
 
     async def write_async(self, card: dict, facts: tuple[dict, dict], languages: list[str], note: str | None = None, avoid: dict | None = None, duo: bool = False,
                           preferences: str | None = None, max_tokens: int | None = None) -> str:
-        """One Writer call, as FoundryWriter.write_async. The connection opens and closes in this task (anyio requires it), so nothing is left on the desk's loop."""
+        """One Writer call, as FoundryWriter.write_async. The connection opens and closes in this task (anyio requires it), so nothing is left on the desk's loop; a
+        connection that fails to close after the reply is logged, and the reply is kept."""
         self.registry.put_moment(card["id"], *facts)
         message = writer_message(card, languages, note, avoid, duo, preferences)
         async with contextlib.AsyncExitStack() as stack:
@@ -61,4 +62,10 @@ class McpWriter(FoundryWriter):
             except Exception as error:
                 log.warning("get_moment served locally, MCP unavailable: %r", error)
             self.transports[transport] += 1
-            return await self.run(message, max_tokens, tools=tools)
+            reply = await self.run(message, max_tokens, tools=tools)
+            opened = stack.pop_all()  # closed below, so that a close error cannot cost the reply
+        try:
+            await opened.aclose()
+        except Exception as error:
+            log.warning("MCP connection not closed cleanly, reply kept: %r", error)
+        return reply
