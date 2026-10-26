@@ -685,6 +685,22 @@ def test_a_starter_and_a_club_the_history_cannot_place_get_their_familys_texts()
             assert not any(w in (t["headline"] + t["why"]).lower() for w in ("bench", "banc", "banquillo", "substitut", "remplaçant", "suplente")), t
 
 
+def test_a_late_goal_credited_to_another_player_is_told_with_the_new_name():
+    """The feed gives a late goal to a team-mate: version 2 of its insight, same minute and score, carries the texts of version 1, which name the old scorer. They are written again."""
+    away = replay_names()["away"]
+    old = away[9]
+    new = next(n for n in away if n.split()[-1] != old.split()[-1])
+    facts = {"player": old, "team": "United", "minute": "90+4'", "goal_type": "go-ahead goal", "score_after": "0-1"} | seen(3000)
+    desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
+    first = json.loads(json.dumps(desk.write_insight(insight_doc("late-e1-go-ahead", facts, version=1), TEAMS)))
+    out = desk.write_insight(dict(first, version=2, headline_facts=dict(facts, player=new)), TEAMS)
+    assert out["verification"]["verified"]
+    for t in out["texts"]:
+        body = t["headline"] + " " + t["why"]
+        assert new in body and old not in body, t
+    assert not [l["line"] for l in out["duo"] if old in l["line"]]
+
+
 def test_the_generic_insight_lines_name_who_did_it():
     """The lines left for a fact no family can tell name the player or the club ({subject}), or both clubs; with nobody named in the facts, the two clubs are."""
     for lang, kinds in INSIGHT_TEMPLATES.items():

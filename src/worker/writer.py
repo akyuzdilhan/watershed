@@ -1080,7 +1080,7 @@ class TemplateWriter:
             pick = _Picker(memory, doc["id"], lang, facts, self.demoted)
             values = {"subject": subject, "home_team": facts.get("home_team"), "away_team": facts.get("away_team"), "minute": facts.get("minute")}
             mine = own.get(lang)
-            if mine and verify(json.dumps([mine], ensure_ascii=False), [lang], air)[1]["verified"] and memory_key_free(pick, mine):
+            if mine and own_text_ok(mine, lang, air, subject) and memory_key_free(pick, mine):
                 texts.append(mine)  # the document's text, the family's duo lines
                 fact = insight_fact_text(doc, facts, lang, pick, duo) if duo else None
             else:
@@ -1223,6 +1223,13 @@ def season_lines(card: dict, facts: dict, lang: str, pick: _Picker) -> list[dict
 
 def memory_key_free(pick: _Picker, text: dict) -> bool:
     return pick.memory.key(str(text.get("headline", ""))) not in pick.headlines
+
+
+def own_text_ok(text: dict, lang: str, facts: dict, subject: str | None) -> bool:
+    """Whether a document's own text (the storyline's, or the one an insight kept from its last version) may stay: it passes the Verifier on the on-air facts, names nobody the facts do not, and names who did it. A late goal the feed credits to another player is a new version whose facts name the new scorer: the text of the earlier version, with the old name, is written again."""
+    _, report = verify(json.dumps([text], ensure_ascii=False), [lang], facts)
+    body = f"{text.get('headline', '')} {text.get('why', '')}"
+    return report["verified"] and not report["cards"][0]["unknown_names"] and (subject is None or subject.split()[-1] in body)
 
 
 class FoundryWriter:
