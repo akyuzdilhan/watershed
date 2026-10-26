@@ -292,6 +292,7 @@ class Pipeline:
 
     def handle(self, m: dict, now: float | None = None) -> list[dict]:
         """Processes one message off the wire; returns the cards and card actions it produced."""
+        self._poll_desk()
         match = self.matches.get(m["match_id"]) or Match(m["match_id"], hold_s=self.hold_s)
         ready = match.receive(m, now)  # an unreadable message raises here, before it creates a match
         self.matches.setdefault(match.match_id, match)
@@ -305,7 +306,14 @@ class Pipeline:
             whistled = self._whistled.get(match.match_id)
             if self.recap and whistled is not None and self.clock() - whistled <= self.recap_window_s and match.match_id in self.spotters:
                 self._recap(match, self.spotters[match.match_id], self.timelines.get(match.match_id, []), only_if_changed=True)
+        self._poll_desk()
         return out
+
+    def _poll_desk(self) -> None:
+        """A desk that finishes work in the background (worker.agent_desk) applies it here, on the pipeline's thread; the plain Desk has no poll."""
+        poll = getattr(self.desk, "poll", None)
+        if poll is not None:
+            poll()
 
     def _process(self, match: Match, ready: list[dict]) -> list[dict]:
         out = []
