@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from dash import no_update
+from dash import html, no_update
 from flask import Flask
 
 from generator import generate_match
@@ -103,7 +103,7 @@ def test_a_half_written_file_keeps_the_last_good_read(desk):
 def test_approve_and_reject_go_through_the_desk_and_are_audited(desk):
     goal, other = card_at(desk, "66'"), card_at(desk, "14'")
     message, done = console.decide("approve", MATCH, goal["id"], "producer-1")
-    assert done and "approved by producer-1" in message
+    assert done and "approved by Producer" in message and "producer-1" not in message  # the screen names the producer, the audit keeps who
     message, done = console.decide("reject", MATCH, other["id"], "producer-1")
     assert done
     on_disk = {c["id"]: c for c in json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))}
@@ -217,11 +217,11 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
 
 
 def test_a_scorer_correction_is_shown_in_the_console_and_on_the_overlay(desk):
-    rewritten = next(c for c in desk.cards(MATCH) if c.get("version", 1) >= 2)
-    first = next(m for m in matchfeed.load(REPLAY_DIR / f"{MATCH}.jsonl.gz") if m["type"] == "action" and m["event_id"] == rewritten["event_id"])  # the goal as first credited
-    previous, now = first["player"]["name"], rewritten["player"]["name"]
-    assert previous != now
-    corrected = dict(rewritten, previous_player=previous)
+    corrected = next(c for c in desk.cards(MATCH) if c.get("version", 1) >= 2)
+    first = next(m for m in matchfeed.load(REPLAY_DIR / f"{MATCH}.jsonl.gz") if m["type"] == "action" and m["event_id"] == corrected["event_id"])  # the goal as first credited
+    previous, now = first["player"]["name"], corrected["player"]["name"]
+    assert previous != now and corrected.get("previous_player") == previous  # the desk records the scorer the feed first credited
+    rewritten = {k: v for k, v in corrected.items() if k != "previous_player"}
     assert f"Scorer corrected: {previous} → {now}" in texts_in(console.detail(corrected, []))
     assert "Scorer corrected" not in texts_in(console.detail(rewritten, []))  # no field: nothing changes
     assert "Scorer corrected" not in texts_in(console.detail(dict(corrected, version=1), []))
@@ -241,7 +241,7 @@ def test_a_var_decision_shows_its_reason_and_call_and_the_margin_only_to_a_produ
     assert "VAR decision: Offside, tight call" in seen_by_producer and "0.37 m" in seen_by_producer
     assert "VAR decision: Offside, tight call" in seen_by_visitor and "0.37" not in seen_by_visitor
     assert "VAR decision: Handball" in texts_in(console.detail(dict(ruled, var_decision={"reason": "var_handball", "call": None, "margin_m": None}), []))
-    assert "VAR decision" not in texts_in(console.detail({k: v for k, v in card_at(desk, "63'").items() if k != "ruled_out"}, []))
+    assert "VAR decision" not in texts_in(console.detail({k: v for k, v in card_at(desk, "63'").items() if k not in ("ruled_out", "var_decision")}, []))
     cards = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
     (desk.root / MATCH / "cards.json").write_text(json.dumps([dict(c, var_decision=decision) if c["id"] == ruled["id"] else c for c in cards]), encoding="utf-8")
     monkeypatch.setenv("PUBLIC_MODE", "1")
@@ -252,6 +252,11 @@ def test_a_var_decision_shows_its_reason_and_call_and_the_margin_only_to_a_produ
     monkeypatch.setenv("PUBLIC_MODE", "0")
     with app.server.test_request_context("/"):
         assert "0.37 m" in texts_in(console._refresh_cb(1, 0, MATCH, ruled["id"], "en", None)[3])
+    head = console.card_head(ruled)
+    folded = find(head, lambda c: getattr(c, "className", "") == "producer-details")
+    assert len(folded) == 1 and folded[0].open is False and "0.37 m" in texts_in(folded[0])  # the producer's margin, closed by default
+    assert "0.37" not in texts_in([c for c in head.children if c is not folded[0]]) and "VAR decision: Offside, tight call" in texts_in(head)
+    assert not find(console.card_head(ruled, read_only=True), lambda c: getattr(c, "className", "") == "producer-details")
     for lang in overlay.LANGS:  # never on the overlay
         for item in ({"kind": "retraction", "card": dict(ruled, retracted_on_air=True), "detail": None}, {"kind": "card", "card": dict(ruled, status="approved"), "detail": None}):
             on_screen = texts_in(overlay.lower_third(item, lang))
@@ -305,6 +310,19 @@ def test_overlay_shows_the_retraction_of_a_card_that_was_on_air(tmp_path, monkey
     assert "Goal ruled out (VAR, offside)" in text and "63'" in text and "withdrawn" not in text
     assert "But refusé (VAR, hors-jeu)" in texts_in(overlay.render("?lang=fr", store=s))
     assert "Gol anulado (VAR, fuera de juego)" in texts_in(overlay.render("?lang=es", store=s))
+
+
+def test_a_retraction_audited_by_the_feed_holds_from_the_minute_of_the_ruling():
+    goal = {"id": "card-g", "type": "card", "status": "retracted", "retracted_on_air": True, "moment": "goal", "minute_label": "63'", "clock_s": 3745.0, "team": "home",
+            "ruled_out": {"reason": "offside"}, "texts": [{"lang": "en", "headline": "Goal headline", "why": "Goal why."}]}
+    audit = [{"card_id": "card-g", "action": "written", "by": "template", "at": 100.0}, {"card_id": "card-g", "action": "approved", "by": "auto-approve", "at": 100.0},
+             {"card_id": "card-g", "action": "hold", "by": "feed", "at": 100.2, "minute_label": "63'"},
+             {"card_id": "card-g", "action": "retracted", "by": "feed", "at": 100.5, "minute_label": "64'", "was_on_air": True}]
+    assert overlay.from_feed(audit[-1]) and not overlay.from_feed(audit[1])
+    for entries in (audit, [{k: v for k, v in e.items() if not (k == "by" and v == "feed")} for e in audit]):  # the desk's trail, then an older one without `by`
+        held = overlay.on_air([goal], entries, 3800.0, 2)
+        assert held is not None and held["kind"] == "retraction"  # the ruling came in the 64th minute: the retraction holds from there
+        assert overlay.on_air([goal], entries, 3840.0 + overlay.RETRACTION_HOLD_S + 1, 2) is None
 
 
 def test_a_card_holds_the_overlay_while_its_facts_wait_on_the_detail_line():
@@ -486,7 +504,11 @@ def test_public_mode_shows_visitors_a_read_only_console(desk, monkeypatch):
     with app.server.test_request_context("/", headers={security.PRINCIPAL_HEADER: "ana@example.com"}):
         assert security.producer() == "ana@example.com"
         page = route("/")
-        assert "Signed in as ana@example.com" in texts_in(page) and "Read-only view" not in texts_in(page) and "read-only" not in page.className
+        assert "Signed in as Producer" in texts_in(page) and "Read-only view" not in texts_in(page) and "read-only" not in page.className
+        assert "ana@example.com" not in texts_in(page)  # the identity stays in the audit, never on screen
+        monkeypatch.setenv("PRODUCER_DISPLAY_NAME", "Match desk")
+        assert "Signed in as Match desk" in texts_in(route("/")) and "ana@example.com" not in texts_in(route("/"))
+        monkeypatch.delenv("PRODUCER_DISPLAY_NAME")
     monkeypatch.setenv("PRODUCERS", "bob@example.com")
     with app.server.test_request_context("/", headers={security.PRINCIPAL_HEADER: "ana@example.com"}):
         assert security.producer() is None and "Read-only view" in texts_in(route("/"))
@@ -517,7 +539,8 @@ def test_approve_callback_refuses_without_sign_in_in_public_mode(desk, monkeypat
     assert card_at(desk, "66'")["status"] == "pending"
     monkeypatch.setenv("PUBLIC_MODE", "0")
     response = app.server.test_client().post("/_dash-update-component", json=body)
-    assert "approved by local-producer" in response.get_data(as_text=True)
+    assert "approved by Producer" in response.get_data(as_text=True) and "local-producer" not in response.get_data(as_text=True)
+    assert audit_of(desk, card["id"])[-1] == ("approved", "local-producer")
     assert card_at(desk, "66'")["status"] == "approved"
 
 
@@ -613,7 +636,9 @@ def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypa
     monkeypatch.setenv("PUBLIC_MODE", "0")  # the producer, locally: every control
     with app.server.test_request_context("/"):
         detail = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)[2]
-    assert feedback_ids(detail) and feedback_ids(detail, "fb-n") and "ana@example.com" in texts_in(detail)
+    history = texts_in(find(detail, lambda c: getattr(c, "className", "") == "history"))
+    assert feedback_ids(detail) and feedback_ids(detail, "fb-n") and "by Producer" in history and "ana@example.com" not in texts_in(detail)
+    assert audit_of(desk, goal["id"])[-2:] == [("approved", "ana@example.com"), ("feedback", "ana@example.com")]  # the audit keeps the identity
 
 
 def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypatch):
@@ -656,9 +681,11 @@ def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypat
     producer = {**VISITOR, security.PRINCIPAL_HEADER: "ana@example.com"}
     panel = dash_post("c-edit-panel.children", *edit_open(goal), headers=producer).get_json()["response"]
     assert len(panel["c-edit-panel"]["children"]) == len(goal["texts"])
-    assert "approved by ana@example.com" in dash_post(DECIDE, *decision("c-approve", goal), headers=producer).get_data(as_text=True)
-    assert "Rejected by ana@example.com" in dash_post(DECIDE, *decision("c-reject", other), headers=producer).get_data(as_text=True)
-    assert "not relevant (too long), by ana@example.com" in dash_post("c-i-rev.data@", *judge("fb-r", goal, "too_long"), headers=producer).get_data(as_text=True)
+    approved, rejected = (dash_post(DECIDE, *decision(b, c), headers=producer).get_data(as_text=True) for b, c in (("c-approve", goal), ("c-reject", other)))
+    judged = dash_post("c-i-rev.data@", *judge("fb-r", goal, "too_long"), headers=producer).get_data(as_text=True)
+    assert "approved by Producer" in approved and "Rejected by Producer" in rejected and "not relevant (too long), by Producer" in judged
+    assert not any("ana@example.com" in answer for answer in (approved, rejected, judged))
+    assert audit_of(desk, goal["id"])[-1] == ("feedback", "ana@example.com") and audit_of(desk, other["id"])[-1] == ("rejected", "ana@example.com")
     assert "with a note" in dash_post("c-i-rev.data@", *judge("fb-n", goal, "Too long by half"), headers=producer).get_data(as_text=True)
     assert card_at(desk, "66'")["status"] == "approved" and card_at(desk, "57'")["status"] == "rejected"
     latest = console.FB.by_target(desk.feedback_docs(MATCH))[f"{goal['id']}|why|en|0"]
@@ -739,8 +766,10 @@ def test_graphics_tab_draws_every_kind_from_the_feed(feed_desk):
         assert panels.graphics(MATCH, kind, value if value is not no_update else None, "graphics", sig, feed_desk)[2] is no_update  # unchanged: nothing re-sent
     _, _, fig, _, _ = panels.graphics(MATCH, "momentum", None, "graphics", None, feed_desk)
     assert len(fig.data) == 5  # threat bars and the desk's win-probability curve
-    _, _, fig, _, _ = panels.graphics(MATCH, "tactics", "run:demo-0007-v2-a01178:home-20", "graphics", None, feed_desk)
-    assert fig.layout.meta["offside"]["margin_m"] == 0.25
+    _, _, fig, note, _ = panels.graphics(MATCH, "tactics", "run:demo-0007-v2-a01178:home-20", "graphics", None, feed_desk)
+    assert "margin_m" not in fig.layout.meta["offside"] and fig.layout.meta["offside"]["line_x"]  # the figure never carries the margin
+    folded = find(note, lambda c: isinstance(c, html.Details))
+    assert len(folded) == 1 and folded[0].open is False and "0.25 m beyond the line" in texts_in(folded[0])  # the producer's, folded
     assert panels.graphics(MATCH, "shots", None, "desk", None, feed_desk) == (no_update,) * 5  # hidden tab
 
 
@@ -777,7 +806,9 @@ def test_insights_and_storyline_are_decided_through_the_desk_and_reach_the_overl
     options, value, detail, fig, story, a_off, r_off, sa_off, sr_off, _ = panels.insights(MATCH, run["id"], "insights", None, store=feed_desk)
     assert [o["value"] for o in options] == [d["id"] for d in sorted(docs, key=lambda d: -d["value"])]
     assert not a_off and not r_off and not sa_off and "Fourth against sixth" in texts_in(story)
-    assert "A quarter of a metre." in texts_in(detail) and fig.layout.meta["offside"]["margin_m"] == 0.25
+    assert "A quarter of a metre." in texts_in(detail) and "margin_m" not in fig.layout.meta["offside"]
+    folded = find(detail, lambda c: isinstance(c, html.Details))
+    assert len(folded) == 1 and "margin_m" in [c.title for c in find(folded[0], lambda c: getattr(c, "className", "") == "fact-key")]
     assert panels.decide_doc("approve", MATCH, run["id"], None, feed_desk) == ("Sign in to approve or reject.", False)
     message, done = panels.decide_doc("approve", MATCH, run["id"], "producer-1", feed_desk)
     assert done, message
@@ -874,6 +905,21 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
     assert ["ru-waiting" in o["label"].className for o in options] == [c["status"] == "pending" for c in after]
 
 
+def test_without_a_card_waiting_the_most_recent_card_is_selected(desk):
+    waiting = [c for c in desk.cards(MATCH) if c["status"] == "pending"]
+    assert waiting and console.refresh(MATCH, None, None)[1] == console.rundown_order(desk.cards(MATCH))[0]["id"]  # the earliest waiting card first
+    for c in waiting:
+        assert console.decide("reject", MATCH, c["id"], "producer-1")[1]
+    cards = desk.cards(MATCH)
+    assert not any(c["status"] == "pending" for c in cards)
+    picked = next(c for c in cards if c["id"] == console.refresh(MATCH, None, None)[1])
+    latest = max((c.get("clock_s") or 0, c.get("version") or 1) for c in cards)
+    assert (picked.get("clock_s") or 0, picked.get("version") or 1) == latest  # the most recent card, not the first of the match
+    earliest = min(cards, key=lambda c: c.get("clock_s") or 0)
+    assert earliest["id"] != picked["id"] and console.refresh(MATCH, earliest["id"], None)[1] is no_update  # a selection is kept
+    assert console.default_pick([]) is None
+
+
 def test_readable_labels_for_fact_types_fields_and_audit_actions(desk):
     assert console.fact_label("ht-lead-lost") == "Half-time lead lost" and console.fact_label("ht-lead-lost-away-2") == "Half-time lead lost"
     assert console.fact_label("stat-of-the-match") == "Stat of the match" and console.fact_label("xg-ft-home-5") == "Full-time xG"
@@ -891,8 +937,9 @@ def test_a_card_ruled_out_shows_the_var_reason_and_what_the_duo_says(desk):
     assert ruled["status"] == "retracted" and ruled["ruled_out"]["reason"] == "offside" and ruled.get("duo_ruling")
     teams = desk.state(MATCH)["teams"]
     producer, visitor = console.detail(ruled, desk.audit(MATCH), [], teams), console.detail(ruled, desk.audit(MATCH), [], teams, read_only=True)
-    call = console.VAR_CALLS[console.offside_call(ruled["ruled_out"]["margin_cm"])]
-    assert f"VAR decision: Offside, {call}" in texts_in(producer) and f"{ruled['ruled_out']['margin_cm'] / 100:.2f} m" in texts_in(producer)
+    assert ruled["ruled_out"]["margin_cm"] is None  # the margin and its call stay in var_decision, for the producer
+    call = console.VAR_CALLS[ruled["var_decision"]["call"]]
+    assert f"VAR decision: Offside, {call}" in texts_in(producer) and f"{ruled['var_decision']['margin_m']:.2f} m" in texts_in(producer)
     assert f"VAR decision: Offside, {call}" in texts_in(visitor) and " m, producer only" not in texts_in(visitor)
     for lang in ("en", "fr", "es"):
         view = texts_in(console.detail(ruled, [], [], teams, lang=lang))
@@ -922,9 +969,15 @@ def test_the_writing_trace_is_shown_when_the_card_carries_it(desk):
     assert len(table) == 1 and len(table[0].children[1].children) == 2
     text = texts_in(producer)
     assert "1200 / 800 / 512" in text and "1300 / - / -" in text and "4.2 s" in text and "length" in text and "unclaimed number 33" in text
-    assert "Written by the templates: every attempt refused" in text and "Writer settings: deployment dep-1, effort low, max_tokens 2000, prompt abcdef0123" in text
+    assert "Written by the templates: every attempt refused" in text and "Writer settings: deployment dep-1, effort low, max_tokens 2000, prompt abcdef012345" in text
     seen = texts_in(visitor)
-    assert "1200 / 800 / 512" in seen and "unclaimed number 33" not in seen and "dep-1" not in seen
+    assert "1200 / 800 / 512" in seen and "unclaimed number 33" not in seen and "dep-1" not in seen and "every attempt refused" not in seen  # fallback_reason: producer only
+    folded = find(producer, lambda c: getattr(c, "className", "") == "producer-details")
+    assert len(folded) == 1 and folded[0].open is False and texts_in(folded[0].children[0]) == "Producer details"
+    inside = texts_in(folded[0])
+    assert all(s in inside for s in ("unclaimed number 33", "every attempt refused", "dep-1", "abcdef012345"))
+    assert "unclaimed number 33" not in texts_in(table[0])  # the error is out of the table, folded with the rest
+    assert not find(visitor, lambda c: getattr(c, "className", "") == "producer-details")
     broken = dict(card, verification=dict(card["verification"], attempts_log="oops"), writer_config="oops")
     assert "Verified" in texts_in(console.detail(broken, []))  # a malformed trace is ignored
 
@@ -1035,5 +1088,5 @@ def test_feedback_callback_refuses_without_sign_in_in_public_mode(desk, monkeypa
     assert desk.feedback_docs(MATCH) == []
     monkeypatch.setenv("PUBLIC_MODE", "0")
     response = app.server.test_client().post("/_dash-update-component", json=body)
-    assert "relevant, by local-producer" in response.get_data(as_text=True)
+    assert "relevant, by Producer" in response.get_data(as_text=True)
     assert len(desk.feedback_docs(MATCH)) == 1

@@ -18,6 +18,7 @@ LANGS = ("en", "fr", "es")
 AI_WRITTEN_LABEL = {"en": "AI-written, not reviewed", "fr": "rédigé par IA, non relu", "es": "escrito por IA, sin revisar"}
 AUTO_APPROVED_LABEL = {"en": "auto-approved", "fr": "validation automatique", "es": "aprobación automática"}
 AUTO_APPROVER = "auto-approve"  # the audit's `by` for an approval the desk made itself
+FEED_ACTOR = "feed"  # the audit's `by` for a card action from the feed (hold, release, retract, rewrite)
 VAR_LABEL = {"en": "VAR check", "fr": "Vérification VAR", "es": "Revisión VAR"}
 SCORER_CORRECTED = {"en": "Scorer corrected", "fr": "Buteur corrigé", "es": "Gol reasignado"}
 RULED_OUT = {"en": "Goal ruled out", "fr": "But refusé", "es": "Gol anulado"}
@@ -96,6 +97,11 @@ def last_approver(doc: dict) -> str | None:
     return next((h.get("by") for h in reversed(doc.get("history") or []) if isinstance(h, dict) and h.get("action") == "approved"), None)
 
 
+def from_feed(entry: dict) -> bool:
+    """Whether an audit entry is a card action from the feed: the desk audits it `by` "feed" (older trails: no `by`)."""
+    return entry.get("by") in (None, "", FEED_ACTOR)
+
+
 def _card_level(action: str, doc: dict) -> bool:
     """A card still on air, or the retraction of one that was."""
     return action == "retracted" or (doc.get("type", "card") == "card" and doc.get("status") == "approved")
@@ -112,7 +118,7 @@ def on_air(cards: list[dict], audit: list[dict], clock: float | None = None, per
         cid, action = e.get("card_id"), e.get("action")
         if action == "written" and isinstance(e.get("at"), (int, float)):
             written.setdefault(cid, e["at"])
-        elif not e.get("by") and e.get("minute_label"):  # a Spotter action on the card (hold, release, retract, rewrite): the feed's clock then
+        elif from_feed(e) and e.get("minute_label"):  # a feed action on the card (hold, release, retract, rewrite): the feed's clock then
             feed_end[cid] = minute_end(e["minute_label"])
         if action == "approved":
             approver[cid] = e.get("by")
