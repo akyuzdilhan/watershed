@@ -285,16 +285,14 @@ def buildup_figure(feed: dict, event_id: str, theme="dark", width: int | None = 
     before = len(T.chain(feed["actions"], event_id)) - len(seq)  # actions of the possession before the first one drawn
     wx, wy = won["x"], won["y"]  # in the attacking team's frame, as drawn
     gold = t["actor"]
-    nx, ny = next(((x, y) for x, y in starts if math.hypot(x - wx, y - wy) >= 1.5), (pitch.HALF_X, pitch.MID_Y))
-    away = math.hypot(nx - wx, ny - wy) or 1.0
-    ax, ay = -40 * (nx - wx) / away, 30 * (ny - wy) / away  # the label on the side away from the next action (screen y points down)
-    ax, ay = ax if abs(ax) > 8 else 0, ay if abs(ay) > 8 else (-30 if wy < pitch.MID_Y else 30)
     fig.add_trace(go.Scatter(x=[wx], y=[wy], mode="markers", name=("Ball won high" if won["high"] else "Ball won") if won["how"] != "kept the ball" else "Possession start", hoverinfo="skip",
                              marker={"symbol": "star", "size": 30 if won["high"] else 24, "color": gold if won["high"] else "rgba(0,0,0,0)", "opacity": 0.85,
                                      "line": {"color": gold, "width": 2}}))
-    fig.add_annotation(x=wx, y=wy, text=((f"<b>Won here</b>: {won['how']}, {won['metres']} m from own goal" + (" (high regain)" if won["high"] else "")) if won["how"] != "kept the ball"
-                       else f"<b>Possession starts here</b>, {won['metres']} m from own goal") + (f", {before} actions before 1" if before else ""), showarrow=True, arrowhead=0,
-                       arrowcolor=gold, ax=ax, ay=ay, font={"color": gold, "size": 12}, bgcolor=t["paper"], bordercolor=gold, borderpad=3, name="won")
+    # where the ball was won, in words on a line of its own under the legend: a label on the pitch would cover the numbered dots of a crowded build-up
+    fig.add_annotation(x=0, y=0, xref="paper", yref="paper", xanchor="left", yanchor="top", yshift=-30, align="left", showarrow=False,
+                       text=((f"<b>Won here</b>: {won['how']}, {won['metres']} m from own goal" + (" (high regain)" if won["high"] else "")) if won["how"] != "kept the ball"
+                                          else f"<b>Possession starts here</b>, {won['metres']} m from own goal") + (f", {before} actions before 1" if before else ""),
+                       font={"color": gold, "size": 12}, name="won")
     dots: list[list] = []  # [x, y, labels, hover lines]: one dot per place the ball was played from, so a receiver who plays at once shares his dot
     for k, (x, y) in enumerate(starts):
         if dots and math.hypot(x - dots[-1][0], y - dots[-1][1]) < 1.5:
@@ -306,17 +304,17 @@ def buildup_figure(feed: dict, event_id: str, theme="dark", width: int | None = 
                              textfont={"color": "#111827", "size": 12, "family": t["font"]}, hovertext=["<br>".join(d[3]) for d in dots], hoverinfo="text",
                              marker={"size": [19 + 7 * (len(d[2]) - 1) for d in dots], "color": "#ffffff", "line": {"color": "#111827", "width": 1.5}}))
     lines = _wrap(steps)
-    fig.add_annotation(x=0, y=0, xref="paper", yref="paper", xanchor="left", yanchor="top", yshift=-30, align="left", showarrow=False, text="<br>".join(lines),
+    fig.add_annotation(x=0, y=0, xref="paper", yref="paper", xanchor="left", yanchor="top", yshift=-47, align="left", showarrow=False, text="<br>".join(lines),
                        font={"color": t["text"], "size": 12}, name="sequence")
     s = last.get("score", {"home": 0, "away": 0})
     head = f"{last.get('minute_label', '')}  {teams['home']} {s['home']}-{s['away']} {teams['away']}"
     sub = f"{teams[last['team']]} build-up to {_who(last)}'s " + ("goal" if T.any_goal(last) else "chance") + (" (ruled out by VAR)" if last.get("voided") else "") \
         + ". Numbered in order; width: threat added"
-    fig.update_layout(title_text=_title(head, sub), showlegend=True, margin={"b": 40 + 17 * len(lines)},
+    fig.update_layout(title_text=_title(head, sub), showlegend=True, margin={"b": 57 + 17 * len(lines)},
                       legend={"orientation": "h", "y": 0, "x": 0, "yanchor": "top", "font": {"color": t["text"], "size": 12}, "itemsizing": "constant"},
                       meta={"buildup": [a["event_id"] for a in seq], "sequence": steps, "won": won})
     if width:
-        fig.update_layout(height=fig.layout.height + 30 + 17 * len(lines))
+        fig.update_layout(height=fig.layout.height + 47 + 17 * len(lines))
     return fig
 
 

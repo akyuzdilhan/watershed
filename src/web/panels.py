@@ -287,8 +287,11 @@ def _tied(feed: dict, fig: go.Figure, event_id: str) -> go.Figure:
     return fig
 
 
-def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict] | None = None) -> go.Figure:
-    """The figure of a graphic; a run is drawn without its offside margin, for everyone."""
+COMPACT_BUILDUP = 8  # actions of a build-up drawn under the desk's curve; All graphics draws the last 10
+
+
+def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict] | None = None, compact: bool = False) -> go.Figure:
+    """The figure of a graphic; a run is drawn without its offside margin, for everyone. `compact` (under the desk's curve): a build-up keeps its last `COMPACT_BUILDUP` actions."""
     if kind == "shots":
         team = item if item in ("home", "away") else None
         half = {"h1": 1, "h2": 2}.get(item or "")
@@ -299,7 +302,7 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
     if not item:
         return empty_figure(EMPTY.get(kind, "Nothing of this kind in the match so far."))
     if kind == "buildups":
-        return _sized(G.buildup_figure(feed, item, THEME, None))
+        return _sized(G.buildup_figure(feed, item, THEME, None, **({"n_max": COMPACT_BUILDUP} if compact else {})))
     if kind == "setpieces":
         tag, _, rest = item.partition(":")
         return _sized(G.set_pieces_map(feed, rest, THEME, None) if tag == "map" else G.set_piece_figure(feed, rest, THEME, None), 640)
@@ -625,10 +628,11 @@ def card_context(card: dict | None, feed: dict | None, docs: list[dict], story: 
     kind, item = card_graphic(feed, card)
     if kind:
         try:
-            fig = _sized(graphic_figure(feed, kind, item), 380)
+            fig = _sized(graphic_figure(feed, kind, item, compact=True), 440)
         except (StopIteration, KeyError, ValueError, IndexError) as error:
             fig = empty_figure(f"Cannot draw this graphic: {error}")
-        out += [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(NOTES[kind], className="muted small")]
+        note = NOTES[kind].replace("(last 10 actions)", f"(last {COMPACT_BUILDUP} actions here, 10 under All graphics)") if kind == "buildups" else NOTES[kind]
+        out += [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(note, className="muted small")]
     else:
         out.append(html.P("No pitch graphic for this moment; every graphic of the match is under All graphics.", className="muted small"))
     out.append(html.H3("Insights on this moment"))

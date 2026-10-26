@@ -1234,6 +1234,27 @@ def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_d
     assert [v["label"] for v in panels.VIEWS] == ["Desk", "All graphics", "All insights and storyline"]
 
 
+def test_the_desk_draws_a_short_build_up_with_where_the_ball_was_won_off_the_pitch(feed_desk):
+    feed = feed_desk.feed(MATCH)
+    long = max(graphics_moments(feed), key=lambda m: len(panels.T.chain(feed["actions"], m["event_id"])))
+    assert len(panels.T.chain(feed["actions"], long["event_id"])) > 10  # a long possession, like the 88' goal
+    compact = panels.graphic_figure(feed, "buildups", long["event_id"], compact=True)
+    full = panels.graphic_figure(feed, "buildups", long["event_id"])
+    assert len(compact.layout.meta["buildup"]) == panels.COMPACT_BUILDUP and len(full.layout.meta["buildup"]) == 10  # All graphics keeps the longer one
+    for fig in (compact, full):
+        won = next(a for a in fig.layout.annotations if a.name == "won")
+        assert won.xref == won.yref == "paper" and won.showarrow is False and won.y == 0  # a line under the pitch, never over the numbered dots
+        assert "Won here" in won.text or "Possession starts here" in won.text
+    out, _ = console.context(MATCH, next(c for c in feed_desk.cards(MATCH) if c.get("shot_event_id", c.get("event_id")) == long["event_id"])["id"], "en", None, feed_desk) \
+        if any(c.get("shot_event_id", c.get("event_id")) == long["event_id"] for c in feed_desk.cards(MATCH)) else (None, None)
+    if out is not None:
+        assert len(find(out, lambda c: type(c).__name__ == "Graph")[0].figure.layout.meta["buildup"]) == panels.COMPACT_BUILDUP
+
+
+def graphics_moments(feed: dict) -> list[dict]:
+    return panels.G.moments(feed)
+
+
 @pytest.fixture(scope="module")
 def auto_desk(tmp_path_factory):
     """The demo as deployed: the desk auto-approves verified cards, so the 63' goal went on air before VAR ruled it out."""
