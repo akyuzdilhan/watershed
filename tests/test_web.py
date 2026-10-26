@@ -114,6 +114,22 @@ def test_approve_and_reject_go_through_the_desk_and_are_audited(desk):
     assert on_disk[goal["id"]]["history"][-1] == {"action": "approved", "by": "producer-1", "version": 1}
 
 
+def test_a_card_under_var_review_needs_an_explicit_confirmation(desk):
+    goal = card_at(desk, "66'")
+    cards = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
+    (desk.root / MATCH / "cards.json").write_text(json.dumps([dict(c, under_review=True) if c["id"] == goal["id"] else c for c in cards]), encoding="utf-8")
+    assert console.approve_styles(card_at(desk, "66'")) == ({"display": "none"}, {})  # Approve is replaced by "Approve during VAR check"
+    assert console.approve_styles(card_at(desk, "14'")) == ({}, {"display": "none"})
+    message, done = console.decide("approve", MATCH, goal["id"], "producer-1")
+    assert not done and "VAR check" in message and card_at(desk, "66'")["status"] == "pending"
+    message, done = console.decide("approve-var", MATCH, goal["id"], "producer-1")
+    assert done and "during the VAR check, confirmed by Producer" in message and card_at(desk, "66'")["status"] == "approved"
+    entries = [e for e in desk.audit(MATCH) if e.get("card_id") == goal["id"]]
+    assert [(e["action"], e["by"]) for e in entries[-2:]] == [("approved_under_review", "producer-1"), ("approved", "producer-1")] and entries[-2]["force"] is True
+    assert "Confirmed during a VAR check  by Producer" in texts_in(console.history_view(card_at(desk, "66'"), desk.audit(MATCH), False))
+    assert console.decide("approve-var", MATCH, goal["id"], None)[1] is False  # still a producer decision
+
+
 def test_a_retracted_card_cannot_go_on_air(desk):
     retracted = card_at(desk, "63'")
     message, done = console.decide("approve", MATCH, retracted["id"], "producer-1")
@@ -528,7 +544,7 @@ def test_approve_callback_refuses_without_sign_in_in_public_mode(desk, monkeypat
         "output": "..c-message.children...c-rev.data..",
         "outputs": [{"id": "c-message", "property": "children"}, {"id": "c-rev", "property": "data"}],
         "inputs": [{"id": "c-approve", "property": "n_clicks", "value": 1}, {"id": "c-reject", "property": "n_clicks", "value": None},
-                   {"id": "c-approve-edit", "property": "n_clicks", "value": None}],
+                   {"id": "c-approve-edit", "property": "n_clicks", "value": None}, {"id": "c-approve-var", "property": "n_clicks", "value": None}],
         "state": [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card["id"]},
                   {"id": "c-rev", "property": "data", "value": 0}, pattern, pattern, pattern, pattern],
         "changedPropIds": ["c-approve.n_clicks"],
@@ -659,7 +675,7 @@ def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypat
 
     def decision(button: str, card: dict, headline: str | None = None) -> tuple[list, list, list]:
         edits = [[{"id": hid, "property": "id", "value": hid}], [{"id": hid, "property": "value", "value": headline}], [], []] if headline else [[], [], [], []]
-        inputs = [{"id": b, "property": "n_clicks", "value": 1 if b == button else None} for b in ("c-approve", "c-reject", "c-approve-edit")]
+        inputs = [{"id": b, "property": "n_clicks", "value": 1 if b == button else None} for b in ("c-approve", "c-reject", "c-approve-edit", "c-approve-var")]
         state = [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card["id"]},
                  {"id": "c-rev", "property": "data", "value": 0}, *edits]
         return inputs, state, [f"{button}.n_clicks"]
@@ -678,7 +694,7 @@ def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypat
         return inputs, [{"id": "c-match", "property": "value", "value": MATCH}], ["c-edit.n_clicks"]
 
     for headers in (VISITOR, {**VISITOR, security.PRINCIPAL_HEADER: ""}):  # nobody signed in
-        for body in (decision("c-approve", goal), decision("c-reject", other), decision("c-approve-edit", goal, "Edited by a visitor")):
+        for body in (decision("c-approve", goal), decision("c-reject", other), decision("c-approve-edit", goal, "Edited by a visitor"), decision("c-approve-var", goal)):
             assert "Sign in to approve or reject cards" in dash_post(DECIDE, *body, headers=headers).get_data(as_text=True)
         for body in (judge("fb", goal, "down"), judge("fb-r", goal, "too_long"), judge("fb-n", goal, "Too long by half")):
             assert "Sign in to give feedback" in dash_post("c-i-rev.data@", *body, headers=headers).get_data(as_text=True)

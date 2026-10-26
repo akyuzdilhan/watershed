@@ -144,7 +144,7 @@ stateDiagram-v2
     retracted --> [*]
 ```
 
-`hold` and `release` do not change the status: they set and clear `under_review`, and are written to the audit trail. A retracted card can never be approved again (`Desk.approve` raises).
+`hold` and `release` do not change the status: they set and clear `under_review`, and are written to the audit trail. A retracted card can never be approved again (`Desk.approve` raises), and a card under review goes on air only with `force=True`, the producer's confirmation, audited `approved_under_review`.
 
 ## Temporal contract of corrections
 
@@ -222,7 +222,7 @@ Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth:
 | 40 model calls used for the match | Every further card, and the recap, use the template | `Desk.write` |
 | Model down: 3 drafts in a row whose model calls all failed | Circuit breaker: the templates write at once for 5 minutes (`fallback_reason` `circuit_open`, audit `model_paused`), so a lasting outage costs no delay per card; then the next draft tries the model again, a failure pauses it again, a reply closes it (`model_resumed`) | `Desk._model_outcome` |
 | Producer tries to approve a retracted card | Refused (`ValueError`) | `Desk.approve` |
-| Producer approves during a VAR check | Allowed; the card is flagged `under_review`. Known limitation | `Desk.approve` |
+| Producer approves during a VAR check | Only with an explicit confirmation: the console replaces Approve with "Approve during VAR check" (`Desk.approve(force=True)`, audited `approved_under_review`, then `approved`); without it `Desk.approve` raises | `Desk.approve` |
 | Correction for a moment without a card | Applied to the match state; no card action | `Spotter.process` |
 | Final whistle | The win probability becomes certain only on `full_time`; before it, never 0% or 100% on air | `SkellamWinProb.minutes_left`, `shown` |
 | Cosmos DB throttled (1,000 RU/s shared) or briefly unavailable | Retried on 408, 429, 449, 500, 502, 503 and 504 with exponential backoff, jitter and the service's retry-after hint; not load-tested | `with_retry` in `azure_io.py` |

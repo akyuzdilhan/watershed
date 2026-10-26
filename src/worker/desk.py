@@ -1,6 +1,6 @@
 """The editorial desk: every card (and every insight) is written, checked, then waits for a producer, and the audit trail records who did what.
 
-Statuses: `pending` (written and checked, waiting for a producer), `approved` (on air), `rejected`, `retracted` (the feed took the moment back; a card that was on air must come off). A rewrite (goal credited to another player) writes a new version, which waits for approval again. In auto-approve mode (announced to the judges), a verified card goes on air without a click; a card the Verifier failed and the template replaced is approved too, since the template only uses checked fields.
+Statuses: `pending` (written and checked, waiting for a producer), `approved` (on air), `rejected`, `retracted` (the feed took the moment back; a card that was on air must come off). A rewrite (goal credited to another player) writes a new version, which waits for approval again. A card under a VAR check goes on air only on the producer's explicit confirmation (`approve(force=True)`, audited `approved_under_review`). In auto-approve mode (announced to the judges), a verified card goes on air without a click; a card the Verifier failed and the template replaced is approved too, since the template only uses checked fields.
 
 Each card carries the duo's suggested lines (`duo`: text proposed to the commentary team, never voiced), written with the texts. The desk keeps one `PhraseMemory` per match so that nothing is said twice the same way, counts the scorer's goals in the match (`scorer_match_goals`), marks a goal with no stake `on_air_priority: low`, and, when VAR rules a goal out, records why (`ruled_out`: reason and minute; its `margin_cm` stays null) and the duo's lines about it (`duo_ruling`). The offside margin (`var_decision.margin_m`, set by the Spotter) is for the signed-in producer only: no text on air gives it as a number. How close it was may be said in words, tight ("by a whisker") or clear, from `var_decision.call`, which the console may also show to everyone. A card action from the feed (hold, release, retract, rewrite) is audited once, by the desk, with the action's own fields.
 
@@ -183,13 +183,19 @@ class Desk:
 
     # --- producer decisions (called by the console) ---------------------------------------------
 
-    def approve(self, card: dict, by: str, texts: list[dict] | None = None) -> dict:
+    def approve(self, card: dict, by: str, texts: list[dict] | None = None, force: bool = False) -> dict:
+        """Puts a card on air. A card under a VAR check (`under_review`) needs `force`, the producer's explicit confirmation, audited `approved_under_review` before the usual `approved`; insights and the storyline keep their own flag and need none."""
         if card["status"] == "retracted":
             raise ValueError("a retracted card cannot go on air")
+        reviewing = bool(card.get("under_review")) and card.get("type", "card") == "card"
+        if reviewing and not force:
+            raise ValueError("this card is under a VAR check: confirm with Approve during VAR check")
         if texts is not None:
             card["texts"] = texts
             self._audit(card, "edited", by)
         card["status"] = "approved"
+        if reviewing:  # the confirmation, then the approval every reader of the audit (overlay, recap) knows
+            self._audit(card, "approved_under_review", by, {"force": True})
         self._audit(card, "approved", by)
         self.sink.card(card)
         return card

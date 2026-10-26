@@ -132,6 +132,20 @@ def test_producer_decisions_are_audited():
     assert [e["action"] for e in sink.audit if e.get("card_id") == card["id"]][-2:] == ["edited", "approved"]
 
 
+def test_a_card_under_a_var_check_goes_on_air_only_when_forced():
+    sink, desk = MemorySink(), Desk(MemorySink())
+    desk.sink = sink
+    card = {"id": "card-x", "match_id": "m", "type": "card", "status": "pending", "under_review": True, "texts": [], "version": 1}
+    with pytest.raises(ValueError, match="VAR check"):
+        desk.approve(card, "producer-1")
+    assert card["status"] == "pending" and not sink.audit
+    desk.approve(card, "producer-1", force=True)
+    assert card["status"] == "approved" and [(e["action"], e.get("force")) for e in sink.audit] == [("approved_under_review", True), ("approved", None)]
+    insight = {"id": "insight-x", "match_id": "m", "type": "insight", "status": "pending", "under_review": True, "version": 1}
+    assert desk.approve(insight, "producer-1")["status"] == "approved"  # insights keep their own flag
+    assert desk.approve(dict(card, id="card-y", under_review=False, status="pending"), "producer-1")["status"] == "approved"
+
+
 def test_verifier_rejects_invented_numbers_and_misused_percentages():
     card = {"id": "c", "team": "home", "team_name": "Varleigh", "moment": "save", "minute_label": "72'", "player": {"name": "Keeper"},
             "score_before": {"home": 3, "away": 2}, "facts": {"xg_pct": 20, "team_wp_before_pct": 81, "team_wp_if_goal_pct": 24}}

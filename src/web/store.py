@@ -109,13 +109,13 @@ class Store:
             self._desk = Desk(self.sink())
         return self._desk
 
-    def approve(self, match_id: str, card_id: str, by: str, texts: list[dict] | None = None) -> dict:
+    def approve(self, match_id: str, card_id: str, by: str, texts: list[dict] | None = None, force: bool = False) -> dict:
         with self._lock:
             card = self.card(match_id, card_id)
             if card is None:
                 raise KeyError(card_id)
             try:
-                return self.desk().approve(card, by, texts)
+                return self.desk().approve(card, by, texts, force=force)
             finally:
                 self.invalidate()
 

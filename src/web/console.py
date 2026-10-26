@@ -360,6 +360,17 @@ def scoreline(state: dict | None) -> str:
     return f"{t['home']} {s.get('home', 0)}-{s.get('away', 0)} {t['away']}   {clock}"
 
 
+def approve_styles(card: dict | None) -> tuple[dict, dict]:
+    """(Approve, Approve during VAR check) styles: a card under a VAR check that can still go on air gets the second one only, an explicit confirmation (`Desk.approve(force=True)`)."""
+    show, hide = {}, {"display": "none"}
+    var = bool(card and card.get("under_review") and card.get("status") in ("pending", "rejected"))
+    return (hide, show) if var else (show, hide)
+
+
+def _approve_styles_cb(_sig, match_id, card_id):
+    return approve_styles((get_store().card(match_id, card_id) if match_id and card_id else None))
+
+
 def button_states(card: dict | None) -> tuple[bool, bool, bool]:
     """(approve, edit, reject) disabled."""
     if card is None:
@@ -478,6 +489,9 @@ def decide(action: str, match_id: str | None, card_id: str | None, by: str | Non
         if action == "approve":
             store.approve(match_id, card_id, by)
             return f"On air, approved by {who}.", True
+        if action == "approve-var":
+            store.approve(match_id, card_id, by, force=True)
+            return f"On air during the VAR check, confirmed by {who}.", True
         if action == "reject":
             store.reject(match_id, card_id, by)
             return f"Rejected by {who}.", True
@@ -578,6 +592,8 @@ def layout(user: str | None) -> html.Div:
             html.Section([
                 html.Div(id="c-head"),
                 html.Div([html.Div([html.Button("Approve", id="c-approve", className="btn btn-approve", disabled=True),
+                                    html.Button("Approve during VAR check", id="c-approve-var", className="btn btn-approve btn-var", style={"display": "none"},
+                                                title="The goal may still be ruled out: it goes on air now, the confirmation is audited"),
                                     html.Button("Edit", id="c-edit", className="btn", disabled=True),
                                     html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden),
                           dcc.RadioItems(id="c-lang", options=LANG_OPTIONS, value=DEFAULT_LANG, className="view-switch lang-switch", inputClassName="view-radio",
@@ -603,8 +619,8 @@ def _edit_cb(_edit, _cancel, _rev, card_id, match_id):
     return edit_panel(ctx.triggered_id == "c-edit", match_id, card_id)
 
 
-def _decide_cb(_a, _r, _e, match_id, card_id, rev, h_ids, headlines, w_ids, whys):
-    action = {"c-approve": "approve", "c-reject": "reject", "c-approve-edit": "approve-edited"}.get(ctx.triggered_id)
+def _decide_cb(_a, _r, _e, _v, match_id, card_id, rev, h_ids, headlines, w_ids, whys):
+    action = {"c-approve": "approve", "c-reject": "reject", "c-approve-edit": "approve-edited", "c-approve-var": "approve-var"}.get(ctx.triggered_id)
     if action is None:
         return no_update, no_update
     by = security.producer()
@@ -659,7 +675,7 @@ def register(app) -> None:
                  Input("c-edit", "n_clicks"), Input("c-cancel-edit", "n_clicks"), Input("c-rev", "data"), Input("c-rundown", "value"), State("c-match", "value"),
                  prevent_initial_call=True)(_edit_cb)
     app.callback(Output("c-message", "children"), Output("c-rev", "data"),
-                 Input("c-approve", "n_clicks"), Input("c-reject", "n_clicks"), Input("c-approve-edit", "n_clicks"),
+                 Input("c-approve", "n_clicks"), Input("c-reject", "n_clicks"), Input("c-approve-edit", "n_clicks"), Input("c-approve-var", "n_clicks"),
                  State("c-match", "value"), State("c-rundown", "value"), State("c-rev", "data"),
                  State({"type": "c-edit-headline", "lang": ALL}, "id"), State({"type": "c-edit-headline", "lang": ALL}, "value"),
                  State({"type": "c-edit-why", "lang": ALL}, "id"), State({"type": "c-edit-why", "lang": ALL}, "value"),
@@ -667,4 +683,5 @@ def register(app) -> None:
     app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-i-message", "children", allow_duplicate=True), Output("c-i-rev", "data", allow_duplicate=True),
                  Input({"type": "fb", "p": ALL, "k": ALL, "v": ALL}, "n_clicks"), Input({"type": "fb-r", "p": ALL, "k": ALL, "r": ALL}, "n_clicks"),
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
+    app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
     panels.register(app)
