@@ -2,7 +2,7 @@
 
 Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Every sentence of a document on the desk carries the producer feedback controls (`fb_controls`, wired in `console`). Under the storyline, "After the match" shows the recap the worker writes at the final whistle (`Store.recap`): read only, nothing to approve. Like `console`, the functions below are plain functions that `register` wires as callbacks.
 
-In public mode a visitor who is not signed in gets every panel read only (`read_only`): no thumbs, Approve and Reject disabled, and nothing that stays with the producer, that is the offside margin (run labels and titles, facts, run figures) and the counts, rates and bits behind a rarity (`PRODUCER_ONLY_FACTS`, `rarity.basis`). They are left out on the server, not hidden in the page, and a decision without a producer is refused there too (`decide_doc`).
+In public mode a visitor who is not signed in gets every panel read only (`read_only`): no thumbs, Approve and Reject disabled, and nothing that stays with the producer, that is the offside margin (run labels, facts, run figures) and the counts, rates and bits behind a rarity (`PRODUCER_ONLY_FACTS`, `rarity.basis`). They are left out on the server, not hidden in the page, and a decision without a producer is refused there too (`decide_doc`). The producer gets them folded under "Producer details" (`producer_details`, closed by default), and insight titles never carry the margin, so a screen capture of the producer's view shows no margin unless the producer opens it. Insight types and fact fields read as words (`web.labels`), and a language the model and the templates write directly is labelled like on the overlay ("AI-written, not reviewed").
 """
 
 import hashlib
@@ -13,6 +13,8 @@ from dash import Input, Output, State, ctx, dcc, html, no_update
 
 from web import graphics as G
 from web import pitch, security
+from web.labels import FACT_KINDS, fact_label, field_label
+from web.overlay import AI_WRITTEN_LABEL
 from web.matchfeed import player_names, team_names
 from web.store import get_store
 from worker import feedback as FB
@@ -37,6 +39,8 @@ STATUS_CLASS = {"proposed": "st-proposed", "pending": "st-pending", "approved": 
 PRODUCER_ONLY_FACTS = frozenset({  # never on air, never in the read-only view: the offside margin, and the counts, league-wide rates, ratios and bits behind a rarity
     "margin_m", "frame_margin_m", "one_in", "surprisal_bits", "history_count", "history_opportunities", "history_per_season", "runner_up_surprisal_bits", "times_rarer_than_runner_up"})
 PRODUCER_ONLY_NOTE = "Offside margins and the counts, rates and bits behind a rarity are shown to the signed-in producer only."
+PRODUCER_DETAILS = "Producer details"
+AI_WRITTEN = AI_WRITTEN_LABEL["en"]
 
 
 def _sig(*parts) -> str:
@@ -121,14 +125,36 @@ def suggested_lines(duo: html.Div) -> list:
     return [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo]
 
 
+def producer_details(children: list) -> html.Details | None:
+    """What only the producer sees (offside margin, writer settings, error causes, the basis of a rarity), folded and closed by default; None when there is nothing."""
+    children = [c for c in children if c is not None]
+    if not children:
+        return None
+    return html.Details([html.Summary(PRODUCER_DETAILS), *children], open=False, className="producer-details")
+
+
 def facts_table(facts: dict, meanings: dict) -> html.Table:
-    return html.Table([html.Tbody([html.Tr([html.Td(k, className="fact-key"), html.Td(str(v)), html.Td(meanings.get(k, ""), className="muted small")]) for k, v in facts.items()])],
-                      className="facts")
+    """One row per fact: the field in words (its key on hover), the value, what the field means."""
+    return html.Table([html.Tbody([html.Tr([html.Td(field_label(k), className="fact-key", title=k), html.Td(str(v)), html.Td(meanings.get(k, ""), className="muted small")])
+                                   for k, v in facts.items()])], className="facts")
 
 
-def shown_facts(facts: dict, read_only: bool) -> dict:
-    """The facts as the viewer sees them: without `PRODUCER_ONLY_FACTS` in the read-only view."""
-    return {k: v for k, v in facts.items() if not (read_only and k in PRODUCER_ONLY_FACTS)}
+def shown_facts(facts: dict) -> dict:
+    """The facts shown to everyone: all but `PRODUCER_ONLY_FACTS`, which a visitor never gets and a producer finds under "Producer details"."""
+    return {k: v for k, v in facts.items() if k not in PRODUCER_ONLY_FACTS}
+
+
+def facts_view(facts: dict, meanings: dict, read_only: bool, basis: str | None = None) -> list:
+    """The Facts heading and table; for a producer the producer-only facts and the rarity basis folded under "Producer details", for a visitor the note saying they are left out."""
+    shown = shown_facts(facts)
+    out = [html.H3("Facts"), facts_table(shown, meanings)]
+    if read_only:
+        if len(shown) < len(facts):
+            out.append(html.P(PRODUCER_ONLY_NOTE, className="muted small"))
+        return out
+    kept = {k: v for k, v in facts.items() if k not in shown}
+    folded = producer_details([facts_table(kept, meanings) if kept else None, html.P(f"Rarity: {basis}", className="muted small") if basis else None])
+    return out + ([folded] if folded is not None else [])
 
 
 def text_lines(doc: dict, t: dict, verdicts: dict | None, pane: str) -> list:
@@ -139,7 +165,8 @@ def text_lines(doc: dict, t: dict, verdicts: dict | None, pane: str) -> list:
 
 
 def lang_row(lang: str, machine_translated: set) -> html.Div:
-    return html.Div([html.Span(lang.upper(), className="lang"), *([html.Span("machine-translated", className="badge st-mt")] if lang in machine_translated else [])],
+    """The language of a text, with the overlay's label when the model and the templates write it directly with no native review (`machine_translated`)."""
+    return html.Div([html.Span(lang.upper(), className="lang"), *([html.Span(AI_WRITTEN, className="badge st-mt")] if lang in machine_translated else [])],
                     className="lang-row")
 
 
@@ -265,17 +292,22 @@ def insight_rows(store, match_id: str) -> tuple[list[dict], bool]:
     return [dict(d, status="candidate") for d in T.insight_candidates(feed["actions"], feed["info"], match_id)], False
 
 
-def insight_options(docs: list[dict], read_only: bool = False) -> list[dict]:
+def insight_type(d: dict) -> str:
+    """What kind of fact an insight is, in words: from its group or key ("Half-time lead lost", "Run behind the line"), else its kind ("Streak")."""
+    return fact_label(d.get("group") or d.get("key") or d.get("kind"))
+
+
+def insight_options(docs: list[dict]) -> list[dict]:
     return [{"value": d["id"], "label": html.Div([
-        html.Div([html.Span(d.get("minute_label") or "", className="ru-minute"), html.Span((d.get("kind") or "").title(), className="ru-moment"),
+        html.Div([html.Span(d.get("minute_label") or "", className="ru-minute"), html.Span(insight_type(d), className="ru-moment"),
                   html.Span(f"priority {d.get('value', 0)}", className="ru-value")], className="ru-top"),
-        html.Div(insight_title(d, read_only), className="ru-who"),
+        html.Div(insight_title(d), className="ru-who"),
         html.Div(html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed")), className="ru-badges")],
         className="ru-item")} for d in docs]
 
 
-def insight_title(d: dict, read_only: bool = False) -> str:
-    """The English headline, else a title made from the facts (a candidate has no text); `read_only` titles a run without its margin."""
+def insight_title(d: dict) -> str:
+    """The English headline, else a title made from the facts (a candidate has no text), a run without its margin (the producer finds it under "Producer details"); else the insight's type in words."""
     texts = d.get("texts") or []
     en = next((t for t in texts if t.get("lang") == "en"), texts[0] if texts else None)
     if en:
@@ -285,7 +317,7 @@ def insight_title(d: dict, read_only: bool = False) -> str:
     if kind == "line_break" and "defenders_bypassed" in f:
         return f"{f.get('passer_name', '')}: {f['defenders_bypassed']} defenders bypassed before the {f.get('goal_minute_label', '')} goal"
     if kind == "run" and "margin_m" in f:
-        return f"{f.get('runner_name', '')}: " + ("" if read_only else f"{f['margin_m']} m ") + f"{'beyond' if f.get('runner_beyond_line') else 'inside'} the line"
+        return f"{f.get('runner_name', '')}: {'beyond' if f.get('runner_beyond_line') else 'inside'} the line"
     if kind == "space" and "space_m" in f:
         return f"{f.get('scorer_name', '')}: {f['space_m']} m of space before the {f.get('goal_minute_label', '')} goal"
     if kind == "line_height":
@@ -293,16 +325,17 @@ def insight_title(d: dict, read_only: bool = False) -> str:
     if kind == "pressing":  # what its figure counts, "Opponents near the ball"
         more = {"harder": "more", "less": "fewer"}.get(f.get("pressed"))
         return f"{f.get('team_name', '')}: " + (f"{more} players near the opponent on the ball after the break" if more else "players near the opponent on the ball, first half against second")
-    return (d.get("key") or d.get("id", "")).replace("-", " ")
+    return insight_type(d) if (d.get("group") or d.get("key") or d.get("kind")) else d.get("id", "")
 
 
 def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts: dict | None = None, read_only: bool = False) -> tuple[html.Div, go.Figure]:
-    """The selected insight: texts, duo lines, facts and figure. `read_only` (a visitor): no thumbs, no producer-only fact, no rarity basis, a run figure without its margin."""
+    """The selected insight: texts, duo lines, facts and figure. `read_only` (a visitor): no thumbs, no producer-only fact, no rarity basis, a run figure without its margin; a producer gets the producer-only facts and the rarity basis folded (`facts_view`)."""
     if d is None:
         return html.Div("No insight yet. Tactical candidates appear here once the feed has goals to explain.", className="muted"), empty_figure("No insight selected.")
     rarity = d.get("rarity") or {}
-    parts = [html.H2(insight_title(d, read_only)),
-             html.Div([html.Span(f"{d.get('minute_label') or ''} {d.get('kind', '')}, priority {d.get('value', 0)}", className="muted"),
+    kind, what = FACT_KINDS.get(str(d.get("kind") or "").lower(), str(d.get("kind") or "")).lower(), insight_type(d)
+    parts = [html.H2(insight_title(d)),
+             html.Div([html.Span(f"{d.get('minute_label') or ''} {what}" + (f", {kind}" if kind and kind != what.lower() else "") + f", priority {d.get('value', 0)}", className="muted"),
                        html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta")]
     if not from_desk:
         parts.append(html.P("Candidate computed from the feed by worker.tactics: not on the desk, no text yet, nothing to approve.", className="muted small"))
@@ -311,13 +344,8 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts:
     duo = duo_block(d, verdicts=fb)
     if duo is not None:
         parts += suggested_lines(duo)
-    facts = d.get("headline_facts") or {}
-    shown = shown_facts(facts, read_only)
-    parts += [html.H3("Facts"), facts_table(shown, d.get("field_meanings") or {})]
-    if rarity.get("basis") and not read_only:
-        parts.append(html.P(f"Rarity: {rarity['basis']}" + (f" ({rarity['surprisal_bits']} bits)" if rarity.get("surprisal_bits") is not None else ""), className="muted small"))
-    if len(shown) < len(facts):
-        parts.append(html.P(PRODUCER_ONLY_NOTE, className="muted small"))
+    basis = (str(rarity["basis"]) + (f" ({rarity['surprisal_bits']} bits)" if rarity.get("surprisal_bits") is not None else "")) if rarity.get("basis") else None
+    parts += facts_view(d.get("headline_facts") or {}, d.get("field_meanings") or {}, read_only, basis)
     fig = G.insight_figure(d, feed, THEME, None, show_margin=not read_only) if feed else None
     return html.Div(parts), _sized(fig) if fig is not None else empty_figure("No figure for this insight.")
 
@@ -332,7 +360,7 @@ def storyline_block(doc: dict | None, verdicts: dict | None = None, read_only: b
     duo = duo_block(doc, verdicts=fb)
     if duo is not None:
         parts += suggested_lines(duo)
-    parts += [html.H3("Facts"), facts_table(shown_facts(doc.get("facts") or doc.get("headline_facts") or {}, read_only), doc.get("field_meanings") or {})]
+    parts += facts_view(doc.get("facts") or doc.get("headline_facts") or {}, doc.get("field_meanings") or {}, read_only)
     return html.Div(parts)
 
 
@@ -340,7 +368,7 @@ RECAP_PARTS = {"recap": "Recap", "fan": "Supporters", "analyst": "Analyst"}
 
 
 def recap_block(doc: dict | None, final: bool, lang: str | None = None) -> html.Div:
-    """After the match: the recap, the supporters' text and the analyst text of the recap document (`worker.recap`), in every language or in `lang` only, labelled like the other texts of the console (Spanish machine-translated). Before the final whistle, a line saying when it comes."""
+    """After the match: the recap, the supporters' text and the analyst text of the recap document (`worker.recap`), in every language or in `lang` only, labelled like the other texts of the console (Spanish "AI-written, not reviewed"). Before the final whistle, a line saying when it comes."""
     if not final:
         return html.Div("The recap appears at full time.", className="muted")
     if not doc:
@@ -405,7 +433,7 @@ def insights(match_id: str | None, selected: str | None, view: str | None, last_
     no_doc = read_only or not from_desk or doc is None
     no_story = read_only or story is None
     s_status = (story or {}).get("status")
-    return (insight_options(docs, read_only), picked if picked != selected else no_update, detail, fig, storyline_block(story, verdicts, read_only),
+    return (insight_options(docs), picked if picked != selected else no_update, detail, fig, storyline_block(story, verdicts, read_only),
             no_doc or status in ("approved", "superseded"), no_doc or status in ("rejected", "superseded"),
             no_story or s_status == "approved", no_story or s_status == "rejected", sig)
 
@@ -424,7 +452,7 @@ def decide_doc(action: str, match_id: str | None, doc_id: str | None, by: str | 
         return "The desk cannot decide insights or storylines yet.", False
     except (ValueError, TypeError, AttributeError) as error:
         return f"Refused: {error}.", False
-    return ("On air" if action == "approve" else "Rejected") + f", by {by}.", True
+    return ("On air" if action == "approve" else "Rejected") + f", by {security.display_name()}.", True
 
 
 def insights_pane() -> html.Div:

@@ -2,6 +2,8 @@
 
 In Azure Container Apps, Easy Auth signs the producer in and passes the user in the `X-MS-CLIENT-PRINCIPAL-NAME` header. Anyone can send that header to an app without Easy Auth, so it is trusted only when `EASY_AUTH_ENABLED` is true. In `PUBLIC_MODE` (on unless set to 0) a visitor sees the console read only, and the producer callbacks (decisions, edits, feedback) require a trusted user, optionally one of `PRODUCERS` (comma-separated); with `PUBLIC_MODE=0`, locally, everyone is the local producer.
 
+The producer's identity (the Easy Auth user name, an address) goes to the audit trail and never to the screen: the console names the signed-in producer `PRODUCER_DISPLAY_NAME`, "Producer" when it is not set (`display_name`).
+
 The rate limit counts page loads and Dash callbacks per IP over a sliding minute: `RATE_LIMIT_PER_MIN`, 600 by default. The console's desk (about 80 requests a minute), its graphics or insights panel (12) and the overlay (60), open together from one address, send about 150.
 """
 
@@ -14,6 +16,7 @@ from flask import Flask, Response, request
 
 PRINCIPAL_HEADER = "X-MS-CLIENT-PRINCIPAL-NAME"
 LOCAL_PRODUCER = "local-producer"
+DEFAULT_DISPLAY_NAME = "Producer"
 LOGIN_URL = "/.auth/login/aad?post_login_redirect_uri=/"
 DEFAULT_PER_MIN = 600
 LIMITED_PREFIXES = ("/_dash-update-component", "/_dash-layout", "/_dash-dependencies")
@@ -46,6 +49,11 @@ def producer() -> str | None:
         return None
     allowed = {p.strip().lower() for p in os.environ.get("PRODUCERS", "").split(",") if p.strip()}
     return name if not allowed or name.lower() in allowed else None
+
+
+def display_name() -> str:
+    """How the console names the signed-in producer on screen: `PRODUCER_DISPLAY_NAME`, else "Producer". The audit keeps the real identity."""
+    return os.environ.get("PRODUCER_DISPLAY_NAME", "").strip() or DEFAULT_DISPLAY_NAME
 
 
 def client_ip() -> str:

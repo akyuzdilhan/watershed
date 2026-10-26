@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import shutil
 import statistics
 import subprocess
@@ -10,7 +11,7 @@ import pytest
 from dash import no_update
 
 from generator import generate_match
-from web import graphics, matchfeed, panels, security, store
+from web import graphics, labels, matchfeed, overlay, panels, security, store
 from web.app import app
 from worker import recap, tactics
 from worker.desk import Desk
@@ -34,6 +35,15 @@ def texts_in(component) -> str:
     if isinstance(component, (list, tuple)):
         return " ".join(texts_in(c) for c in component)
     return texts_in(getattr(component, "children", None))
+
+
+def find(component, test) -> list:
+    """Every component of a Dash tree for which `test` is true."""
+    if isinstance(component, (list, tuple)):
+        return [c for item in component for c in find(item, test)]
+    if not hasattr(component, "to_plotly_json"):
+        return []
+    return ([component] if test(component) else []) + find(getattr(component, "children", None), test)
 
 
 @pytest.fixture(scope="module")
@@ -81,7 +91,7 @@ def text_blocks(section) -> list:
 
 
 def block_lang(block) -> tuple[str, bool]:
-    """(language shown, labelled machine-translated) of one text block."""
+    """(language shown, labelled "AI-written, not reviewed") of one text block."""
     row = block.children[0].children
     return row[0].children, any(getattr(c, "className", "") == "badge st-mt" for c in row[1:])
 
@@ -126,7 +136,8 @@ def feedback_ids(node) -> list:
 
 
 def fact_keys(node) -> set:
-    return {c["props"]["children"] for c in components(node) if c["props"].get("className") == "fact-key"}
+    """The fact fields of a callback answer: each row shows the field in words, with its key on hover."""
+    return {c["props"]["title"] for c in components(node) if c["props"].get("className") == "fact-key"}
 
 
 # --- after the match --------------------------------------------------------------------------------
@@ -150,6 +161,7 @@ def test_after_the_match_shows_the_recap_the_supporters_and_the_analyst_text_in_
     shown = [block_lang(b) for b in text_blocks(section)]
     assert shown == [(t["lang"].upper(), t["lang"] == "es") for t in doc["texts"]] and [t["lang"] for t in doc["texts"]] == ["en", "fr", "es"]
     assert doc["machine_translated"] == ["es"]
+    assert panels.AI_WRITTEN == overlay.AI_WRITTEN_LABEL["en"] and panels.AI_WRITTEN in text and "machine-translated" not in text  # the overlay's label
     assert panels.after_the_match(MATCH, "insights", sig, desk) == (no_update, no_update)  # unchanged: nothing re-sent
     assert panels.after_the_match(MATCH, "desk", None, desk) == (no_update, no_update)  # hidden tab
     french = panels.recap_block(doc, True, "fr")
@@ -387,8 +399,44 @@ def test_a_visitor_cannot_approve_or_reject_an_insight_or_the_storyline(public):
         assert "Sign in to approve or reject" in words(out["c-i-message"]) and "c-i-rev" not in out
     assert {name: (folder / name).read_bytes() for name in before} == before  # nothing written
     out = dash_post("c-i-message.children", {**values, "c-i-approve.n_clicks": 1}, "c-i-approve.n_clicks", PRODUCER)
-    assert f"On air, by {PRODUCER[security.PRINCIPAL_HEADER]}" in words(out["c-i-message"]) and out["c-i-rev"]["data"] == 1
+    assert "On air, by Producer" in words(out["c-i-message"]) and PRODUCER[security.PRINCIPAL_HEADER] not in words(out["c-i-message"]) and out["c-i-rev"]["data"] == 1
+    entry = next(e for e in reversed(public.audit(MATCH)) if e.get("card_id") == docs[0]["id"])
+    assert entry["action"] == "approved" and entry["by"] == PRODUCER[security.PRINCIPAL_HEADER]  # the audit keeps the identity
     assert {d["id"]: d for d in public.insights(MATCH)}[docs[0]["id"]]["status"] == "approved"
+
+
+def test_insights_read_as_words_and_fold_what_stays_with_the_producer():
+    doc = {"id": "insight-x-ht", "type": "insight", "key": "ht-lead-lost-away-2", "group": "ht-lead-lost-away", "kind": "rarity", "status": "pending", "value": 80, "minute_label": "70'",
+           "headline_facts": {"team_name": "Away side", "lead_at_ht": 2, "one_in": 101, "history_count": 94, "history_opportunities": 9579},
+           "field_meanings": {"lead_at_ht": "goals ahead at half-time"}, "rarity": {"basis": "leads of two lost: 94 in 9,579", "surprisal_bits": 6.66},
+           "machine_translated": ["es"], "texts": [{"lang": "en", "headline": "", "why": "Two up at the break."}, {"lang": "es", "headline": "", "why": "Dos arriba."}]}
+    options = panels.insight_options([dict(doc, texts=[])])
+    assert texts_in(options[0]["label"].children[0].children[1]) == "Half-time lead lost" and texts_in(options[0]["label"].children[1]) == "Half-time lead lost"
+    assert panels.insight_title({"key": "run-x-v2-a01178"}) == "Run behind the line" and panels.insight_title({"kind": "streak"}) == "Streak"
+    run = {"figure": {"kind": "run"}, "headline_facts": {"runner_name": "Runner", "margin_m": 0.37, "runner_beyond_line": True}}
+    assert panels.insight_title(run) == "Runner: beyond the line"  # never the margin in a title, for the producer either
+    producer, _ = panels.insight_detail(doc, None, True, {}, read_only=False)
+    visitor, _ = panels.insight_detail(doc, None, True, None, read_only=True)
+    keys = lambda node: {c.title: texts_in(c) for c in find(node, lambda c: getattr(c, "className", "") == "fact-key")}  # noqa: E731
+    assert keys(producer) == {k: labels.field_label(k) for k in doc["headline_facts"]} and keys(producer)["lead_at_ht"] == "Lead at half-time"
+    assert set(keys(visitor)) == set(doc["headline_facts"]) - panels.PRODUCER_ONLY_FACTS
+    folded = find(producer, lambda c: getattr(c, "className", "") == "producer-details")
+    assert len(folded) == 1 and folded[0].open is False and texts_in(folded[0].children[0]) == panels.PRODUCER_DETAILS
+    assert set(keys(folded[0])) == set(doc["headline_facts"]) & panels.PRODUCER_ONLY_FACTS and "Rarity: leads of two lost: 94 in 9,579 (6.66 bits)" in texts_in(folded[0])
+    outside = texts_in([c for c in producer.children if c is not folded[0]])
+    assert "9,579" not in outside and "9579" not in outside and "Half-time lead lost, rarity, priority 80" in outside
+    assert not find(visitor, lambda c: getattr(c, "className", "") == "producer-details") and panels.PRODUCER_ONLY_NOTE in texts_in(visitor) and "9,579" not in texts_in(visitor)
+    assert panels.AI_WRITTEN in texts_in(producer) and "machine-translated" not in texts_in(producer)
+    assert [panels.AI_WRITTEN in texts_in(b) for b in panels.texts_block(doc)] == [False, True]
+    assert panels.producer_details([None]) is None
+
+
+def test_the_labels_live_in_a_module_both_tabs_import():
+    code = "import json, sys, web.panels; print(json.dumps(['web.console' in sys.modules, web.panels.fact_label('xg-ft-home-5')]))"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}).stdout
+    assert json.loads(out) == [False, "Full-time xG"]  # the panels never import the console
+    from web import console
+    assert console.fact_label is labels.fact_label and console.field_label is labels.field_label
 
 
 # --- requests per tick ------------------------------------------------------------------------------

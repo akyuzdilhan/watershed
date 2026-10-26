@@ -1,20 +1,22 @@
 """The console (`/`): the rundown of cards, the selected card with its texts, the claim behind every number and the Verifier's report, its history, the producer's decisions, and the win-probability curve.
 
-The rundown is in match order, the cards waiting for a decision grouped at the top. The selected card shows its heading, then Approve, Edit and Reject, then its texts in one language at a time (English by default, French and Spanish on the switch next to the buttons). Fact types, fields and audit actions read as words ("Half-time lead lost"), not keys. A card ruled out shows why VAR ruled it out and what the duo says about it (`duo_ruling`). The writing trace (`verification.attempts_log`, `fallback_reason`, `writer_config`) is shown when the card carries it.
+The rundown is in match order, the cards waiting for a decision grouped at the top. The selected card shows its heading, then Approve, Edit and Reject, then its texts in one language at a time (English by default, French and Spanish on the switch next to the buttons). Fact types, fields and audit actions read as words ("Half-time lead lost"), not keys. A card ruled out shows why VAR ruled it out and what the duo says about it (`duo_ruling`). The writing trace (`verification.attempts_log`, `fallback_reason`, `writer_config`) is shown when the card carries it. Without a selection the earliest card waiting for a decision is picked, else the most recent card of the match.
+
+What stays with the producer (the offside margin, the writer settings, the error causes and `fallback_reason`, which can hold a service's error message) is folded under "Producer details", closed by default (`panels.producer_details`), and the producer's identity never shows: the console says `security.display_name()` ("Producer", or `PRODUCER_DISPLAY_NAME`) in "Signed in as", in the decision messages and in the history, while the audit keeps the identity. A screen capture of the producer's view shows neither an address nor a margin unless the producer opens the details.
 
 Every decision goes through `worker.desk.Desk` (via the store), which writes the audit trail; an edited text is checked by the Verifier before it goes on air. Next to each headline, why and suggested line (cards here, insights and storyline in `panels`), a thumbs up or down, and on a thumbs down one-click reasons and a note: `Desk.feedback`, a decision like approve (refused without a producer), never in the way of approving. The suggested lines are the duo's proposals for the commentary team, never voiced.
 
-In public mode a visitor who is not signed in gets the same views read only: no decision button, no thumbs, reasons or notes, no producer identity, no offside margin. Every decision and feedback callback asks `security.producer()` again and refuses without writing. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
+In public mode a visitor who is not signed in gets the same views read only: no decision button, no thumbs, reasons or notes, no producer identity, no offside margin, no writer settings, attempt errors or fallback reason. Every decision and feedback callback asks `security.producer()` again and refuses without writing. The functions below are plain functions that `register` wires as callbacks, so the tests call them directly.
 """
 
 import hashlib
 import json
-import re
 
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from web import panels, security
+from web.labels import action_label, fact_label, field_label, readable  # noqa: F401 (fact_label: console.fact_label)
 from web.overlay import AI_WRITTEN_LABEL, previous_scorer, retraction_message, text_for, var_reason
 from web.store import get_store
 from worker import feedback as FB
@@ -30,53 +32,12 @@ STATUS = {"proposed": ("Writing", "st-proposed"), "pending": ("Pending", "st-pen
           "rejected": ("Rejected", "st-rejected"), "retracted": ("Retracted", "st-retracted")}
 VAR_REASONS = {"offside": "Offside", "handball": "Handball", "foul": "Foul"}
 VAR_CALLS = {"tight": "tight call", "clear": "clear call"}
-ACTIONS = {"written": "Written", "approved": "Approved", "rejected": "Rejected", "edited": "Edited", "retracted": "Retracted", "rewrite_requested": "Rewrite requested",
-           "hold": "Held for a VAR check", "release": "Released after the check", "feedback": "Feedback", "superseded": "Superseded"}
-FACT_TYPES = {  # the prefix of an insight key (worker.insights, worker.tactics), longest first when matched
-    "hat-trick-speed": "Fastest hat-trick", "ht-lead-lost": "Half-time lead lost", "stat-of-the-match": "Stat of the match", "possession-swing": "Possession swing",
-    "goals-total": "Goals in the match", "club-goals": "Club goals record", "h2h-drought": "Head-to-head drought", "h2h-margin": "Head-to-head margin",
-    "run-unbeaten": "Unbeaten run", "run-winless": "Winless run", "line-break": "Line-breaking pass", "line-height": "Defensive line height",
-    "xg-ft": "Full-time xG", "xg-p1": "First-half xG", "shots-ft": "Full-time shots", "shots-p1": "First-half shots", "ten-men": "Ten men",
-    "comeback": "Comeback", "scorer": "Scorer milestone", "late": "Late goal", "run": "Run behind the line", "space": "Space before the goal", "pressing": "Pressing",
-    "xg": "Expected goals (xG)", "shots": "Shots"}
-FACT_KINDS = {"milestone": "Milestone", "rarity": "Rarity", "streak": "Streak", "record": "Record", "tactical": "Tactical detail"}
-WORDS = {"wp": "win probability", "pct": "(%)", "pts": "(points)", "xg": "xG", "ht": "half-time", "ft": "full-time", "h2h": "head-to-head", "var": "VAR",
-         "m": "(m)", "cm": "(cm)", "s": "(s)", "p1": "first half", "p2": "second half"}
 SYSTEM_ACTORS = ("template", "auto-approve", "feed")  # who decided, besides a producer and the writer models
 COLORS = {"home": "#3987e5", "draw": "#9a998f", "away": "#d95926", "muted": "#6f6e69", "ink": "#f0efec", "ink2": "#c3c2b7", "surface": "#1a1a19", "grid": "#2c2c2a"}
 
 
 def _sig(*parts) -> str:
     return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()
-
-
-# --- readable labels ------------------------------------------------------------------------------
-
-def readable(key: str | None) -> str:
-    """A key as words: "rovers_wp_before_pct" reads "Rovers win probability before (%)", "rewrite_requested" "Rewrite requested"."""
-    words = [WORDS.get(w.lower(), w) for w in re.split(r"[-_\s]+", str(key or "").strip()) if w]
-    text = " ".join(words)
-    return text[:1].upper() + text[1:]
-
-
-def fact_label(key: str | None) -> str:
-    """What kind of fact an insight is, from its key or group ("ht-lead-lost-away-2" reads "Half-time lead lost") or its kind ("streak" reads "Streak")."""
-    k = str(key or "").lower()
-    for prefix in sorted(FACT_TYPES, key=len, reverse=True):
-        if k == prefix or k.startswith(prefix + "-"):
-            return FACT_TYPES[prefix]
-    if k in FACT_KINDS:
-        return FACT_KINDS[k]
-    return readable(re.sub(r"(-(home|away|\d+))+$", "", k))
-
-
-def field_label(field: str | None) -> str:
-    """A fact field as words, for the claims table."""
-    return readable(field)
-
-
-def action_label(action: str | None) -> str:
-    return ACTIONS.get(action or "", readable(action))
 
 
 # --- pieces ---------------------------------------------------------------------------------------
@@ -220,20 +181,19 @@ def corrections(card: dict, show_margin: bool) -> list:
         words = VAR_REASONS.get(reason) or (readable(reason) or "Other")
         call, margin = var_call_and_margin(card)
         call = VAR_CALLS.get(call)
-        parts = [html.Span(f"VAR decision: {words}" + (f", {call}" if call else ""))]
+        out.append(html.Div(f"VAR decision: {words}" + (f", {call}" if call else ""), className="correction"))
         if show_margin and margin is not None:
-            parts.append(html.Span(f" (margin {margin:.2f} m, producer only: never on air or to visitors)", className="muted small"))
-        out.append(html.Div(parts, className="correction"))
+            out.append(panels.producer_details([html.Div(f"Offside margin {margin:.2f} m: never on air or to visitors", className="muted small")]))
     if card.get("status") == "retracted" and card.get("retracted_on_air"):
         out.append(html.Div(f"The lower-third said: {retraction_message(card, 'en')}", className="correction muted"))
     return out
 
 
 def actor(by: str, action: str, card: dict, read_only: bool) -> str:
-    """Who did it, as shown: in the read-only view a producer's identity becomes "a producer"."""
-    if not read_only or action == "written" or by in SYSTEM_ACTORS or by in (card.get("writer"), card.get("duo_writer")):
+    """Who did it, as shown: the desk, the feed and the writers by name, a producer as `security.display_name()` ("a producer" in the read-only view), never the identity the audit keeps."""
+    if action == "written" or by in SYSTEM_ACTORS or by in (card.get("writer"), card.get("duo_writer")):
         return by
-    return "a producer"
+    return "a producer" if read_only else security.display_name()
 
 
 def history_view(card: dict, audit: list[dict], read_only: bool) -> html.Ol:
@@ -252,27 +212,28 @@ def _usage(a: dict) -> str:
 
 
 def writing_trace(doc: dict, read_only: bool) -> list:
-    """The writing trace when the document carries it: one row per model attempt (`verification.attempts_log`), why the templates took over (`fallback_reason`), and the writer settings (`writer_config`, producer only). Nothing when the fields are missing."""
+    """The writing trace when the document carries it: one row per model attempt (`verification.attempts_log`: writer, verified, rejected, finish reason, tokens, latency), then for a producer only, folded under "Producer details", the error of each attempt, why the templates took over (`fallback_reason`, which can hold a service's error message) and the writer settings (`writer_config`). Nothing when the fields are missing."""
     v = doc.get("verification") if isinstance(doc.get("verification"), dict) else {}
-    out = []
+    out, private = [], []
     log = [a for a in v.get("attempts_log") or [] if isinstance(a, dict)] if isinstance(v.get("attempts_log"), list) else []
     if log:
-        head = html.Tr([html.Th(h) for h in ("#", "writer", "verified", "rejected", "finish", "tokens in / out / reasoning", "latency")] + ([] if read_only else [html.Th("error")]))
+        head = html.Tr([html.Th(h) for h in ("#", "writer", "verified", "rejected", "finish", "tokens in / out / reasoning", "latency")])
         rows = [html.Tr([html.Td(_num(a.get("attempt", i + 1))), html.Td(str(a.get("writer") or "?")), html.Td(_num(a.get("verified")) if a.get("verified") is not None else "-"),
                          html.Td(_num(a.get("rejected")) if a.get("rejected") is not None else "-"), html.Td(str(a.get("finish_reason") or "-")), html.Td(_usage(a)),
-                         html.Td(f"{a['latency_s']:.1f} s" if _is_num(a.get("latency_s")) else "-")]
-                        + ([] if read_only else [html.Td(str(a.get("error") or ""), className="claim-bad small")]))
+                         html.Td(f"{a['latency_s']:.1f} s" if _is_num(a.get("latency_s")) else "-")])
                 for i, a in enumerate(log)]
         out.append(html.Table([html.Thead(head), html.Tbody(rows)], className="facts attempts"))
+        private += [html.Div(f"Attempt {_num(a.get('attempt', i + 1))}: {a['error']}", className="claim-bad small") for i, a in enumerate(log) if a.get("error")]
     if v.get("fallback_reason"):
-        out.append(html.Div(f"Written by the templates: {v['fallback_reason']}", className="muted small"))
+        private.append(html.Div(f"Written by the templates: {v['fallback_reason']}", className="muted small"))
     cfg = doc.get("writer_config")
-    if not read_only and isinstance(cfg, dict) and cfg:
+    if isinstance(cfg, dict) and cfg:
         parts = [f"{k} {cfg[k]}" for k in ("deployment", "effort", "max_tokens") if cfg.get(k) is not None]
         if cfg.get("prompt_sha"):
-            parts.append(f"prompt {str(cfg['prompt_sha'])[:10]}")
-        out.append(html.Div("Writer settings: " + ", ".join(parts), className="muted small"))
-    return out
+            parts.append(f"prompt {str(cfg['prompt_sha'])[:12]}")
+        private.append(html.Div("Writer settings: " + ", ".join(parts), className="muted small"))
+    folded = None if read_only else panels.producer_details(private)
+    return out + ([folded] if folded is not None else [])
 
 
 def card_head(card: dict | None, read_only: bool = False) -> html.Div:
@@ -299,7 +260,7 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
            lang: str | None = DEFAULT_LANG, head: bool = True) -> html.Div:
     """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no margin, no feedback.
 
-    `lang` picks the language shown (None: every language); `head` puts the heading (`card_head`) on top, which the console draws apart, above the decision buttons."""
+    The offside margin and the writer's settings and errors are folded under "Producer details" for a producer. `lang` picks the language shown (None: every language); `head` puts the heading (`card_head`) on top, which the console draws apart, above the decision buttons."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
     verdicts = None if read_only else FB.by_target(feedback or [])
@@ -409,6 +370,13 @@ def button_states(card: dict | None) -> tuple[bool, bool, bool]:
 
 # --- callbacks as plain functions -----------------------------------------------------------------
 
+def default_pick(cards: list[dict]) -> str | None:
+    """The card selected when none is: the top of the rundown when it waits for a decision, else the most recent card of the match (the rundown is in match order)."""
+    if not cards:
+        return None
+    return cards[0]["id"] if cards[0].get("status") == "pending" else cards[-1]["id"]
+
+
 def match_options(current: str | None, store=None) -> tuple[list[dict], str | None]:
     store = store or get_store()
     matches = store.matches()
@@ -423,14 +391,14 @@ REFRESH_OUTPUTS = 10
 def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, rev: int | None = None, store=None, read_only: bool = False, lang: str | None = DEFAULT_LANG):
     """(rundown options, selected card, detail, heading, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed.
 
-    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the top card is picked. The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled."""
+    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the earliest waiting card is picked, else the most recent (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled."""
     store = store or get_store()
     lang = lang if lang in LANG_NAMES else DEFAULT_LANG
     if not match_id:
         return [], None, detail(None, []), card_head(None), figure(None, []), "No match on the desk yet", True, True, True, None
     cards, state, audit, fb_docs = rundown_order(store.cards(match_id)), store.state(match_id), store.audit(match_id), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
-    picked = selected if selected in ids else (ids[0] if ids else None)
+    picked = selected if selected in ids else default_pick(cards)
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
@@ -496,9 +464,10 @@ def check_edits(card: dict, texts: list[dict], teams: dict[str, str]) -> list[st
 
 
 def decide(action: str, match_id: str | None, card_id: str | None, by: str | None, edits: dict[str, dict] | None = None, store=None) -> tuple[str, bool]:
-    """Applies a producer decision through the Desk; returns (message, done)."""
+    """Applies a producer decision through the Desk, audited `by` the producer's identity; returns (message, done), the message naming the producer as `security.display_name()`."""
     if by is None:
         return "Sign in to approve or reject cards.", False
+    who = security.display_name()
     if not match_id or not card_id:
         return "Select a card first.", False
     store = store or get_store()
@@ -508,21 +477,21 @@ def decide(action: str, match_id: str | None, card_id: str | None, by: str | Non
     try:
         if action == "approve":
             store.approve(match_id, card_id, by)
-            return f"On air, approved by {by}.", True
+            return f"On air, approved by {who}.", True
         if action == "reject":
             store.reject(match_id, card_id, by)
-            return f"Rejected by {by}.", True
+            return f"Rejected by {who}.", True
         if action == "approve-edited":
             texts = edited_texts(card, edits or {})
             if texts is None:
                 store.approve(match_id, card_id, by)
-                return f"No change: on air as written, approved by {by}.", True
+                return f"No change: on air as written, approved by {who}.", True
             teams = (store.state(match_id) or {}).get("teams") or {card["team"]: card["team_name"], ("away" if card["team"] == "home" else "home"): ""}
             problems = check_edits(card, texts, teams)
             if problems:
                 return "Edit refused by the Verifier. " + " | ".join(problems), False
             store.approve(match_id, card_id, by, texts=texts)
-            return f"Edited and on air, approved by {by}.", True
+            return f"Edited and on air, approved by {who}.", True
     except ValueError as error:
         return f"Refused: {error}.", False
     return f"Unknown action {action}.", False
@@ -574,17 +543,17 @@ def give_feedback(match_id: str | None, key: str | None, kind: str, value, by: s
         return f"Refused: {error}.", False
     what = {"headline": "headline", "why": "text", "duo": "duo line"}[target["part"]]
     if verdict == "up":
-        return f"Noted: {what} ({target['lang']}) relevant, by {by}.", True
+        return f"Noted: {what} ({target['lang']}) relevant, by {security.display_name()}.", True
     detail_ = ", ".join(FB.REASONS[r].lower() for r in reasons)
-    return f"Noted: {what} ({target['lang']}) not relevant" + (f" ({detail_})" if detail_ else "") + (", with a note" if note else "") + f", by {by}.", True
+    return f"Noted: {what} ({target['lang']}) not relevant" + (f" ({detail_})" if detail_ else "") + (", with a note" if note else "") + f", by {security.display_name()}.", True
 
 
 # --- layout and wiring ----------------------------------------------------------------------------
 
 def viewer(user: str | None) -> html.Div:
-    """Who is looking: the signed-in producer, or a visitor of the read-only view (with the sign-in link when Easy Auth is on)."""
+    """Who is looking: the signed-in producer, by display name and never by identity, or a visitor of the read-only view (with the sign-in link when Easy Auth is on)."""
     if user:
-        return html.Div(f"Signed in as {user}", className="who muted")
+        return html.Div(f"Signed in as {security.display_name()}", className="who muted")
     parts = [html.Span("Read-only view", className="muted")]
     if security.easy_auth():
         parts.append(html.A("Producer sign-in", href=security.LOGIN_URL, className="sign-in-link"))
