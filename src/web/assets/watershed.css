@@ -106,7 +106,13 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .detail-head { padding-bottom: 4px; }
 .detail-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .detail-bar .actions { margin-top: 10px; }
-.lang-switch { margin-top: 10px; margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lang-switch { margin-left: auto; flex: none; cursor: help; }
+/* the card's title and the language pills on one line */
+.title-row { display: flex; align-items: flex-start; gap: 10px; }
+.title-main { flex: 1; min-width: 0; }
+.lang-pills { gap: 2px; }
+.lang-pills label { padding: 2px 8px; font-size: 12px; border-radius: 10px; font-weight: 600; letter-spacing: .04em; }
+.read-only .detail-bar { display: none; }
 .summary { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; color: var(--ink-2); font-size: 13px; border-bottom: 1px solid var(--line); }
 .fold { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
 .fold > summary { cursor: pointer; color: var(--ink-2); font-weight: 600; font-size: 13px; }

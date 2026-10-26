@@ -25,7 +25,7 @@ from worker.duo import PERSONAS
 from worker.writer import card_facts, claim_ok, offside_call, verify, verify_duo
 
 LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish"}
-LANG_OPTIONS = [{"value": code, "label": name} for code, name in LANG_NAMES.items()]
+LANG_OPTIONS = [{"value": code, "label": code.upper()} for code in LANG_NAMES]  # compact pills, "EN FR ES"
 DEFAULT_LANG = "en"
 LANG_NOTE = "Texts in EN/FR/ES; console labels in English"
 AI_WRITTEN = AI_WRITTEN_LABEL["en"]  # a language the model and the templates write directly, with no native review
@@ -822,14 +822,12 @@ def layout(user: str | None) -> html.Div:
                                     html.H3("Rundown"), follow_button()], className="col-head"),
                           dcc.Store(id="c-rundown-folded", storage_type="local"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
             html.Section([
-                html.Div(id="c-head"),
+                html.Div([html.Div(id="c-head", className="title-main"), lang_switch()], className="title-row"),
                 html.Div([html.Div([html.Button("Approve", id="c-approve", className="btn btn-approve", disabled=True),
                                     html.Button("Approve during VAR check", id="c-approve-var", className="btn btn-approve btn-var", style={"display": "none"},
                                                 title="The goal may still be ruled out: it goes on air now, the confirmation is audited"),
                                     html.Button("Edit", id="c-edit", className="btn", disabled=True),
-                                    html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden),
-                          html.Div([dcc.RadioItems(id="c-lang", options=LANG_OPTIONS, value=DEFAULT_LANG, className="view-switch", inputClassName="view-radio",
-                                                   labelClassName="view-label"), html.Span(LANG_NOTE, className="muted small")], className="lang-switch")], className="detail-bar"),
+                                    html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden)], className="detail-bar"),
                 html.Div(id="c-message", className="message", role="status"),
                 html.Div(id="c-edit-panel", className="edit-panel"),
                 html.Div([html.Button("Approve edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
@@ -853,6 +851,12 @@ FOLD_TITLES = ("Fold the rundown to its minutes", "Unfold the rundown")
 # The rundown's chevron folds it to a slim column of minutes and status dots; the choice is kept in this browser (c-rundown-folded, local storage)
 FOLD_TOGGLE = "function(n, folded) { return !folded; }"
 FOLD_VIEW = ("function(folded) { return folded ? ['desk rundown-folded', '›', '" + FOLD_TITLES[1] + "'] : ['desk', '‹', '" + FOLD_TITLES[0] + "']; }")
+
+
+def lang_switch() -> html.Div:
+    """The language of the texts as compact pills on the card's title row, "EN FR ES"; what it changes (`LANG_NOTE`) on hover."""
+    return html.Div(dcc.RadioItems(id="c-lang", options=LANG_OPTIONS, value=DEFAULT_LANG, className="view-switch lang-pills", inputClassName="view-radio", labelClassName="view-label"),
+                    className="lang-switch", title=LANG_NOTE)
 
 
 def follow_button() -> html.Button:

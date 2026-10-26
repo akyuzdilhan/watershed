@@ -953,10 +953,12 @@ def test_decision_buttons_sit_between_the_heading_and_the_texts():
         def at(cid: str) -> int:
             return next(i for i, ids in enumerate(blocks) if cid in ids)
 
-        assert at("c-head") < at("c-approve") < at("c-edit-panel") < at("c-detail") and at("c-lang") == at("c-approve")  # one bar: decisions and language
+        assert at("c-head") < at("c-approve") < at("c-edit-panel") < at("c-detail") and at("c-lang") == at("c-head")  # the title and the language on one line
         assert at("c-approve") == at("c-edit") == at("c-reject") and at("c-message") < at("c-detail")
         lang = find(page, lambda c: getattr(c, "id", None) == "c-lang")[0]
-        assert lang.value == "en" and [o["value"] for o in lang.options] == ["en", "fr", "es"] and console.LANG_NOTE in texts_in(page)
+        assert lang.value == "en" and [(o["value"], o["label"]) for o in lang.options] == [("en", "EN"), ("fr", "FR"), ("es", "ES")]
+        switch = find(page, lambda c: getattr(c, "className", "") == "lang-switch")[0]
+        assert switch.title == console.LANG_NOTE and console.LANG_NOTE not in texts_in(page)  # the hint on hover, not a line
         actions = find(page, lambda c: getattr(c, "className", "") == "actions" and "c-approve" in component_ids(c.children))[0]
         assert getattr(actions, "style", None) == ({"display": "none"} if user is None else None)  # read only: no decision button
         assert not find(page, lambda c: "c-lang" in component_ids(getattr(c, "children", None)) and getattr(c, "style", None) == {"display": "none"})  # the switch stays
