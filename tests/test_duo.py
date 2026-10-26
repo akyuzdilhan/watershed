@@ -19,6 +19,7 @@ from worker.writer import (CARD_KIND_WORDS, EM_DASH, EXAMPLE_DUO, EXAMPLE_FACTS,
 
 LANGS = ["en", "fr", "es"]
 TEAMS = {"home": "Rovers", "away": "United"}
+H, A = TEAMS["home"], TEAMS["away"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -572,9 +573,9 @@ def family_facts() -> list[tuple[str, dict]]:
     the shots, the passes, the goals of the match and of a club, the fastest hat-trick, the runs, goals against expected goals at half-time, the stat of the match of a family
     with no question of its own; and comebacks and lost leads of a club the history does not know, or that did it last season (the plain lines)."""
     home, away = replay_names()["home"], replay_names()["away"]
-    starter = {"player": home[8], "team": "Rovers", "substitute": False}
-    last = {"last_season": "2024/25", "last_player": away[0], "last_match": "Rovers 1-5 United"}
-    late = {"player": away[9], "team": "United", "minute": "88'", "goal_type": "equaliser", "score_after": "2-2"} | seen(3000, last)
+    starter = {"player": home[8], "team": H, "substitute": False}
+    last = {"last_season": "2024/25", "last_player": away[0], "last_match": f"{H} 1-5 {A}"}
+    late = {"player": away[9], "team": A, "minute": "88'", "goal_type": "equaliser", "score_after": "2-2"} | seen(3000, last)
     out = [
         ("scorer-home-9-2", starter | {"goals": 2, "goal_minutes": "12', 70'"} | seen(9000, last)),
         ("scorer-home-9-4", starter | {"goals": 4, "goal_minutes": "12', 30', 70', 81'"} | seen(20, last)),
@@ -582,37 +583,37 @@ def family_facts() -> list[tuple[str, dict]]:
         ("scorer-home-9-5", starter | {"goals": 5, "goal_minutes": "12', 30', 70', 81', 88'"} | seen(0)),
         ("late-e1-equaliser", late),
         ("late-e2-go-ahead", late | {"goal_type": "go-ahead goal", "score_after": "2-3", "minute": "90+3'"}),
-        ("ten-men-away-scored", {"team": "United", "goals_after_red": 1, "score": "1-1", "stage": "scored"} | seen(900)),
-        ("ten-men-away-won", {"team": "United", "goals_after_red": 2, "score": "1-2", "stage": "won"} | seen(400)),
-        ("h2h-margin-home-4", {"team": "Rovers", "opponent": "United", "margin": 4, "score": "5-1", "meetings": 98, "record": "new"} | seen(800, last)),
-        ("h2h-margin-away-3", {"team": "United", "opponent": "Rovers", "margin": 3, "score": "0-3", "meetings": 98, "record": "equalled", "equalled_season": "2018/19"} | seen(1500, last)),
-        ("h2h-drought-away-5", {"team": "United", "opponent": "Rovers", "venue": "away", "seasons_without_win": 5, "meetings_here": 49, "first_win_here": False, "last_win_season": "2021/22"}
+        ("ten-men-away-scored", {"team": A, "goals_after_red": 1, "score": "1-1", "stage": "scored"} | seen(900)),
+        ("ten-men-away-won", {"team": A, "goals_after_red": 2, "score": "1-2", "stage": "won"} | seen(400)),
+        ("h2h-margin-home-4", {"team": H, "opponent": A, "margin": 4, "score": "5-1", "meetings": 98, "record": "new"} | seen(800, last)),
+        ("h2h-margin-away-3", {"team": A, "opponent": H, "margin": 3, "score": "0-3", "meetings": 98, "record": "equalled", "equalled_season": "2018/19"} | seen(1500, last)),
+        ("h2h-drought-away-5", {"team": A, "opponent": H, "venue": "away", "seasons_without_win": 5, "meetings_here": 49, "first_win_here": False, "last_win_season": "2021/22"}
          | seen(300)),
-        ("h2h-drought-home-7", {"team": "Rovers", "opponent": "United", "venue": "home", "seasons_without_win": 7, "meetings_here": 7, "first_win_here": True} | seen(120)),
-        ("h2h-drought-home-6", {"team": "Rovers", "opponent": "United", "venue": "home", "seasons_without_win": 6, "meetings_here": 49, "first_win_here": False, "last_win_season": "2020/21"}
+        ("h2h-drought-home-7", {"team": H, "opponent": A, "venue": "home", "seasons_without_win": 7, "meetings_here": 7, "first_win_here": True} | seen(120)),
+        ("h2h-drought-home-6", {"team": H, "opponent": A, "venue": "home", "seasons_without_win": 6, "meetings_here": 49, "first_win_here": False, "last_win_season": "2020/21"}
          | seen(300)),
-        ("h2h-drought-away-9", {"team": "United", "opponent": "Rovers", "venue": "away", "seasons_without_win": 9, "meetings_here": 9, "first_win_here": True} | seen(120)),
-        ("shots-p1-home-12-3", {"team": "Rovers", "shots": 12, "opponent_shots": 3, "expected_share_pct": 55, "window": "first half", "one_in": 300, "surprisal_bits": 8.2}),
-        ("shots-ft-away-20-4", {"team": "United", "shots": 20, "opponent_shots": 4, "expected_share_pct": 45, "window": "match", "one_in": 900, "surprisal_bits": 9.8}),
-        ("possession-swing-away-61", {"team": "United", "first_half_pass_share_pct": 43, "second_half_pass_share_pct": 61, "one_in": 150, "surprisal_bits": 7.2}),
+        ("h2h-drought-away-9", {"team": A, "opponent": H, "venue": "away", "seasons_without_win": 9, "meetings_here": 9, "first_win_here": True} | seen(120)),
+        ("shots-p1-home-12-3", {"team": H, "shots": 12, "opponent_shots": 3, "expected_share_pct": 55, "window": "first half", "one_in": 300, "surprisal_bits": 8.2}),
+        ("shots-ft-away-20-4", {"team": A, "shots": 20, "opponent_shots": 4, "expected_share_pct": 45, "window": "match", "one_in": 900, "surprisal_bits": 9.8}),
+        ("possession-swing-away-61", {"team": A, "first_half_pass_share_pct": 43, "second_half_pass_share_pct": 61, "one_in": 150, "surprisal_bits": 7.2}),
         ("goals-total-6", {"goals": 6, "score": "4-2", "minute": "77'"} | seen(400, last)),
         ("goals-total-9", {"goals": 9, "score": "6-3", "minute": "85'"} | seen(12, last)),
         ("goals-total-12", {"goals": 12, "score": "7-5", "minute": "89'"} | seen(0)),
-        ("club-goals-home-6", {"team": "Rovers", "goals": 6, "club_record": 5, "record": "new"} | seen(300)),
-        ("club-goals-away-5", {"team": "United", "goals": 5, "club_record": 5, "record": "equalled"} | seen(700)),
-        ("hat-trick-speed-home-9-4", {"player": home[8], "team": "Rovers", "hat_trick_minutes": 4, "first_goal": "10'", "third_goal": "14'"} | seen(0)),
-        ("hat-trick-speed-home-9-9", {"player": home[8], "team": "Rovers", "hat_trick_minutes": 9, "first_goal": "10'", "third_goal": "19'"} | seen(30, last)),
-        ("hat-trick-speed-home-9-40", {"player": home[8], "team": "Rovers", "hat_trick_minutes": 40, "first_goal": "10'", "third_goal": "50'"} | seen(700, last)),
-        ("run-unbeaten-home-extended-12", {"team": "Rovers", "run": "unbeaten", "run_matches": 12, "stage": "extended", "result": "D"} | seen(200)),
-        ("run-unbeaten-away-ended-9", {"team": "United", "run": "unbeaten", "run_matches": 9, "stage": "ended", "result": "L"} | seen(300)),
-        ("run-winless-home-ended-8", {"team": "Rovers", "run": "winless", "run_matches": 8, "stage": "ended", "result": "W"} | seen(250)),
-        ("run-winless-away-extended-10", {"team": "United", "run": "winless", "run_matches": 10, "stage": "extended", "result": "L"} | seen(150)),
-        ("xg-p1-home-3", {"team": "Rovers", "goals": 3, "xg": 0.9, "window": "first half", "one_in": 60, "surprisal_bits": 5.9}),
-        ("comeback-away-2-1", {"team": "United", "opponent": "Rovers", "deficit_goals": 2, "trailing_score": "2-0", "stage": "level", "score": "2-2"} | seen(500)),  # a club the history does not know
-        ("comeback-away-2-3", {"team": "United", "opponent": "Rovers", "deficit_goals": 2, "trailing_score": "2-0", "stage": "won", "score": "2-3", "club_last_season": "2025/26",
+        ("club-goals-home-6", {"team": H, "goals": 6, "club_record": 5, "record": "new"} | seen(300)),
+        ("club-goals-away-5", {"team": A, "goals": 5, "club_record": 5, "record": "equalled"} | seen(700)),
+        ("hat-trick-speed-home-9-4", {"player": home[8], "team": H, "hat_trick_minutes": 4, "first_goal": "10'", "third_goal": "14'"} | seen(0)),
+        ("hat-trick-speed-home-9-9", {"player": home[8], "team": H, "hat_trick_minutes": 9, "first_goal": "10'", "third_goal": "19'"} | seen(30, last)),
+        ("hat-trick-speed-home-9-40", {"player": home[8], "team": H, "hat_trick_minutes": 40, "first_goal": "10'", "third_goal": "50'"} | seen(700, last)),
+        ("run-unbeaten-home-extended-12", {"team": H, "run": "unbeaten", "run_matches": 12, "stage": "extended", "result": "D"} | seen(200)),
+        ("run-unbeaten-away-ended-9", {"team": A, "run": "unbeaten", "run_matches": 9, "stage": "ended", "result": "L"} | seen(300)),
+        ("run-winless-home-ended-8", {"team": H, "run": "winless", "run_matches": 8, "stage": "ended", "result": "W"} | seen(250)),
+        ("run-winless-away-extended-10", {"team": A, "run": "winless", "run_matches": 10, "stage": "extended", "result": "L"} | seen(150)),
+        ("xg-p1-home-3", {"team": H, "goals": 3, "xg": 0.9, "window": "first half", "one_in": 60, "surprisal_bits": 5.9}),
+        ("comeback-away-2-1", {"team": A, "opponent": H, "deficit_goals": 2, "trailing_score": "2-0", "stage": "level", "score": "2-2"} | seen(500)),  # a club the history does not know
+        ("comeback-away-2-3", {"team": A, "opponent": H, "deficit_goals": 2, "trailing_score": "2-0", "stage": "won", "score": "2-3", "club_last_season": "2025/26",
                                "club_seasons_since": 1} | seen(114)),  # done last season: "1 seasons ago" is left out
-        ("ht-lead-lost-home-1", {"team": "Rovers", "opponent": "United", "half_time_score": "1-0", "score": "1-2", "venue": "home", "stage": "behind"} | seen(40)),
-        ("ht-lead-lost-home-2", {"team": "Rovers", "opponent": "United", "half_time_score": "1-0", "score": "1-2", "venue": "home", "stage": "lost"} | seen(42)),
+        ("ht-lead-lost-home-1", {"team": H, "opponent": A, "half_time_score": "1-0", "score": "1-2", "venue": "home", "stage": "behind"} | seen(40)),
+        ("ht-lead-lost-home-2", {"team": H, "opponent": A, "half_time_score": "1-0", "score": "1-2", "venue": "home", "stage": "lost"} | seen(42)),
     ]
     out.append(("stat-of-the-match", late | {"top_fact": "late-e1-equaliser", "top_value": 70, "runner_up": "shots-p1-home-12-3", "runner_up_value": 50,
                                              "runner_up_surprisal_bits": 8.2, "times_rarer_than_runner_up": 2}))
@@ -675,9 +676,9 @@ def insight_doc(key: str, facts: dict, kind: str = "rarity", **extra) -> dict:
 def test_a_starter_and_a_club_the_history_cannot_place_get_their_familys_texts():
     """A starter's four goals and a comeback by a club with no landmark in seasons (unknown to the history, or done last season): the feat and who did it, with its numbers, never the generic line of the kind."""
     starter = next(f for k, f in family_facts() if k == "scorer-home-9-4")
-    plain = {"team": "United", "opponent": "Rovers", "deficit_goals": 2, "trailing_score": "2-0", "stage": "level", "score": "2-2"} | seen(500)
+    plain = {"team": A, "opponent": H, "deficit_goals": 2, "trailing_score": "2-0", "stage": "level", "score": "2-2"} | seen(500)
     recent = plain | {"stage": "won", "score": "2-3", "club_last_season": "2025/26", "club_seasons_since": 1}
-    for key, facts, who in (("scorer-home-9-4", starter, starter["player"]), ("comeback-away-2-1", plain, "United"), ("comeback-away-2-3", recent, "United")):
+    for key, facts, who in (("scorer-home-9-4", starter, starter["player"]), ("comeback-away-2-1", plain, A), ("comeback-away-2-3", recent, A)):
         out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(insight_doc(key, facts), TEAMS)
         assert out["verification"]["verified"], key
         for t in out["texts"]:
@@ -690,7 +691,7 @@ def test_a_late_goal_credited_to_another_player_is_told_with_the_new_name():
     away = replay_names()["away"]
     old = away[9]
     new = next(n for n in away if n.split()[-1] != old.split()[-1])
-    facts = {"player": old, "team": "United", "minute": "90+4'", "goal_type": "go-ahead goal", "score_after": "0-1"} | seen(3000)
+    facts = {"player": old, "team": A, "minute": "90+4'", "goal_type": "go-ahead goal", "score_after": "0-1"} | seen(3000)
     desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
     first = json.loads(json.dumps(desk.write_insight(insight_doc("late-e1-go-ahead", facts, version=1), TEAMS)))
     out = desk.write_insight(dict(first, version=2, headline_facts=dict(facts, player=new)), TEAMS)
@@ -712,7 +713,7 @@ def test_the_generic_insight_lines_name_who_did_it():
     assert out["verification"]["verified"]
     for t in out["texts"]:
         body = t["headline"] + " " + t["why"]
-        assert "Rovers" in body and "United" in body and "{" not in body, t
+        assert H in body and A in body and "{" not in body, t
 
 
 def test_the_stat_of_the_match_keeps_the_club_name_and_one_colon():
@@ -723,7 +724,7 @@ def test_the_stat_of_the_match_keeps_the_club_name_and_one_colon():
     for t in out["texts"]:
         prefix = insight_texts.STAT_PREFIX[t["lang"]]
         rest = t["headline"][len(prefix):]
-        assert t["headline"].startswith(prefix) and ":" not in rest and "Rovers" in rest, t  # never "Stat of the match: rovers: 12 shots"
+        assert t["headline"].startswith(prefix) and ":" not in rest and H in rest, t  # never "Stat of the match: rovers: 12 shots"
 
 
 class EveryDocVersion(MemorySink):
