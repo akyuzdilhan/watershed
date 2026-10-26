@@ -402,9 +402,9 @@ def test_the_user_message_ends_with_the_reply_rule_and_labels_the_verifier_feedb
 
 
 @pytest.mark.parametrize("lang,why", [
-    ("en", "Rovers go from 30% to 54% to win, up 24 points; the assist is not available."),
-    ("fr", "Rovers passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux, passeur non disponible."),
-    ("es", "El Rovers pasa del 30% al 54% de opciones de ganar: 24 puntos más, asistente no disponible."),
+    ("en", "Varleigh go from 30% to 54% to win, up 24 points; the assist is not available."),
+    ("fr", "Varleigh passe de 30 % à 54 % de chances de gagner, soit 24 points de mieux, passeur non disponible."),
+    ("es", "El Varleigh pasa del 30% al 54% de opciones de ganar: 24 puntos más, asistente no disponible."),
 ])
 def test_a_missing_fact_written_as_missing_is_refused(lang, why):
     assert "not_available" in rules(GOOD[lang][0], why, lang)[0]
@@ -438,7 +438,7 @@ class FakeAgent:
 def good_reply(duo=False):
     scorer = make_card()["player"]["name"]
     lines = [{"speaker": "wren", "lang": "en", "line": f"{scorer}! And this place has woken up!", "claims": []},
-             {"speaker": "joss", "lang": "en", "line": "That goal is worth 24 points to Rovers.", "claims": [SWING]}]
+             {"speaker": "joss", "lang": "en", "line": "That goal is worth 24 points to Varleigh.", "claims": [SWING]}]
     return json.dumps({"texts": [{"headline": GOOD["en"][0], "why": GOOD["en"][1], "lang": "en", "claims": GOAL_CLAIMS}], "duo": lines if duo else []}, ensure_ascii=False)
 
 
@@ -449,7 +449,7 @@ def test_a_hostile_producer_note_stays_quoted_and_never_becomes_a_rule():
     judged = desk.write(make_card(), TEAMS)
     item = desk.feedback(judged, {"part": "why", "lang": "en", "index": 0}, "down", [], hostile, "producer-1", TEAMS)
     profile = fb.build_profile([item], now=0)
-    obeying = json.dumps({"texts": [{"headline": GOOD["en"][0], "why": "Rovers now have a 0.9 chance to win.", "lang": "en", "claims": []}], "duo": []})
+    obeying = json.dumps({"texts": [{"headline": GOOD["en"][0], "why": "Varleigh now have a 0.9 chance to win.", "lang": "en", "claims": []}], "duo": []})
     agent = FakeAgent(FakeResponse(obeying), FakeResponse(obeying))
     writer = FoundryWriter(model="writer-test", agent=agent)
     card = Desk(MemorySink(), writer, languages=("en",), profile=profile).write(dict(make_card(), id="c2"), TEAMS)
@@ -466,7 +466,7 @@ def test_a_hostile_producer_note_stays_quoted_and_never_becomes_a_rule():
 
 def test_a_real_name_fails_and_the_template_takes_over():
     scorer = make_card()["player"]["name"].split()[-1]
-    named = reply("en", f"{scorer} scores for Rovers", "As Martin Tyler would say, Rovers go from 30% to 54% to win, up 24 points.")
+    named = reply("en", f"{scorer} scores for Varleigh", "As Martin Tyler would say, Varleigh go from 30% to 54% to win, up 24 points.")
     _, report = verify(named, ["en"], GOAL_FACTS)
     assert report["cards"][0]["unknown_names"] == ["Martin", "Tyler"] and not report["verified"]
     writer = FakeWriter([named, named])
@@ -474,22 +474,22 @@ def test_a_real_name_fails_and_the_template_takes_over():
     assert d.writer == "template" and d.report["verified"] and d.attempts == 2 and d.fallback_reason == "verifier"
     assert "unknown_names" in writer.notes[1] and "Tyler" in writer.notes[1] and "leave out every name that is not in the facts" in writer.notes[1]
     lines = [{"speaker": "wren", "lang": "en", "line": "As Martin Tyler would say, what a goal!", "claims": []},
-             {"speaker": "joss", "lang": "en", "line": "Rovers go from 30% to 54% to win, up 24 points.", "claims": GOAL_CLAIMS}]
+             {"speaker": "joss", "lang": "en", "line": "Varleigh go from 30% to 54% to win, up 24 points.", "claims": GOAL_CLAIMS}]
     duo = verify_duo(lines, ["en"], GOAL_FACTS)
     assert not duo["verified"] and duo["lines"][0]["unknown_names"] == ["Martin", "Tyler"] and duo["lines"][1]["verified"]
 
 
 def test_a_title_case_headline_is_asked_again_in_sentence_case():
     scorer = make_card()["player"]["name"].split()[-1]
-    why = "Rovers go from 30% to 54% to win, up 24 points."
-    titled, plain = reply("en", f"{scorer} Keeps Rovers Alive", why), reply("en", f"{scorer} keeps Rovers alive", why)
+    why = "Varleigh go from 30% to 54% to win, up 24 points."
+    titled, plain = reply("en", f"{scorer} Keeps Varleigh Alive", why), reply("en", f"{scorer} keeps Varleigh alive", why)
     assert verify(titled, ["en"], GOAL_FACTS)[1]["cards"][0]["unknown_names"] == ["Alive", "Keeps"]
     assert "Sentence case everywhere, headlines included" in WRITER_INSTRUCTIONS and "never \"Ari Holt Keeps Town Alive\"" in WRITER_INSTRUCTIONS
     writer = FakeWriter([titled, plain])
     d = asyncio.run(draft(make_card(), TEAMS, writer, ["en"]))
     assert d.writer == "fake" and d.report["verified"] and d.attempts == 2 and "write in sentence case" in writer.notes[1]
-    assert names_ok("Rovers top the Premier League on Monday, in October, after a VAR check.", GOAL_FACTS) == []
-    assert names_ok("Rovers top the Premier League, says Martin.", GOAL_FACTS) == ["Martin"]
+    assert names_ok("Varleigh top the Premier League on Monday, in October, after a VAR check.", GOAL_FACTS) == []
+    assert names_ok("Varleigh top the Premier League, says Martin.", GOAL_FACTS) == ["Martin"]
 
 
 def test_a_spaced_closing_tag_cannot_close_the_quote():
