@@ -174,11 +174,14 @@ def test_refresh_lists_the_rundown_and_draws_the_curve(desk):
     cards = {c["id"]: c for c in desk.cards(MATCH)}
     order = [cards[o["value"]] for o in rundown if o["value"] not in console.PHASES]
     waiting = [c for c in order if c["status"] == "pending"]
-    assert len(order) == 11 and rundown[0]["value"] == console.PRE_MATCH and waiting and order[:len(waiting)] == waiting  # the cards waiting for a decision on top
+    assert len(order) == 11 and rundown[0]["value"] == console.PRE_MATCH and rundown[-1]["value"] == console.FULL_TIME and waiting and order[:len(waiting)] == waiting  # the cards waiting for a decision on top
     assert all(a["clock_s"] <= b["clock_s"] for group in (waiting, order[len(waiting):]) for a, b in zip(group, group[1:]))  # each group in match order
     latest = console.latest_card(list(cards.values()))
-    assert selected == latest["id"] and latest["minute_label"] in texts_in(head)  # the most recent card in time
+    assert selected == console.FULL_TIME and texts_in(head).startswith("Full time: Varleigh 5-2 Yarnford")  # the match is over: the console ends on Full time
     assert "Retracted" in texts_in([o["label"] for o in rundown])
+    rundown, selected, detail, head, fig, score, approve_off, edit_off, reject_off, sig = console.refresh(MATCH, latest["id"], None)
+    assert selected is no_update and latest["minute_label"] in texts_in(head)  # a card clicked: its detail
+    selected = latest["id"]
     assert len(text_blocks(detail)) == 1 and "English" in texts_in(detail)  # one language at a time, English first
     assert [t.name for t in fig.data[:3]] == ["Varleigh win", "Draw", "Yarnford win"]
     assert {t.name for t in fig.data[3:]} == {"Cards", "Retracted cards"}
@@ -703,7 +706,7 @@ def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypa
         rundown, _, detail, head, fig, score, approve_off, edit_off, _, _ = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)
     text = texts_in(detail) + texts_in(head)
     en = next(t for t in goal["texts"] if t["lang"] == "en")
-    assert len(rundown) == 12 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
+    assert len(rundown) == 13 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
     assert approve_off and edit_off
     assert not feedback_ids(detail) and not feedback_ids(detail, "fb-r") and not feedback_ids(detail, "fb-n")  # no thumbs, reasons or notes
     history = texts_in(find(detail, lambda c: getattr(c, "className", "") == "history"))
@@ -791,7 +794,7 @@ def test_public_console_never_loads_a_model(desk):
     env.update(PYTHONPATH=str(SRC), PUBLIC_MODE="1", EASY_AUTH_ENABLED="true", DESK_DIR=str(desk.root))
     out = subprocess.run([sys.executable, "-c", code, MATCH], capture_output=True, text=True, check=True, env=env).stdout
     result = json.loads(out.strip().splitlines()[-1])
-    assert result == {"read_only": True, "rundown": 12, "loaded": []}  # the 11 cards and Before kick-off
+    assert result == {"read_only": True, "rundown": 13, "loaded": []}  # the 11 cards between Before kick-off and Full time
 
 
 # --- match graphics, insights and storyline -------------------------------------------------------
@@ -1001,7 +1004,7 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
     assert after[:len(waiting)] == waiting and picked["id"] not in [c["id"] for c in waiting]  # decided: out of the waiting group
     rest = after[len(waiting):]
     assert [c["clock_s"] for c in rest] == sorted(c["clock_s"] for c in rest) and picked["id"] in [c["id"] for c in rest]
-    assert console.refresh(MATCH, None, None)[1] == console.latest_card(after)["id"]  # nothing selected: the most recent card in time
+    assert console.refresh(MATCH, None, None)[1] == console.FULL_TIME  # nothing selected after the final whistle: Full time
     options = console.rundown_options(after)  # the cards' entries, between Before kick-off and Full time
     assert ["ru-waiting" in o["label"].className for o in options] == [c["status"] == "pending" for c in after]
 
@@ -1009,10 +1012,12 @@ def test_rundown_is_in_match_order_with_the_waiting_cards_on_top(desk):
 def test_the_latest_card_in_time_is_selected_until_the_viewer_clicks_one(desk):
     cards = desk.cards(MATCH)
     latest = max(cards, key=lambda c: c["clock_s"])
-    assert desk.state(MATCH)["final"] and console.refresh(MATCH, None, None)[1] == latest["id"]  # at full time too, not the headline story
+    assert desk.state(MATCH)["final"] and console.refresh(MATCH, None, None)[1] == console.FULL_TIME  # at full time: Full time, not the headline story
+    points, _, breaks = console.axis(desk.state(MATCH)["wp_timeline"])
+    assert console.refresh(MATCH, None, None, t=points[-1]["x"] - 1, follow=True)[1] == latest["id"]  # in a replay: the most recent card in time
     earliest = min(cards, key=lambda c: c["clock_s"])
     assert console.refresh(MATCH, earliest["id"], None)[1] is no_update  # a clicked card is kept
-    assert console.refresh(MATCH, earliest["id"], None, follow=True)[1] == latest["id"]  # following live: back to the latest
+    assert console.refresh(MATCH, earliest["id"], None, follow=True)[1] == console.FULL_TIME  # following live: back to the end
     assert console.following("c-rundown", True) is False and console.following("c-tick", False) is False  # a click stops following, a tick does not resume it
     assert console.following("c-follow", True) is True and console.following("c-tick", None) is True  # on by default, again after Follow live
     assert console.default_pick([]) is None
@@ -1474,6 +1479,42 @@ def test_before_kick_off_opens_the_rundown_and_gathers_what_was_analysed_before_
     assert style == {} and "a relegation battle" in texts_in(shown)
     assert console.story(MATCH, "en", None, desk, t=1.0, selected=console.PRE_MATCH)[1] == {"display": "none"}  # the strip would repeat the stakes
     assert {p.name: p.read_bytes() for p in folder.iterdir()} == before  # a view: nothing written
+
+
+def test_full_time_closes_the_rundown_with_the_recap_the_turning_points_and_the_table(desk):
+    folder, state = desk.root / MATCH, desk.state(MATCH)
+    recap = {"id": f"recap-{MATCH}", "type": "recap", "match_id": MATCH, "final": True, "fan_team": "Varleigh", "analyst_team": "Varleigh", "machine_translated": ["es"],
+             "texts": [{"lang": "en", "recap": "Varleigh won 5-2.", "fan": "What a night.", "analyst": "The curve turned at 66'."},
+                       {"lang": "fr", "recap": "Varleigh s'impose 5-2.", "fan": "Quelle soirée.", "analyst": "La courbe bascule à 66'."}],
+             "analysis": {"teams": state["teams"], "score": state["score"], "half_time_score": {"home": 0, "away": 2}},
+             "facts": {"season_varleigh_rank_before": 17, "season_varleigh_rank_after_matchday": 16, "season_varleigh_relegation_chance_before_pct": 11,
+                       "season_varleigh_relegation_chance_after_pct": 4, "season_yarnford_rank_before": 18, "season_yarnford_rank_after": 18}}
+    stat = {"id": "insight-stat", "type": "insight", "match_id": MATCH, "stat_of_the_match": True, "status": "approved", "value": 80, "clock_s": 6000, "minute_label": "90+11'",
+            "texts": [{"lang": "en", "headline": "Stat of the match: four goals off the bench", "why": "Never before."}, {"lang": "fr", "headline": "La stat du match : quatre buts en sortie de banc"}]}
+    (folder / "recap.json").write_text(json.dumps(recap), encoding="utf-8")
+    (folder / "insights.json").write_text(json.dumps([stat]), encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    rundown, selected, view, head = console.refresh(MATCH, None, None, lang="fr")[:4]
+    last = rundown[-1]
+    assert last["value"] == console.FULL_TIME and "ru-phase" in last["label"].className and "FT" in texts_in(last["label"]) and "Varleigh 5-2 Yarnford" in texts_in(last["label"])
+    assert selected == console.FULL_TIME and texts_in(head).startswith("Full time: Varleigh 5-2 Yarnford")  # at full time, Follow live ends on it
+    text = texts_in(view)
+    assert "Varleigh s'impose 5-2." in text and "Quelle soirée." in text and "Supporters (Varleigh)" in text and "Varleigh won 5-2." not in text  # the language picked
+    assert "half-time 0-2" in text and "2 goals ruled out by VAR" in text
+    top = console.turning_points(state, desk.cards(MATCH))
+    assert [m["minute_label"] for m in top][:1] == ["66'"] and top[0]["swing"] >= top[-1]["swing"] and len(top) == console.TURNING_POINTS
+    assert "Turning points" in text and "66' Goal" in text and f"Varleigh {top[0]['before']}% to {top[0]['after']}% to win" in text
+    assert "63'" not in texts_in(find(view, lambda c: getattr(c, "className", "") == "phase-chips"))  # a goal ruled out never turned the match
+    assert "La stat du match : quatre buts en sortie de banc" in text
+    assert "Varleigh 17th to 16th after the matchday, relegation 11% to 4%" in text and "Yarnford 18th to 18th (provisional)" in text
+    assert console._approve_styles_cb(None, MATCH, console.FULL_TIME) == ({"display": "none"},) * 3
+    points, _, _ = console.axis(state["wp_timeline"])
+    replay = console.refresh(MATCH, None, None, t=points[-1]["x"] - 1, follow=True)
+    assert console.FULL_TIME not in [o["value"] for o in replay[0]]  # the replay's minute: not over yet
+    assert console.refresh(MATCH, None, None, t=points[-1]["x"] + 1, follow=True)[1] == console.FULL_TIME  # the replay's end: Full time again
+    assert console.story(MATCH, "fr", None, desk)[1] == {} and console.story(MATCH, "fr", None, desk, selected=console.FULL_TIME)[1] == {"display": "none"}
+    assert {p.name: p.read_bytes() for p in folder.iterdir()} == before  # a view: nothing written
+    assert "no recap yet" in texts_in(console.fulltime_view(state, None, [], [], "en"))
 
 
 def test_the_replay_control_is_in_the_header_for_everyone():

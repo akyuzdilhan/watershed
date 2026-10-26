@@ -617,7 +617,7 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
             t: float | None = None, follow: bool = False):
     """(rundown options, selected card, detail, heading, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed.
 
-    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection, or while the desk follows live (`follow`), the most recent card in time is picked (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
+    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`), between Before kick-off (first, always) and Full time (last, once the match is over and at the end of a replay), two views built from the storyline, the insights, the recap and the state (`prematch_view`, `fulltime_view`), never cards. Without a selection, or while the desk follows live (`follow`), `follow_pick` picks Full time once the match is over, else the most recent card in time, else Before kick-off. The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
     store = store or get_store()
     lang = lang if lang in LANG_NAMES else DEFAULT_LANG
     if not match_id:
@@ -626,14 +626,22 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     cards, state, audit, x_max = replay(store.cards(match_id), full_state, store.audit(match_id), t)
     cards, fb_docs = rundown_order(cards), store.feedback_docs(match_id)
     docs = insights_at(store.insights(match_id), full_state, t)
-    ids = [PRE_MATCH, *(c["id"] for c in cards)]
-    picked = selected if selected in ids and not follow else follow_pick(cards)
+    final = bool((state or {}).get("final")) and x_max is None  # full time, or a replay back at its end
+    ids = [PRE_MATCH, *(c["id"] for c in cards), *([FULL_TIME] if final else [])]
+    picked = selected if selected in ids and not follow else follow_pick(cards, final)
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
     tied = panels.tied_insights(docs, card)
     storyline = store.storyline(match_id) if picked == PRE_MATCH else None
-    phase = (storyline, [d for d in docs if not d.get("clock_s")], (full_state or {}).get("wp_timeline", [])[:1]) if picked in PHASES else None
+    recap = store.recap(match_id) if picked == FULL_TIME else None
+    if recap is not None and not panels.same_match(recap, full_state or {}):
+        recap = None  # left by an earlier run that ended otherwise
+    phase = None
+    if picked == PRE_MATCH:
+        phase = (storyline, [d for d in docs if not d.get("clock_s")], (full_state or {}).get("wp_timeline", [])[:1])
+    elif picked == FULL_TIME:
+        phase = (recap, [d for d in docs if d.get("stat_of_the_match")], [(c["id"], c.get("status")) for c in cards])
     detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang, x_max is not None, tied, phase)
     sig = _sig(detail_sig, cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), (state or {}).get("final"), len(audit))
     last = last_sig if isinstance(last_sig, dict) else {}
@@ -643,11 +651,14 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     if picked == PRE_MATCH:
         view = prematch_view(storyline, full_state, docs, lang) if changed else no_update
         head = phase_head(PRE_MATCH, full_state, storyline) if changed else no_update
+    elif picked == FULL_TIME:
+        view = fulltime_view(state, recap, docs, cards, lang) if changed else no_update
+        head = phase_head(FULL_TIME, state, None) if changed else no_update
     else:
         view = detail(card, audit, fb_docs, teams, read_only, lang=lang, head=False, insights=tied) if changed else no_update
         head = card_head(card, read_only) if changed else no_update
     buttons = (True, True, True) if read_only or x_max is not None else button_states(card)  # a replay decides nothing, nor does a view that is not a card
-    options = [phase_option(PRE_MATCH, state), *rundown_options(cards)]
+    options = [phase_option(PRE_MATCH, state), *rundown_options(cards), *([phase_option(FULL_TIME, state)] if final else [])]
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
     return (options, picked if picked != selected else no_update, view, head, figure(state, cards, picked, x_max), scoreline(state), *buttons,
             {"all": sig, "detail": detail_sig})
@@ -969,9 +980,81 @@ def phase_option(kind: str, state: dict | None) -> dict:
         html.Div([html.Span(tag, className="badge st-phase")], className="ru-badges")], className="ru-item ru-phase")}
 
 
-def follow_pick(cards: list[dict]) -> str:
-    """What Follow live selects: the latest card in time, else Before kick-off."""
+def follow_pick(cards: list[dict], final: bool = False) -> str:
+    """What Follow live selects: Full time once the match is over (`final`: at full time, or a replay back at its end), else the latest card in time, else Before kick-off."""
+    if final:
+        return FULL_TIME
     return default_pick(cards) or PRE_MATCH
+
+
+TURNING_POINTS = 2
+
+
+def turning_points(state: dict | None, cards: list[dict], limit: int = TURNING_POINTS) -> list[dict]:
+    """The moments that moved the win probability most, from the curve: for each card still standing, its team's chance just before and at its moment, the largest swings first (`minute_label`, `card`, `before`, `after`, `swing`, in %)."""
+    points = sorted((state or {}).get("wp_timeline") or [], key=lambda p: p["seq"])
+    at = {p["event_id"]: i for i, p in enumerate(points)}
+    out = []
+    for c in cards:
+        i = at.get(c.get("event_id"))
+        if not i or c.get("status") in ("retracted", "rejected") or c.get("team") not in ("home", "away"):
+            continue
+        before, after = points[i - 1][c["team"]] * 100, points[i][c["team"]] * 100
+        out.append({"minute_label": c.get("minute_label", ""), "card": c, "before": round(before), "after": round(after), "swing": round(abs(after - before))})
+    return sorted(out, key=lambda m: (-m["swing"], m["card"].get("clock_s") or 0))[:limit]
+
+
+def table_effect(recap: dict | None, teams: dict) -> list[str]:
+    """What the result changed in the table, from the recap's season facts: "Varleigh 17th to 16th after the matchday, relegation 11% to 4%" (provisional when only this result is counted)."""
+    facts, out = (recap or {}).get("facts") or {}, []
+    for side in ("home", "away"):
+        club = teams.get(side)
+        s = f"season_{club_slug(club)}"
+        if not club or f"{s}_rank_before" not in facts:
+            continue
+        after = facts.get(f"{s}_rank_after_matchday", facts.get(f"{s}_rank_after"))
+        line = f"{club} {ordinal(facts[f'{s}_rank_before'])}" + (f" to {ordinal(after)}" + (" after the matchday" if f"{s}_rank_after_matchday" in facts else " (provisional)") if after is not None else "")
+        b, a = facts.get(f"{s}_relegation_chance_before_pct"), facts.get(f"{s}_relegation_chance_after_pct")
+        if b is not None and a is not None:
+            line += f", relegation {_num(b)}% to {_num(a)}%"
+        out.append(line)
+    return out
+
+
+def fulltime_view(state: dict | None, recap: dict | None, docs: list[dict], cards: list[dict], lang: str | None) -> html.Div:
+    """Full time, in the card's column: the recap, the supporters' and the analyst texts in the language picked, the final score, the turning points of the curve (`turning_points`), the stat of the match and what the result changed in the table (`table_effect`)."""
+    lang = lang if lang in LANG_NAMES else DEFAULT_LANG
+    teams, score = (state or {}).get("teams") or {}, (state or {}).get("score") or {}
+    out = []
+    t = panels.text_in(recap, lang) if recap else None
+    if t:
+        mt = set(recap.get("machine_translated") or [])
+        names = {"fan": recap.get("fan_team"), "analyst": recap.get("analyst_team")}
+        paras = [html.P([html.Span(label + (f" ({names[part]})" if names.get(part) else ""), className="duo-speaker"), t[part]], className="phase-para")
+                 for part, label in panels.RECAP_PARTS.items() if isinstance(t.get(part), str) and t[part].strip()]
+        out.append(html.Div([panels.lang_row(t.get("lang", ""), mt), *paras], className="text-block phase-lead"))
+    else:
+        out.append(html.Div("Full time: no recap yet.", className="muted"))
+    analysis = (recap or {}).get("analysis") or {}
+    ht = analysis.get("half_time_score") or {}
+    ruled_out = [c for c in cards if c.get("moment") == "goal" and c.get("status") == "retracted"]
+    final = [f"{teams.get('home', '')} {score.get('home', 0)}-{score.get('away', 0)} {teams.get('away', '')}" if teams else "",
+             f"half-time {ht['home']}-{ht['away']}" if "home" in ht and "away" in ht else "",
+             f"{len(ruled_out)} goal{'s' if len(ruled_out) > 1 else ''} ruled out by VAR" if ruled_out else ""]
+    out += _chips("Final score", final)
+    swings = []
+    for m in turning_points(state, cards):
+        c = m["card"]
+        swings.append(f"{m['minute_label']} {MOMENTS.get(c.get('moment'), c.get('moment'))}, {c.get('player', {}).get('name', '')}: "
+                      f"{c.get('team_name', '')} {m['before']}% to {m['after']}% to win")
+    out += _chips("Turning points", swings)
+    stat = next((d for d in docs if d.get("stat_of_the_match") and d.get("status") != "rejected"), None)
+    st = panels.text_in(stat, lang) if stat else None
+    if st:
+        out += [html.H3("Stat of the match"), html.Div(text_head(stat, st), className="text-block")]
+    out += _chips("The table after", table_effect(recap, teams))
+    out.append(html.P("Built from the recap, the curve and the insights at the final whistle: nothing to publish here.", className="muted small phase-note"))
+    return html.Div(out, className="phase-view")
 
 
 def _chips(title: str, chips: list[str]) -> list:
