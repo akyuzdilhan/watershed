@@ -68,12 +68,13 @@ def test_no_retracted_card_is_cited(demo):
 
 
 def test_recap_tells_the_goals_ruled_out_and_why(demo):
-    _, _, _, recap = demo
-    goals = recap["analysis"]["disallowed_goals"]
-    assert [(g["minute_label"], g["reason"], g["margin_cm"]) for g in goals] == [("63'", "offside", None), ("69'", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
+    cards, _, _, recap = demo
+    offside, handball = (next(c["player"]["name"] for c in cards if c.get("ruled_out") and c["minute_label"] == minute) for minute in ("63'", "69'"))
+    assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
+        ("63'", offside, "offside", None), ("69'", handball, "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
     texts = {t["lang"]: t for t in recap["texts"]}
     # how close the offside was is said in words (tight: by a whisker), from the worker's var_decision; never the margin
-    assert f"VAR ruled out {goals[0]['player']}'s goal at 63' (offside by a whisker) and {goals[1]['player']}'s goal at 69' (handball)." in texts["en"]["recap"]
+    assert f"VAR ruled out {offside}'s goal at 63' (offside by a whisker) and {handball}'s goal at 69' (handball)." in texts["en"]["recap"]
     assert "(hors-jeu d'un rien)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
     assert "(fuera de juego por muy poco)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]

@@ -1,3 +1,4 @@
+import copy
 import json
 import math
 import random
@@ -361,6 +362,108 @@ def test_every_step_of_a_fact_is_audited_once(demo, history):
     assert {"scorer-home-20-3", "comeback-home-2-2", "ht-lead-lost-away-1"} <= taken_back  # the three facts that counted the 63' goal, on air when VAR ruled it out
 
 
+class ConsoleSink:
+    """The console's side of the store: a decision written back into the worker's store (the documents of a MemorySink, or cards.json and insights.json), its audit entry next to the worker's."""
+
+    def __init__(self, worker) -> None:
+        self.worker = worker
+
+    def card(self, doc: dict) -> None:
+        insight = doc.get("type") == "insight"
+        if isinstance(self.worker, JsonFileSink):
+            path = self.worker.root / doc["match_id"] / ("insights.json" if insight else "cards.json")
+            docs = json.loads(path.read_text(encoding="utf-8"))
+            path.write_text(json.dumps([doc if d["id"] == doc["id"] else d for d in docs]), encoding="utf-8")
+        else:
+            (self.worker.insights if insight else self.worker.cards)[doc["id"]] = copy.deepcopy(doc)
+
+    def audit_entry(self, entry: dict) -> None:
+        self.worker.audit_entry(entry)
+
+
+def stored_docs(sink, match_id: str, kind: str = "insight") -> dict[str, dict]:
+    """The cards or the insights of a match as the console reads them."""
+    if isinstance(sink, JsonFileSink):
+        path = sink.root / match_id / ("insights.json" if kind == "insight" else "cards.json")
+        return {d["id"]: d for d in json.loads(path.read_text(encoding="utf-8"))} if path.exists() else {}
+    docs = sink.insights if kind == "insight" else sink.cards
+    return {i: d for i, d in docs.items() if d.get("type", "card") == kind and d["match_id"] == match_id}
+
+
+def approve_what_waits(sink, match_id: str, approved: set) -> None:
+    """The producer approves each version of a card or a fact once, as soon as it waits for him."""
+    from worker.desk import Desk
+
+    console = Desk(ConsoleSink(sink))
+    for kind in ("card", "insight"):
+        for d in stored_docs(sink, match_id, kind).values():
+            if d["status"] == "pending" and (d["id"], d["version"]) not in approved:
+                approved.add((d["id"], d["version"]))
+                console.approve(copy.deepcopy(d), "producer")
+
+
+def assert_audit_is_the_stored_history(sink, match_id: str) -> None:
+    """For every card and fact, the audit entries (the console's included) are the steps of its stored history, in order, each written once."""
+    for kind in ("card", "insight"):
+        docs = stored_docs(sink, match_id, kind)
+        assert docs, kind
+        for i, d in docs.items():
+            assert [e["action"] for e in sink.audit if e["card_id"] == i] == [h["action"] for h in d.get("history", [])], i
+    assert len({e["id"] for e in sink.audit}) == len(sink.audit)
+
+
+@pytest.mark.parametrize("store", ["memory", "json"])
+def test_an_approval_holds_while_var_checks_the_goal(demo, history, tmp_path, store):
+    """Producer mode, as the video is shot: the producer approves every card and fact as soon as it is written. While VAR checks a goal, the facts it holds up stay approved in the store, flagged under review; ruled out, the goal withdraws them, audited as on air. With the console's approvals, the audit trail is the stored history of every card and fact."""
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    stream, _ = demo
+    sink = MemorySink() if store == "memory" else JsonFileSink(tmp_path)
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()), history=history)
+    approved, checks = set(), []
+    for m in stream:
+        pipeline.handle(m)
+        if m["type"] == "var_check" and m["status"] == "started":
+            assert m["target_event_id"] in pipeline.engines["demo-0007"].reviewing
+            checks.append({d["key"]: d["status"] for d in stored_docs(sink, "demo-0007").values() if d.get("under_review")})
+        approve_what_waits(sink, "demo-0007", approved)
+    pipeline.flush()
+    assert len(checks) == 3 and all(s == "approved" for check in checks for s in check.values())
+    held = set(checks[0])  # the 63' goal, ruled out for offside
+    assert {"scorer-home-20-3", "comeback-home-2-2", "ht-lead-lost-away-1"} <= held
+    withdrawn = [e for e in sink.audit if e["action"] == "superseded" and e["cause"] == "goal ruled out"]
+    assert held <= {e["card_id"][len("insight-demo-0007-"):] for e in withdrawn} and all(e["was_on_air"] for e in withdrawn)
+    assert_audit_is_the_stored_history(sink, "demo-0007")
+
+
+def test_a_fact_updated_during_a_var_check_keeps_its_steps(demo, history):
+    """United, down to ten, score (3-3), Rovers go 4-3 and VAR checks that goal; United score again (4-4) during the check. That goal updates the fact on United's goals with ten men and flags it under review in the same message (its score rests on the goal checked): the flag keeps the new version as the engine wrote it, the producer's decisions on the previous one included, and every step stays in the history."""
+    from worker.desk import Desk
+    from worker.writer import TemplateWriter
+
+    stream, truth = demo
+    red = next(m for m in stream if m["type"] == "action" and m.get("card") in ("red", "second_yellow"))
+    kept = [m for m in stream if m["seq"] <= red["seq"]]
+    goal = {side: next(m for m in stream if m["type"] == "action" and m["event_id"] == next(g["event_id"] for g in truth["goals"] if g["team"] == side and g["counts"]))
+            for side in ("home", "away")}
+    started = next(m for m in stream if m["type"] == "var_check" and m["status"] == "started")
+    t, s = max(m["emitted_at_s"] for m in kept), red["seq"]
+    extra = [craft(goal["away"], s + 1, t + 60, 79, event_id="extra-away-goal"), craft(goal["home"], s + 2, t + 120, 80, event_id="extra-home-goal"),
+             craft(started, s + 3, t + 135, 80, check_id="extra-var", target_event_id="extra-home-goal"), craft(goal["away"], s + 4, t + 180, 82, event_id="extra-away-goal-2")]
+    sink = MemorySink()
+    pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter()), history=history, insight_min_value=0, insight_cap=100)
+    approved = set()
+    for m in kept + extra:
+        pipeline.handle(m)
+        approve_what_waits(sink, "demo-0007", approved)
+    ten_men = stored_docs(sink, "demo-0007")["insight-demo-0007-ten-men-away-scored"]
+    assert ten_men["under_review"] and (ten_men["headline_facts"]["goals_after_red"], ten_men["headline_facts"]["score"]) == (2, "4-4")
+    steps = [(h["action"], h["version"]) for h in ten_men["history"]]
+    assert ("approved", ten_men["version"] - 1) in steps and steps[-3:] == [("updated", ten_men["version"]), ("written", ten_men["version"]), ("approved", ten_men["version"])]
+    assert_audit_is_the_stored_history(sink, "demo-0007")
+
+
 # --- who writes the facts, and the call budget --------------------------------------------------------------
 
 class CountingWriter:
@@ -453,7 +556,7 @@ def test_the_figures_kept_for_the_producer_reach_no_writer(demo, history):
             return await super().write_async(doc, facts, languages, **kwargs)
 
     sink, model = MemorySink(), Model()
-    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
+    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True, max_calls_per_match=1000))  # every draft reaches the model, the stat of the match included, however many retries
     assert "top_fact" in model.given and not model.given & set(OFF_AIR_FACTS)
 
 

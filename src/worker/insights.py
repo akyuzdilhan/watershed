@@ -243,12 +243,14 @@ class InsightEngine:
                 meanings["last_player"] = "player who last did it"
         return facts, meanings
 
-    def _refresh(self, doc: dict) -> None:
+    def _refresh(self, doc: dict) -> dict | None:
+        """Before the engine changes an insight: the producer's decisions on its version, from the store, where the console writes them. A version changed earlier for the same message (updated, revived) is not in the store yet and already has them. Returns the stored document."""
         stored = self.load(doc["match_id"], doc["id"]) if self.load else None
-        if stored is not None and stored is not doc:
+        if stored is not None and stored is not doc and stored.get("version") == doc.get("version"):
             for k in PRODUCER_FIELDS:
                 if k in stored:
                     doc[k] = copy.deepcopy(stored[k])
+        return stored
 
     def _mark(self, doc: dict, action: str, detail: dict | None = None) -> None:
         """One step of the insight's life: in its history and, with an `audit` callable, in the audit trail (same entry shape as the desk's)."""
@@ -259,10 +261,10 @@ class InsightEngine:
         history.append({"action": action, "by": BY, "version": doc["version"]})
 
     def _supersede(self, doc: dict, by: str | None, cause: str) -> None:
-        self._refresh(doc)
+        stored = self._refresh(doc)
         if cause != "outranked" and any(e in self.match.voided for e in doc.get("evidence", [])):
             cause = "goal ruled out"  # a goal it counted was voided, even when the void is released together with an earlier message
-        was_on_air = doc.get("status") == "approved"
+        was_on_air = (doc if stored is None else stored).get("status") == "approved"  # as the console and the overlay read it
         doc["status"] = "superseded"
         doc["superseded_by"] = f"insight-{self.match.match_id}-{by}" if by else None
         doc["supersede_cause"] = cause
@@ -282,7 +284,7 @@ class InsightEngine:
         return {key for key in self.current.values() if before.get(key) != after.get(key)}
 
     def _flag_reviews(self, now: list[Fact] | None = None) -> list[tuple[dict, bool]]:
-        """`under_review` on the active insights that a goal under VAR check holds up, cleared on the others; returns the insights whose flag changed."""
+        """`under_review` on the active insights that a goal under VAR check holds up, cleared on the others; returns the insights whose flag changed, with the producer's decisions read back first, so that writing the flag keeps an approval made in the console."""
         held: set[str] = set()
         goals = sorted(g for g in self.reviewing if g in self.match.goals)
         if goals:
@@ -293,6 +295,7 @@ class InsightEngine:
         for key in self.current.values():
             doc = self.docs[key]
             if doc.get("under_review") != (key in held):
+                self._refresh(doc)
                 doc["under_review"] = key in held
                 out.append((doc, False))
         return out

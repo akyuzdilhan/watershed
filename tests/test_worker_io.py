@@ -807,12 +807,18 @@ class DocumentSink(MemorySink):
 OFFSIDE_CALL_WORDS = re.compile(r"(?i)whisker|clearly|clear offside|that close|d'un rien|pour un rien|si peu|hors-jeu net|por muy poco|tan poco|fuera de juego claro|\d\s?cm\b|centim")
 
 
-def test_the_offside_margin_and_its_call_stay_off_air(demo, tmp_path):
-    """The feed sends the margin of the offside VAR rules out. It stays in the card's var_decision, for the producer: the duo's lines on the ruling and the recap written at the whistle (recap.json) say offside, never how close it was, whether the sink keeps the feed in a list or, like Cosmos DB, in a container."""
+@pytest.mark.parametrize("clear", [False, True])
+def test_the_offside_margin_and_its_call_stay_off_air(demo, tmp_path, clear):
+    """The feed sends the margin of the offside VAR rules out: tight in the demo, clear when the same correction sends 60 cm. It stays in the card's var_decision, for the producer: the duo's lines on the ruling and the recap written at the whistle (recap.json) say offside, never how close it was, whether the sink keeps the feed in a list or, like Cosmos DB, in a container."""
     stream, _ = demo
     void = next(m for m in stream if m["type"] == "correction" and m["op"] == "void" and m["cause"] == "var_offside")
-    margin = next(m["changes"]["offside"]["margin_m"] for m in stream
-                  if m["type"] == "correction" and m.get("related_message_id") == void["related_message_id"] and isinstance(m["changes"].get("offside"), dict))
+
+    def gives_margin(m: dict) -> bool:
+        return m["type"] == "correction" and m.get("related_message_id") == void["related_message_id"] and isinstance(m["changes"].get("offside"), dict)
+
+    if clear:
+        stream = [{**m, "changes": {**m["changes"], "offside": {**m["changes"]["offside"], "margin_m": 0.6}}} if gives_margin(m) else m for m in stream]
+    margin = next(m["changes"]["offside"]["margin_m"] for m in stream if gives_margin(m))
     inner = DocumentSink()
     for sink in (JsonFileSink(tmp_path), ThreadedSink(inner)):
         pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True))
@@ -826,7 +832,7 @@ def test_the_offside_margin_and_its_call_stay_off_air(demo, tmp_path):
             cards = {c["id"]: c for c in json.loads((tmp_path / "demo-0007" / "cards.json").read_text(encoding="utf-8"))}
             recap = json.loads((tmp_path / "demo-0007" / "recap.json").read_text(encoding="utf-8"))
         decision = cards[f"card-{void['target_event_id']}"]["var_decision"]
-        assert decision["margin_m"] == margin and decision["call"] in ("tight", "clear")  # for the producer
+        assert decision["margin_m"] == margin and decision["call"] == ("clear" if clear else "tight")  # for the producer
         ruled = [c for c in cards.values() if c.get("ruled_out")]
         assert len(ruled) == 2 and all(c["ruled_out"]["margin_cm"] is None and c["duo_ruling"] for c in ruled)
         lines = [l["line"] for c in ruled for l in c["duo_ruling"]]
