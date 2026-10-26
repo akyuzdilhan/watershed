@@ -260,3 +260,14 @@ body:has(.ov-page) { background: #0b0b0b; }
 .ov-preview .ov-why { font-size: 12px; }
 .ov-preview .ov-second-text { font-size: 12px; }
 .ov-preview .ov-line { gap: 8px; }
+
+/* All insights and storyline: compact rows, the storyline as a short timeline */
+.ru-compact .ru-top { flex-wrap: wrap; row-gap: 2px; }
+.ru-compact .badge { font-size: 10px; padding: 0 6px; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line); }
+.tl-item { position: relative; padding: 0 0 14px 10px; }
+.tl-item::before { content: ""; position: absolute; left: -21px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-1); border: 2px solid var(--var); }
+.tl-step { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.tl-during { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.tl-line { display: flex; gap: 6px; color: var(--ink-2); font-size: 13px; }
+.fold-facts { margin-top: 12px; }

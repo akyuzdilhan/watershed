@@ -446,7 +446,7 @@ def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypat
     candidates = tactics.insight_candidates(feed["actions"], feed["info"], MATCH)
     run_margins = [f"{d['headline_facts']['margin_m']} m" for d in candidates if d["figure"]["kind"] == "run"]
     listed = dash_post("c-r-detail.children", {**ON_INSIGHTS, "c-i-tick.n_intervals": 1}, "c-i-tick.n_intervals")  # no insight on the desk: the feed's candidates
-    assert sum(len(props) for props in listed.values()) == 12  # every output of the callback, sent to a visitor
+    assert sum(len(props) for props in listed.values()) == 13  # every output of the callback, sent to a visitor
     assert run_margins and not any(m in words(listed["c-i-list"]["options"]) for m in run_margins)
     doc = write_recap(public, monkeypatch)
     docs = write_docs(public)
@@ -523,6 +523,29 @@ def test_insights_read_as_words_and_fold_what_stays_with_the_producer():
     assert panels.AI_WRITTEN in texts_in(producer) and "machine-translated" not in texts_in(producer)
     assert [panels.AI_WRITTEN in texts_in(b) for b in panels.texts_block(doc)] == [False, True]
     assert panels.producer_details([None]) is None
+
+
+def test_the_insights_page_shows_one_language_compact_rows_folded_facts_and_a_storyline_timeline():
+    doc = {"id": "i-1", "type": "insight", "key": "comeback-home-2-3", "status": "approved", "value": 65, "minute_label": "70'", "clock_s": 4200,
+           "headline_facts": {"team_name": "Varleigh", "deficit": 2}, "field_meanings": {"deficit": "goals behind"},
+           "texts": [{"lang": "en", "headline": "From 0-2 down", "why": "Two behind."}, {"lang": "fr", "headline": "Mené 0-2", "why": "Deux buts de retard."}],
+           "duo": [{"speaker": "Ada", "lang": "en", "line": "What a turn!"}, {"speaker": "Ada", "lang": "fr", "line": "Quel retournement !"}]}
+    detail, _ = panels.insight_detail(doc, None, True, None, read_only=True, lang="fr")
+    words = texts_in(detail)
+    assert "Mené 0-2" in words and "Quel retournement" in words and "From 0-2 down" not in words and "What a turn" not in words
+    facts = find(detail, lambda c: "fold-facts" in (getattr(c, "className", "") or ""))
+    assert len(facts) == 1 and facts[0].open is False and texts_in(facts[0].children[0]) == "Facts (2)"  # the table folded
+    assert "From 0-2 down" in texts_in(panels.insight_detail(doc, None, True, None, read_only=True)[0])  # every language when none is picked
+    story = {"id": "storyline-x", "status": "approved", "texts": [{"lang": "en", "headline": "A relegation battle", "why": "Bottom three."}, {"lang": "es", "headline": "Duelo por la permanencia", "why": "Abajo."}]}
+    assert "Duelo" in texts_in(panels.storyline_block(story, None, True, "es")) and "relegation" not in texts_in(panels.storyline_block(story, None, True, "es"))
+    row = panels.insight_options([doc], "fr")[0]["label"]
+    assert "ru-compact" in row.className and len(row.children) == 2 and texts_in(row.children[1]) == "Mené 0-2"  # two lines, the status on the first
+    during = panels.during_block([doc, dict(doc, id="i-0", status="superseded", texts=[{"lang": "fr", "headline": "Old"}])], "fr")
+    assert texts_in(during).count("Mené 0-2") == 1 and "Old" not in texts_in(during)
+    pane = panels.insights_pane()
+    steps = [texts_in(c) for c in find(pane, lambda c: getattr(c, "className", "") == "tl-step")]
+    assert steps == ["Before the match", "During the match", "After the match"] and find(pane, lambda c: getattr(c, "id", None) == "c-i-lang")
+    assert "c-i-lang" in panels.LANG_SYNC
 
 
 def test_the_labels_live_in_a_module_both_tabs_import():

@@ -14,7 +14,7 @@ from dash import Input, Output, State, ctx, dcc, html, no_update
 from web import graphics as G
 from web import pitch, security
 from web.labels import FACT_KINDS, fact_label, field_label
-from web.overlay import AI_WRITTEN_LABEL
+from web.overlay import AI_WRITTEN_LABEL, LANGS
 from web.matchfeed import player_names, team_names
 from web.store import get_store
 from worker import feedback as FB
@@ -149,12 +149,11 @@ def shown_facts(facts: dict) -> dict:
 
 
 def facts_view(facts: dict, meanings: dict, read_only: bool, basis: str | None = None) -> list:
-    """The Facts heading and table; for a producer the producer-only facts and the rarity basis folded under "Producer details", for a visitor the note saying they are left out."""
+    """The facts table, folded and closed ("Facts (n)"); for a producer the producer-only facts and the rarity basis folded under "Producer details", for a visitor the note saying they are left out."""
     shown = shown_facts(facts)
-    out = [html.H3("Facts"), facts_table(shown, meanings)]
+    inside = [facts_table(shown, meanings)] + ([html.P(PRODUCER_ONLY_NOTE, className="muted small")] if read_only and len(shown) < len(facts) else [])
+    out = [html.Details([html.Summary(f"Facts ({len(shown)})"), *inside], open=False, className="fold fold-facts")]
     if read_only:
-        if len(shown) < len(facts):
-            out.append(html.P(PRODUCER_ONLY_NOTE, className="muted small"))
         return out
     kept = {k: v for k, v in facts.items() if k not in shown}
     folded = producer_details([facts_table(kept, meanings) if kept else None, html.P(f"Rarity: {basis}", className="muted small") if basis else None])
@@ -174,9 +173,11 @@ def lang_row(lang: str, machine_translated: set) -> html.Div:
                     className="lang-row")
 
 
-def texts_block(doc: dict, verdicts: dict | None = None, pane: str = "i") -> list:
+def texts_block(doc: dict, verdicts: dict | None = None, pane: str = "i", lang: str | None = None) -> list:
+    """The texts of a document, every language or `lang` only (else English, else the first: `text_in`)."""
     mt = set(doc.get("machine_translated") or [])
-    return [html.Div([lang_row(t.get("lang", ""), mt), *text_lines(doc, t, verdicts, pane)], className="text-block") for t in doc.get("texts") or []]
+    texts = (doc.get("texts") or []) if lang is None else [t for t in [text_in(doc, lang)] if t]
+    return [html.Div([lang_row(t.get("lang", ""), mt), *text_lines(doc, t, verdicts, pane)], className="text-block") for t in texts]
 
 
 # --- match graphics ---------------------------------------------------------------------------------
@@ -402,13 +403,14 @@ def insight_type(d: dict) -> str:
     return fact_label(d.get("group") or d.get("key") or d.get("kind"))
 
 
-def insight_options(docs: list[dict]) -> list[dict]:
+def insight_options(docs: list[dict], lang: str | None = None) -> list[dict]:
+    """One compact row per insight: minute, type and status on top, its headline in the language picked (`lang`, else English) under it."""
     return [{"value": d["id"], "label": html.Div([
         html.Div([html.Span(d.get("minute_label") or "", className="ru-minute"), html.Span(insight_type(d), className="ru-moment"),
+                  html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed")),
                   html.Span(f"priority {d.get('value', 0)}", className="ru-value")], className="ru-top"),
-        html.Div(insight_title(d), className="ru-who"),
-        html.Div(html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed")), className="ru-badges")],
-        className="ru-item")} for d in docs]
+        html.Div(((text_in(d, lang) or {}).get("headline") if lang and d.get("texts") else None) or insight_title(d), className="ru-who")],
+        className="ru-item ru-compact")} for d in docs]
 
 
 def insight_title(d: dict) -> str:
@@ -433,20 +435,20 @@ def insight_title(d: dict) -> str:
     return insight_type(d) if (d.get("group") or d.get("key") or d.get("kind")) else d.get("id", "")
 
 
-def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts: dict | None = None, read_only: bool = False) -> tuple[html.Div, go.Figure]:
+def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts: dict | None = None, read_only: bool = False, lang: str | None = None) -> tuple[html.Div, go.Figure]:
     """The selected insight: texts, duo lines, facts and figure. `read_only` (a visitor): no thumbs, no producer-only fact, no rarity basis; a producer gets the producer-only facts (the offside margin among them) and the rarity basis folded (`facts_view`). A run figure never carries its margin."""
     if d is None:
         return html.Div("No insight yet. Tactical candidates appear here once the feed has goals to explain.", className="muted"), empty_figure("No insight selected.")
     rarity = d.get("rarity") or {}
     kind, what = FACT_KINDS.get(str(d.get("kind") or "").lower(), str(d.get("kind") or "")).lower(), insight_type(d)
-    parts = [html.H2(insight_title(d)),
+    parts = [html.H2(((text_in(d, lang) or {}).get("headline") if lang else None) or insight_title(d)),
              html.Div([html.Span(f"{d.get('minute_label') or ''} {what}" + (f", {kind}" if kind and kind != what.lower() else "") + f", priority {d.get('value', 0)}", className="muted"),
                        html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta")]
     if not from_desk:
         parts.append(html.P("Candidate computed from the feed by worker.tactics: not on the desk, no text yet, nothing to approve.", className="muted small"))
     fb = (verdicts if verdicts is not None else {}) if from_desk and not read_only else None
-    parts += texts_block(d, fb)
-    duo = duo_block(d, verdicts=fb)
+    parts += texts_block(d, fb, lang=lang)
+    duo = duo_block(d, lang=_shown_lang(d, lang), verdicts=fb)
     if duo is not None:
         parts += suggested_lines(duo)
     basis = (str(rarity["basis"]) + (f" ({rarity['surprisal_bits']} bits)" if rarity.get("surprisal_bits") is not None else "")) if rarity.get("basis") else None
@@ -455,14 +457,19 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts:
     return html.Div(parts), _sized(fig) if fig is not None else empty_figure("No figure for this insight.")
 
 
-def storyline_block(doc: dict | None, verdicts: dict | None = None, read_only: bool = False) -> html.Div:
-    """The storyline: texts, duo lines and facts; `read_only` (a visitor) draws no thumbs and leaves the producer-only facts out."""
+def _shown_lang(doc: dict, lang: str | None) -> str | None:
+    t = text_in(doc, lang) if lang is not None else None
+    return t.get("lang") if t else lang
+
+
+def storyline_block(doc: dict | None, verdicts: dict | None = None, read_only: bool = False, lang: str | None = None) -> html.Div:
+    """The storyline: texts (every language, or `lang` only), duo lines and facts; `read_only` (a visitor) draws no thumbs and leaves the producer-only facts out."""
     if not doc:
         return html.Div("No storyline for this match yet.", className="muted")
     parts = [html.Div([html.Span(STATUS.get(doc.get("status"), doc.get("status", "")), className="badge " + STATUS_CLASS.get(doc.get("status"), "st-proposed"))], className="detail-meta")]
     fb = None if read_only else (verdicts if verdicts is not None else {})
-    parts += texts_block(doc, fb)
-    duo = duo_block(doc, verdicts=fb)
+    parts += texts_block(doc, fb, lang=lang)
+    duo = duo_block(doc, lang=_shown_lang(doc, lang), verdicts=fb)
     if duo is not None:
         parts += suggested_lines(duo)
     parts += facts_view(doc.get("facts") or doc.get("headline_facts") or {}, doc.get("field_meanings") or {}, read_only)
@@ -515,7 +522,8 @@ def after_the_match(match_id: str | None, view: str | None, last_sig: str | None
     return recap_block(doc, final, lang), sig
 
 
-def insights(match_id: str | None, selected: str | None, view: str | None, last_sig: str | None, rev: int | None = None, store=None, read_only: bool = False):
+def insights(match_id: str | None, selected: str | None, view: str | None, last_sig: str | None, rev: int | None = None, store=None, read_only: bool = False,
+             lang: str | None = None):
     """(options, selected, detail, figure, storyline, approve disabled, reject disabled, storyline approve disabled, storyline reject disabled, signature). `read_only` (a visitor in public mode): every button disabled, no thumbs, nothing kept for the producer."""
     if view != "insights":
         return (no_update,) * 10
@@ -528,17 +536,17 @@ def insights(match_id: str | None, selected: str | None, view: str | None, last_
     picked = selected if selected in ids else (ids[0] if ids else None)
     feed = store.feed(match_id)
     fb_docs = [] if read_only else store.feedback_docs(match_id)
-    sig = _sig(match_id, docs, story, picked, rev, (feed or {}).get("last_seq"), len(fb_docs), read_only)
+    sig = _sig(match_id, docs, story, picked, rev, (feed or {}).get("last_seq"), len(fb_docs), read_only, lang)
     if sig == last_sig:
         return (no_update,) * 10
     doc = next((d for d in docs if d["id"] == picked), None)
     verdicts = FB.by_target(fb_docs)
-    detail, fig = insight_detail(doc, feed, from_desk, verdicts, read_only)
+    detail, fig = insight_detail(doc, feed, from_desk, verdicts, read_only, lang)
     status = (doc or {}).get("status")
     no_doc = read_only or not from_desk or doc is None
     no_story = read_only or story is None
     s_status = (story or {}).get("status")
-    return (insight_options(docs), picked if picked != selected else no_update, detail, fig, storyline_block(story, verdicts, read_only),
+    return (insight_options(docs, lang), picked if picked != selected else no_update, detail, fig, storyline_block(story, verdicts, read_only, lang),
             no_doc or status in ("approved", "superseded"), no_doc or status in ("rejected", "superseded"),
             no_story or s_status == "approved", no_story or s_status == "rejected", sig)
 
@@ -568,10 +576,15 @@ def insights_pane() -> html.Div:
                                 html.Button("Reject", id="c-i-reject", className="btn btn-reject", disabled=True)], className="actions"),
                       html.Div(id="c-i-message", className="message", role="status"),
                       dcc.Graph(id="c-i-figure", figure=empty_figure("Loading."), config={"displayModeBar": False})], className="col col-middle"),
-        html.Section([html.H3("Storyline"), html.Div(id="c-s-detail"),
-                      html.Div([html.Button("Approve", id="c-s-approve", className="btn btn-approve", disabled=True),
-                                html.Button("Reject", id="c-s-reject", className="btn btn-reject", disabled=True)], className="actions"),
-                      html.H3("After the match"), html.Div(recap_block(None, False), id="c-r-detail")], className="col col-right"),
+        html.Section([html.Div([html.H3("Storyline"), html.Div(dcc.RadioItems(id="c-i-lang", options=[{"value": c, "label": c.upper()} for c in LANGS], value="en",
+                                                                               className="view-switch lang-pills", inputClassName="view-radio", labelClassName="view-label"),
+                                                                className="lang-switch", title="Texts in EN/FR/ES; console labels in English")], className="col-head"),
+                      html.Ol([html.Li([html.Div("Before the match", className="tl-step"), html.Div(id="c-s-detail"),
+                                        html.Div([html.Button("Approve", id="c-s-approve", className="btn btn-approve", disabled=True),
+                                                  html.Button("Reject", id="c-s-reject", className="btn btn-reject", disabled=True)], className="actions")], className="tl-item"),
+                               html.Li([html.Div("During the match", className="tl-step"), html.Div(id="c-t-during")], className="tl-item"),
+                               html.Li([html.Div("After the match", className="tl-step"), html.Div(recap_block(None, False), id="c-r-detail")], className="tl-item")],
+                              className="timeline")], className="col col-right"),
         dcc.Store(id="c-i-sig"), dcc.Store(id="c-r-sig"), dcc.Store(id="c-i-rev", data=0), dcc.Interval(id="c-i-tick", interval=PANEL_REFRESH_MS, disabled=True)],
         id="c-pane-insights", className="desk pane", style={"display": "none"})
 
@@ -728,9 +741,28 @@ def _graphics_cb(_n, match_id, kind, item, view, last_sig):
     return graphics(match_id, kind, item, view, last_sig, read_only=security.producer() is None)
 
 
-def _insights_cb(_n, rev, match_id, selected, view, last_sig, recap_sig):
-    """The insights and storyline outputs, then the After the match section, in one request per tick; read only without a producer (public mode)."""
-    return insights(match_id, selected, view, last_sig, rev, read_only=security.producer() is None) + after_the_match(match_id, view, recap_sig)
+def during_block(docs: list[dict], lang: str | None) -> html.Div:
+    """During the match, in the storyline's timeline: the insights standing (approved, or superseded by one not yet written), in match order, one line each in the language picked."""
+    shown = sorted([d for d in docs if d.get("status") == "approved"], key=lambda d: (d.get("clock_s") or 0, d.get("id", "")))
+    if not shown:
+        return html.Div("No insight on air yet.", className="muted small")
+    return html.Ul([html.Li([html.Span(d.get("minute_label") or "", className="ru-minute"), html.Span((text_in(d, lang) or {}).get("headline") or insight_title(d))],
+                            className="tl-line") for d in shown], className="tl-during")
+
+
+def _insights_cb(_n, rev, match_id, selected, view, last_sig, recap_sig, lang=None):
+    """The insights and storyline outputs, the After the match section and the During the match lines, in one request per tick, in the language picked; read only without a producer (public mode)."""
+    out = insights(match_id, selected, view, last_sig, rev, read_only=security.producer() is None, lang=lang)
+    during = no_update if out[-1] is no_update or not match_id else during_block(get_store().insights(match_id), lang)
+    return out + after_the_match(match_id, view, recap_sig, lang=lang) + (during,)
+
+
+# The two language switches (the desk's and this page's) are one: either sets both
+LANG_SYNC = """function(desk, page) {
+    var trig = (window.dash_clientside.callback_context.triggered[0] || {}).prop_id || "";
+    var v = trig.indexOf("c-i-lang") === 0 ? page : desk;
+    return [v, v];
+}"""
 
 
 def _decide_cb(_a, _r, _sa, _sr, match_id, doc_id, rev):
@@ -753,9 +785,11 @@ def register(app) -> None:
                  State("c-g-sig", "data"))(_graphics_cb)
     app.callback(Output("c-i-list", "options"), Output("c-i-list", "value"), Output("c-i-detail", "children"), Output("c-i-figure", "figure"), Output("c-s-detail", "children"),
                  Output("c-i-approve", "disabled"), Output("c-i-reject", "disabled"), Output("c-s-approve", "disabled"), Output("c-s-reject", "disabled"), Output("c-i-sig", "data"),
-                 Output("c-r-detail", "children"), Output("c-r-sig", "data"),
+                 Output("c-r-detail", "children"), Output("c-r-sig", "data"), Output("c-t-during", "children"),
                  Input("c-i-tick", "n_intervals"), Input("c-i-rev", "data"), Input("c-p-match", "data"), Input("c-i-list", "value"), Input("c-view", "value"),
-                 State("c-i-sig", "data"), State("c-r-sig", "data"))(_insights_cb)
+                 State("c-i-sig", "data"), State("c-r-sig", "data"), Input("c-i-lang", "value"))(_insights_cb)
+    app.clientside_callback(LANG_SYNC, Output("c-lang", "value", allow_duplicate=True), Output("c-i-lang", "value"), Input("c-lang", "value"), Input("c-i-lang", "value"),
+                            prevent_initial_call=True)
     app.callback(Output("c-i-message", "children"), Output("c-i-rev", "data"),
                  Input("c-i-approve", "n_clicks"), Input("c-i-reject", "n_clicks"), Input("c-s-approve", "n_clicks"), Input("c-s-reject", "n_clicks"),
                  State("c-match", "value"), State("c-i-list", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_decide_cb)

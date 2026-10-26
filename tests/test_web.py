@@ -905,7 +905,7 @@ def test_insights_and_storyline_are_decided_through_the_desk_and_reach_the_overl
     assert [o["value"] for o in options] == [d["id"] for d in sorted(docs, key=lambda d: -d["value"])]
     assert not a_off and not r_off and not sa_off and "Fourth against sixth" in texts_in(story)
     assert "A quarter of a metre." in texts_in(detail) and "margin_m" not in fig.layout.meta["offside"]
-    folded = find(detail, lambda c: isinstance(c, html.Details))
+    folded = find(detail, lambda c: getattr(c, "className", "") == "producer-details")
     assert len(folded) == 1 and "margin_m" in [c.title for c in find(folded[0], lambda c: getattr(c, "className", "") == "fact-key")]
     assert panels.decide_doc("approve", MATCH, run["id"], None, feed_desk) == ("Sign in to approve or reject.", False)
     message, done = panels.decide_doc("approve", MATCH, run["id"], "producer-1", feed_desk)
