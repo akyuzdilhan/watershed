@@ -375,7 +375,7 @@ def graphics(match_id: str | None, kind: str | None, item: str | None, view: str
 def graphics_pane() -> html.Section:
     return html.Section([
         html.Div([dcc.Dropdown(id="c-g-kind", options=KINDS, value="shots", clearable=False, className="match-picker"),
-                  dcc.Dropdown(id="c-g-item", options=[], clearable=False, className="match-picker g-item", placeholder="Moment")], className="g-controls"),
+                  dcc.Dropdown(id="c-g-item", options=[], clearable=False, className="match-picker g-item", placeholder="Nothing to pick")], className="g-controls"),
         dcc.Graph(id="c-g-figure", figure=empty_figure("Loading."), config={"displayModeBar": False}, className="g-figure"),
         html.Div(id="c-g-note", className="muted small"), dcc.Store(id="c-g-sig"), dcc.Store(id="c-p-match"), dcc.Interval(id="c-g-tick", interval=PANEL_REFRESH_MS, disabled=True)],
         id="c-pane-graphics", className="col pane", style={"display": "none"})

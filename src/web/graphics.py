@@ -2,12 +2,13 @@
 
 | Function | What it shows |
 |---|---|
-| `shot_map` | every shot, sized by xG, coloured and shaped by outcome; goals ruled out by VAR drawn apart and left out of the shots and xG totals; the home team attacks right |
-| `buildup_figure` | the possession behind a goal or a big chance as arrows whose width is the threat each action added |
-| `set_piece_figure` | a corner or free kick animated: the frame at the delivery, then at the first contact, with variable-width arrows |
+| `shot_map` | every shot (or one team's, or one half's), sized by xG with a size key under the pitch, coloured and shaped by outcome; goals ruled out by VAR drawn apart and left out of the shots and xG totals; the home team attacks right |
+| `buildup_figure` | the possession behind a goal or a big chance, numbered: passes solid, carries dashed, crosses dotted and curved, the shot thick in its outcome's colour, where and how the ball was won starred, the sequence in words under the pitch |
+| `set_piece_figure` | a corner or free kick animated: the frame at the delivery, then at the first contact, with variable-width arrows and named slider steps |
 | `set_pieces_map` | every corner and crossed free kick of a team: delivery arrows sized by the value of where they landed, coloured by who won the first contact |
-| `momentum_figure` | threat added per 5 minutes per team (mirrored bars), and the win-probability curve below it on its own axis |
+| `momentum_figure` | threat added per slice per team (mirrored bars) with a rolling average, goals, VAR decisions and red cards as vertical lines, the win probability on a right-hand axis |
 | `shot_on_goal_figure` | a penalty or a direct free kick seen from behind the taker: where the ball crossed the goal line and where the keeper stood |
+| `freekick_figure` | a direct free kick from above (spot, distance, wall from the frame, keeper, shot) beside its goal face |
 | `line_break_figure`, `run_figure`, `space_figure`, `line_height_figure`, `pressing_figure` | the tactical details of `worker.tactics` |
 | `insight_figure` | the figure named by an insight document's `figure` reference |
 
@@ -631,8 +632,8 @@ def freekick_figure(feed: dict, event_id: str, theme="dark", width: int | None =
     ex, ey = pitch.clamp(a["end_x"], a["end_y"])
     dist = math.hypot(pitch.LENGTH - bx, pitch.MID_Y - by)
     x0 = max(min(bx - 6, pitch.LENGTH - 30), 0)
-    span = pitch.LENGTH + pitch.PAD + 1 - x0
-    cy = (by + pitch.MID_Y) / 2
+    x1 = pitch.LENGTH + pitch.PAD + 1
+    y0, y1 = min(by - 6, pitch.MID_Y - pitch.BOX_HALF - 3), max(by + 6, pitch.MID_Y + pitch.BOX_HALF + 3)  # the whole box in view
     fig = go.Figure()
     top = {"xaxis": "x", "yaxis": "y"}
     for shape in pitch.pitch_shapes(t):
@@ -665,7 +666,7 @@ def freekick_figure(feed: dict, event_id: str, theme="dark", width: int | None =
                              marker={"size": 13, "color": t["ball"], "line": {"color": t["actor"], "width": 3}}, **top))
     fig.add_annotation(x=bx, y=by, text=f"<b>{dist:.0f} m</b> to goal", showarrow=True, arrowhead=0, ax=-40, ay=-26, arrowcolor=t["actor"],
                        font={"color": t["actor"], "size": 13}, bgcolor=t["paper"])
-    fig.add_annotation(x=x0 + 1, y=cy - span * 0.48 + 1, xanchor="left", yanchor="bottom", showarrow=False, font={"color": t["muted"], "size": 11},
+    fig.add_annotation(x=0, y=-0.75, xref="x2", yref="y2", xanchor="center", yanchor="top", showarrow=False, font={"color": t["muted"], "size": 12},
                        text=(f"Wall: {len(defenders)} (dotted rings)" if defenders else "No wall in the freeze frame") + ". Dotted circle: 9.15 m")
     bh, bz = _goal_face(fig, a, t, "x2", "y2")
     s = a.get("score", {"home": 0, "away": 0})
@@ -673,15 +674,15 @@ def freekick_figure(feed: dict, event_id: str, theme="dark", width: int | None =
         title_text=_title(f"{a.get('minute_label', '')}  {teams['home']} {s['home']}-{s['away']} {teams['away']}",
                           f"Direct free kick: {teams[a['team']]} {_who(a)}, {dist:.0f} m out, xG {shot.get('xg', 0):.2f}, {_lower(OUTCOMES[o][0])}. "
                           "Left: from above; right: the goal seen from behind the taker"),
-        xaxis={"domain": [0, 0.5], "range": [x0, x0 + span], "visible": False, "fixedrange": True, "constrain": "domain"},
-        yaxis={"domain": [0, 1], "range": [cy - span * 0.48, cy + span * 0.48], "visible": False, "fixedrange": True, "scaleanchor": "x", "scaleratio": 1, "constrain": "domain"},
+        xaxis={"domain": [0, 0.5], "range": [x0, x1], "visible": False, "fixedrange": True, "constrain": "domain"},
+        yaxis={"domain": [0, 1], "range": [y0, y1], "visible": False, "fixedrange": True, "scaleanchor": "x", "scaleratio": 1, "constrain": "domain"},
         xaxis2={"domain": [0.53, 1], "range": [-6, 6], "visible": False, "fixedrange": True, "constrain": "domain"},
-        yaxis2={"domain": [0.2, 0.8], "range": [-0.6, 3.6], "visible": False, "fixedrange": True, "scaleanchor": "x2", "scaleratio": 1, "constrain": "domain"},
+        yaxis2={"domain": [0.2, 0.8], "range": [-1.6, 3.6], "visible": False, "fixedrange": True, "scaleanchor": "x2", "scaleratio": 1, "constrain": "domain"},
         paper_bgcolor=t["paper"], plot_bgcolor=t["paper"], font={"family": t["font"], "color": t["text"], "size": 13}, showlegend=False, hovermode="closest",
         margin={"l": 10, "r": 10, "t": 72, "b": 10}, title={"x": 0.02, "xanchor": "left", "font": {"size": 17}},
         meta={"distance_m": round(dist, 1), "wall_ids": sorted(wall_ids), "ball_h": round(bh, 2), "ball_z": bz})
     if width:
-        fig.update_layout(width=width, height=round(width * 0.5) + 82)
+        fig.update_layout(width=width, height=round(width * 0.5 * (y1 - y0) / (x1 - x0)) + 82)
     return fig
 
 
