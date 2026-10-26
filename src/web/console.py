@@ -294,13 +294,19 @@ def writing_trace(doc: dict, read_only: bool) -> list:
     return out + ([folded] if folded is not None else [])
 
 
+def head_meta(card: dict) -> str:
+    """The line under the card's heading: "Varleigh · 4-2 before the goal · v1"."""
+    sb = card.get("score_before") or {}
+    when = "before the goal" if card.get("moment") == "goal" else "at the time"
+    return " · ".join([card.get("team_name", ""), f"{sb.get('home', 0)}-{sb.get('away', 0)} {when}", f"v{card.get('version', 1)}"])
+
+
 def card_head(card: dict | None, read_only: bool = False) -> html.Div:
     """The heading of the selected card: minute, moment, player, its badges, and what the feed changed on it."""
     if card is None:
         return html.Div()
-    sb = card.get("score_before", {})
     return html.Div([html.H2(f"{card.get('minute_label', '')} {MOMENTS.get(card.get('moment'), card.get('moment'))}: {card.get('player', {}).get('name', '')}"),
-                     html.Div([html.Span(f"{card.get('team_name', '')}, score before {sb.get('home', 0)}-{sb.get('away', 0)}, priority {card.get('value_pts', 0)}, version {card.get('version', 1)}", className="muted"),
+                     html.Div([html.Span(head_meta(card), className="muted"),
                                *badges(card)], className="detail-meta"),
                      *corrections(card, show_margin=not read_only)], className="detail-head")
 

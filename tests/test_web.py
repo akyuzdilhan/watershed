@@ -1002,6 +1002,14 @@ def test_the_headline_story_is_the_first_card_pulled_off_air_else_the_highest_va
     assert console.default_pick([{"id": "w", "status": "pending"}, *pulled], final=True) == "w"  # a card waiting for a producer comes first
 
 
+def test_the_card_heading_says_team_score_before_and_version_without_priority():
+    card = {"id": "x", "minute_label": "88'", "moment": "goal", "team_name": "Varleigh", "score_before": {"home": 4, "away": 2}, "value_pts": 0, "version": 1,
+            "player": {"name": "Joaquim Kosznik"}, "status": "approved"}
+    text = texts_in(console.card_head(card))
+    assert "Varleigh · 4-2 before the goal · v1" in text and "priority" not in text and "version" not in text
+    assert "4-2 at the time" in console.head_meta(dict(card, moment="save", version=2)) and console.head_meta(dict(card, version=2)).endswith("v2")
+
+
 def test_readable_labels_for_fact_types_fields_and_audit_actions(desk):
     assert console.fact_label("ht-lead-lost") == "Half-time lead lost" and console.fact_label("ht-lead-lost-away-2") == "Half-time lead lost"
     assert console.fact_label("stat-of-the-match") == "Stat of the match" and console.fact_label("xg-ft-home-5") == "Full-time xG"
