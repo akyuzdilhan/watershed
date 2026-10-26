@@ -1570,6 +1570,27 @@ def test_the_intro_points_at_the_first_card_pulled_off_air(desk):
     assert console.intro_target(MATCH, fake) == ("See the VAR retraction (63')", {}, goal["id"])
 
 
+def test_the_var_retraction_button_shows_only_once_the_retraction_happened(desk):
+    goal = card_at(desk, "63'")
+    retracted = next(e for e in desk.audit(MATCH) if e.get("card_id") == goal["id"] and e.get("action") == "retracted")
+    t = console.retraction_x(MATCH, goal["id"])
+    points, _, breaks = console.axis(desk.state(MATCH)["wp_timeline"])
+    assert t == console.label_x(retracted["minute_label"], points, breaks) + 0.5 and console.retraction_x(MATCH, None) is None
+    card = {"id": goal["id"], "t": t}
+    end = 96
+    assert console.intro_var_shown(None, end, True, card) and console.intro_var_shown(end, end, True, card)  # full time, stopped
+    assert not console.intro_var_shown(end, end, False, {"id": goal["id"], "t": None})  # no retraction minute: only at full time, stopped
+    assert not console.intro_var_shown(10, end, True, card) and not console.intro_var_shown(10, end, False, card)  # before the retraction: no spoiler
+    assert console.intro_var_shown(t + 1, end, False, card) and console.intro_var_shown(t + 1, end, True, card)  # past it, playing or paused
+    assert not console.intro_var_shown(None, end, True, None)
+    label, data = console.intro_card(MATCH, type("S", (), {"cards": lambda self, m: [dict(c, status="retracted", retracted_on_air=True) if c["id"] == goal["id"] else c for c in desk.cards(m)],
+                                                         "audit": lambda self, m: desk.audit(m), "state": lambda self, m: desk.state(m)})())
+    assert label == "See the VAR retraction (63')" and data == card
+    for part in ("value >= max", "paused !== false", "value >= card.t"):
+        assert part in console.INTRO_VAR_SHOW
+    assert "card.id" in console.INTRO_RETRACTION
+
+
 def test_insights_on_a_moment_never_come_from_later_in_the_match():
     from web.panels import tied_insights
 

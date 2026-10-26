@@ -1230,7 +1230,15 @@ INTRO = ("Every match tells a story no other match tells. Watershed finds it liv
 # The intro's Replay the match: the replay from kick-off, playing (the state `REPLAY_STEP` leaves after Play), on the desk
 INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk', true]; }"
 # The intro's VAR retraction: the desk as it stands (the replay stopped at its right end), that card selected
-INTRO_RETRACTION = "function(n, cardId, max) { if (!cardId) { return window.dash_clientside.no_update; } return [cardId, max, null, true, 'Play', 'desk']; }"
+INTRO_RETRACTION = "function(n, card, max) { if (!card || !card.id) { return window.dash_clientside.no_update; } return [card.id, max, null, true, 'Play', 'desk']; }"
+# The intro's VAR retraction is shown once the retraction has happened: the replay stopped at its right end (full time), or its minute at or past the
+# retraction (`card.t`, where `replay` places it); hidden before, so the replay never gives it away. `intro_var_shown` says the same in Python.
+INTRO_VAR_SHOW = """function(value, paused, card, max) {
+    if (!card || !card.id) { return {"display": "none"}; }
+    var end = value === null || value === undefined || value >= max;
+    var past = card.t !== null && card.t !== undefined && value !== null && value !== undefined && value >= card.t;
+    return (end && paused !== false) || past ? {} : {"display": "none"};
+}"""
 INTRO_HIDE = "function(closed) { return closed ? {'display': 'none'} : {}; }"
 INTRO_REPLAY_LABELS = ("Replay the match", "Restart the replay")
 # The intro's replay button while the replay plays (its interval running): it starts it again from kick-off
@@ -1255,6 +1263,31 @@ def intro_target(match_id: str | None, store=None) -> tuple[str, dict, str | Non
         return "See the VAR retraction", {"display": "none"}, None
     card = headline_card(pulled)
     return f"See the VAR retraction ({card.get('minute_label', '')})", {}, card["id"]
+
+
+def retraction_x(match_id: str | None, card_id: str | None, store=None) -> float | None:
+    """Where the feed retracted the card on the replay's axis, as `replay` places it (mid-minute); None without a retraction in the audit."""
+    store = store or get_store()
+    if not match_id or not card_id:
+        return None
+    entry = next((e for e in store.audit(match_id) if e.get("card_id") == card_id and e.get("action") == "retracted" and e.get("by") == "feed"), None)
+    points, _, breaks = axis(((store.state(match_id) or {}).get("wp_timeline")) or [])
+    x = label_x((entry or {}).get("minute_label"), points, breaks)
+    return None if x is None else x + 0.5
+
+
+def intro_card(match_id: str | None, store=None) -> tuple[str, dict | None]:
+    """(label, card) of the intro's retraction button: the card's id and the minute of its retraction (`retraction_x`), for `INTRO_VAR_SHOW`; None when the match has none."""
+    label, _, card_id = intro_target(match_id, store)
+    return label, ({"id": card_id, "t": retraction_x(match_id, card_id, store)} if card_id else None)
+
+
+def intro_var_shown(value: float | None, max_: float, paused: bool | None, card: dict | None) -> bool:
+    """`INTRO_VAR_SHOW` in Python: the retraction button shows at full time with the replay stopped, or at or past the retraction's minute."""
+    if not card or not card.get("id"):
+        return False
+    end = value is None or value >= max_
+    return (end and paused is not False) or (card.get("t") is not None and value is not None and value >= card["t"])
 
 
 def layout(user: str | None) -> html.Div:
@@ -1483,7 +1516,9 @@ def register(app) -> None:
                  State("c-rundown", "value"))(_approve_styles_cb)
     app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
                  State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"), Input("c-replay-tick", "disabled"), Input("c-follow", "data"))(_context_cb)
-    app.callback(Output("c-intro-var", "children"), Output("c-intro-var", "style"), Output("c-intro-card", "data"), Input("c-p-match", "data"))(lambda m: intro_target(m))
+    app.callback(Output("c-intro-var", "children"), Output("c-intro-card", "data"), Input("c-p-match", "data"))(lambda m: intro_card(m))
+    app.clientside_callback(INTRO_VAR_SHOW, Output("c-intro-var", "style"), Input("c-replay-t", "value"), Input("c-replay-tick", "disabled"), Input("c-intro-card", "data"),
+                            State("c-replay-t", "max"))
     app.clientside_callback("function(n) { return true; }", Output("c-intro-closed", "data"), Input("c-intro-close", "n_clicks"), prevent_initial_call=True)
     app.clientside_callback(INTRO_HIDE, Output("c-intro", "style"), Input("c-intro-closed", "data"))
     app.clientside_callback(INTRO_REPLAY_LABEL, Output("c-intro-replay", "children"), Input("c-replay-tick", "disabled"))
