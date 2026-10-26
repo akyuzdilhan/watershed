@@ -21,6 +21,10 @@ param foundryProjectEndpoint string = ''
 
 param foundryModel string = 'gpt-5.4-nano'
 param foundryReasoningEffort string = 'medium'
+@description('Output budget per model call of the Writer, reasoning included; the recap writer has its own effort and budget (at medium effort the recap reasoned through its whole budget in the live run of 26/10).')
+param foundryMaxTokens string = '5000'
+param foundryRecapReasoningEffort string = 'low'
+param foundryRecapMaxTokens string = '6000'
 
 @description('Role granted to the worker on the Foundry account. Default: Foundry User (formerly Azure AI User), the role Microsoft documents for calling models through a Foundry project.')
 param foundryRoleId string = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
@@ -463,6 +467,18 @@ var workerEnv = [
   {
     name: 'FOUNDRY_REASONING_EFFORT'
     value: foundryReasoningEffort
+  }
+  {
+    name: 'FOUNDRY_MAX_TOKENS'
+    value: foundryMaxTokens
+  }
+  {
+    name: 'FOUNDRY_RECAP_REASONING_EFFORT'
+    value: foundryRecapReasoningEffort
+  }
+  {
+    name: 'FOUNDRY_RECAP_MAX_TOKENS'
+    value: foundryRecapMaxTokens
   }
   {
     // Appended to the worker command by src/worker/Dockerfile

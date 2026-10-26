@@ -478,6 +478,7 @@ class RecapWriter(AgentWriter):
 
     instructions = RECAP_INSTRUCTIONS
     agent_name = "recap-writer"
+    env_prefix = "FOUNDRY_RECAP"  # its own effort and output budget: at medium effort the recap spent its whole budget reasoning
 
     def tool(self):
         from agent_framework import tool

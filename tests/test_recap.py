@@ -287,12 +287,25 @@ def test_the_margin_in_var_decision_is_never_copied_into_the_recap(demo):
 
 # --- the instructions and the model's replies ------------------------------------------------------------
 
+def test_the_recap_writer_takes_its_own_effort_and_budget(monkeypatch):
+    for key in ("FOUNDRY_REASONING_EFFORT", "FOUNDRY_MAX_TOKENS", "FOUNDRY_RECAP_REASONING_EFFORT", "FOUNDRY_RECAP_MAX_TOKENS"):
+        monkeypatch.delenv(key, raising=False)
+    assert (RecapWriter(model="m", agent=object()).max_tokens, RecapWriter(model="m", agent=object()).effort) == (3000, None)
+    monkeypatch.setenv("FOUNDRY_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("FOUNDRY_MAX_TOKENS", "5000")
+    assert (RecapWriter(model="m", agent=object()).max_tokens, RecapWriter(model="m", agent=object()).effort) == (5000, "medium")
+    monkeypatch.setenv("FOUNDRY_RECAP_REASONING_EFFORT", "low")
+    monkeypatch.setenv("FOUNDRY_RECAP_MAX_TOKENS", "6000")
+    recap = RecapWriter(model="m", agent=object())
+    assert (recap.max_tokens, recap.effort) == (6000, "low") and recap.config["max_tokens"] == 6000
+
+
 def test_recap_instructions_follow_the_templates():
     assert "25 cm" not in RECAP_INSTRUCTIONS and "the margin when given" not in RECAP_INSTRUCTIONS and "80 words" not in RECAP_INSTRUCTIONS
     assert "offside by a whisker" in RECAP_INSTRUCTIONS and "clear offside" in RECAP_INSTRUCTIONS and "never give a margin" in RECAP_INSTRUCTIONS
     assert all(f"at most {limit} words" in RECAP_INSTRUCTIONS for limit in MAX_WORDS.values()) and not re.search(r"<\w+_words>", RECAP_INSTRUCTIONS)
     assert "provisionally 14th" in RECAP_INSTRUCTIONS and EM_DASH not in RECAP_INSTRUCTIONS
-    assert inspect.signature(RecapWriter).parameters["max_tokens"].default == 3000
+    assert inspect.signature(RecapWriter).parameters["max_tokens"].default is None  # 3000 unless FOUNDRY_RECAP_MAX_TOKENS or FOUNDRY_MAX_TOKENS says otherwise
 
 
 class ScriptedWriter:

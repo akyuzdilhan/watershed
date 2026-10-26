@@ -1325,16 +1325,21 @@ class AgentWriter:
 
     instructions = ""
     agent_name = ""
+    env_prefix = "FOUNDRY"  # <prefix>_REASONING_EFFORT and <prefix>_MAX_TOKENS, then the FOUNDRY_ ones
 
-    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int = 3000, agent: Any = None, timeout_s: float = MODEL_TIMEOUT_S) -> None:
+    def __init__(self, model: str | None = None, effort: str | None = None, max_tokens: int | None = None, agent: Any = None, timeout_s: float = MODEL_TIMEOUT_S) -> None:
         self.model = model or os.environ["FOUNDRY_MODEL"]
         self.name = self.model
-        self.effort = effort or os.environ.get("FOUNDRY_REASONING_EFFORT") or None
-        self.max_tokens = max_tokens
+        self.effort = effort or self.setting("REASONING_EFFORT") or None
+        self.max_tokens = max_tokens or int(self.setting("MAX_TOKENS") or 3000)
         self.timeout_s = timeout_s
         self.facts: dict[str, tuple[dict, dict]] = {}
         self.last_call: dict | None = None
         self.agent = agent if agent is not None else self._foundry_agent()
+
+    def setting(self, key: str) -> str | None:
+        """An environment setting of this writer: `<env_prefix>_<key>`, else `FOUNDRY_<key>`."""
+        return os.environ.get(f"{self.env_prefix}_{key}") or os.environ.get(f"FOUNDRY_{key}")
 
     def tool(self):
         """The function tool the agent calls for its facts."""
