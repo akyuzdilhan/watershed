@@ -1245,10 +1245,11 @@ def test_the_desk_draws_a_short_build_up_with_where_the_ball_was_won_off_the_pit
         won = next(a for a in fig.layout.annotations if a.name == "won")
         assert won.xref == won.yref == "paper" and won.showarrow is False and won.y == 0  # a line under the pitch, never over the numbered dots
         assert "Won here" in won.text or "Possession starts here" in won.text
-    out, _ = console.context(MATCH, next(c for c in feed_desk.cards(MATCH) if c.get("shot_event_id", c.get("event_id")) == long["event_id"])["id"], "en", None, feed_desk) \
-        if any(c.get("shot_event_id", c.get("event_id")) == long["event_id"] for c in feed_desk.cards(MATCH)) else (None, None)
-    if out is not None:
-        assert len(find(out, lambda c: type(c).__name__ == "Graph")[0].figure.layout.meta["buildup"]) == panels.COMPACT_BUILDUP
+    goal = card_at(feed_desk, "63'")
+    out, _ = console.context(MATCH, goal["id"], "en", None, feed_desk)  # under the desk's curve: the compact one
+    shown = find(out, lambda c: type(c).__name__ == "Graph")[0].figure.layout
+    assert shown.meta["buildup"] == panels.graphic_figure(feed, "buildups", goal["shot_event_id"], compact=True).layout.meta["buildup"]
+    assert len(shown.meta["buildup"]) <= panels.COMPACT_BUILDUP and "Numbered in order" not in shown.title.text  # the key is in the note under it
 
 
 def graphics_moments(feed: dict) -> list[dict]:
