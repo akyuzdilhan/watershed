@@ -1318,6 +1318,19 @@ def usage_of(details: Any) -> dict:
     return {"input_tokens": d.get("input_token_count"), "output_tokens": d.get("output_token_count"), "reasoning_tokens": d.get("reasoning_output_token_count")}
 
 
+def foundry_client(model: str, function_invocation_configuration: dict | None = None):
+    """A Foundry chat client (Responses API) with the worker's credential: managed identity in Azure, az login locally; no retry inside the OpenAI client."""
+    from agent_framework.foundry import FoundryChatClient
+    from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
+
+    credential = ChainedTokenCredential(ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID")), AzureCliCredential())
+    client = FoundryChatClient(project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"], model=model, credential=credential,
+                               function_invocation_configuration=function_invocation_configuration)
+    if hasattr(getattr(client, "client", None), "with_options"):
+        client.client = client.client.with_options(max_retries=0)  # the OpenAI client would retry a 429 or a 5xx itself
+    return client
+
+
 class AgentWriter:
     """What the Writer and the recap writer share: one Foundry agent with one function tool, a bounded tool loop (`TOOL_LOOP`), a time limit per call
     (`MODEL_TIMEOUT_S`), no retry inside the OpenAI client (a 429 or a 5xx goes straight to the template), and the trace of the last call (`last_call`:
@@ -1345,32 +1358,32 @@ class AgentWriter:
         """The function tool the agent calls for its facts."""
         raise NotImplementedError
 
-    def _foundry_agent(self):
-        from agent_framework import Agent
-        from agent_framework.foundry import FoundryChatClient
-        from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
+    def agent_tools(self) -> list:
+        """The tools the agent always has; a writer that brings its tools to each run (worker.mcp_writer) has none."""
+        return [self.tool()]
 
-        credential = ChainedTokenCredential(ManagedIdentityCredential(client_id=os.environ.get("AZURE_CLIENT_ID")), AzureCliCredential())  # managed identity in Azure, az login locally
-        client = FoundryChatClient(project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"], model=self.model, credential=credential,
-                                   function_invocation_configuration=dict(TOOL_LOOP))
-        if hasattr(getattr(client, "client", None), "with_options"):
-            client.client = client.client.with_options(max_retries=0)  # the OpenAI client would retry a 429 or a 5xx itself
+    def _foundry_agent(self, client: Any = None):
+        from agent_framework import Agent
+
         options: dict[str, Any] = {"max_tokens": self.max_tokens}  # GPT-5 models take no temperature
         if self.effort:
             options["reasoning"] = {"effort": self.effort}
-        return Agent(client=client, name=self.agent_name, instructions=self.instructions, tools=[self.tool()], default_options=options)
+        return Agent(client=client or foundry_client(self.model, dict(TOOL_LOOP)), name=self.agent_name, instructions=self.instructions, tools=self.agent_tools(),
+                     default_options=options)
 
     @property
     def config(self) -> dict:
         """`writer_config` of the trace."""
         return {"deployment": self.model, "effort": self.effort, "max_tokens": self.max_tokens, "prompt_sha": prompt_sha(self.instructions)}
 
-    async def run(self, prompt: str, max_tokens: int | None = None) -> str:
-        """One agent run within `timeout_s`; `max_tokens` raises the output budget of this run only. Keeps `last_call`, also when the run fails."""
+    async def run(self, prompt: str, max_tokens: int | None = None, tools: list | None = None) -> str:
+        """One agent run within `timeout_s`; `max_tokens` raises the output budget of this run only, `tools` are the tools of this run only.
+        Keeps `last_call`, also when the run fails."""
         self.last_call = {"finish_reason": None, "usage": usage_of(None), "latency_s": None}
         started = time.monotonic()
+        extra: dict[str, Any] = {"tools": tools} if tools is not None else {}
         try:
-            run = self.agent.run(prompt, options={"max_tokens": max_tokens}) if max_tokens else self.agent.run(prompt)
+            run = self.agent.run(prompt, options={"max_tokens": max_tokens}, **extra) if max_tokens else self.agent.run(prompt, **extra)
             response = await asyncio.wait_for(run, self.timeout_s)
         finally:
             self.last_call["latency_s"] = round(time.monotonic() - started, 3)

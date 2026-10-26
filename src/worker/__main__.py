@@ -5,6 +5,7 @@ Usage:
     python -m worker --live --cosmos                                                          # Service Bus in, Cosmos DB out
     python -m worker --live --cosmos --forever                                                # keep listening for new matches (container)
     python -m worker data/replay/demo-0007.jsonl.gz --history data/history/1                  # with the insight engine, against the league history
+    python -m worker data/replay/demo-0007.jsonl.gz --writer foundry --facts mcp              # the Writer reads its facts through the desk's MCP server
 Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment). With APPLICATIONINSIGHTS_CONNECTION_STRING set, the traces go to Application Insights (worker.telemetry).
 
 With a writer, the desk writes the cards and their duo with it, the insights and the storyline with the templates (unless --insights-writer writer), and at the final whistle the post-match recap (unless --no-recap): with --writer foundry, the recap agent on Foundry. Every model call of a match comes out of one budget of 40 (worker.desk).
@@ -55,10 +56,13 @@ def main() -> None:
     parser.add_argument("--history", type=Path, help="league history (data/history/<seed>/): surface insights against it")
     parser.add_argument("--league-seed", type=int, help="league season of the match (e.g. 9): write the pre-match storyline and the season context")
     parser.add_argument("--matchday", type=int, default=30, help="matchday of the match in that season")
+    parser.add_argument("--facts", choices=("local", "mcp"), default="local", help="with --writer foundry: the Writer reads get_moment from the desk's MCP server, in process")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    for noisy in ("azure", "agent_framework", "httpx"):  # the SDKs log every HTTP request, AMQP link change and tool call at INFO
+    for noisy in ("azure", "agent_framework", "httpx", "mcp"):  # the SDKs log every HTTP request, AMQP link change and tool call at INFO
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    if args.facts == "mcp" and args.writer != "foundry":
+        logging.warning("--facts mcp only changes --writer foundry")
 
     sink = MemorySink()
     if args.desk_dir:
@@ -81,6 +85,11 @@ def main() -> None:
 
             service_bus_settings()  # loads .env (Foundry endpoint and model)
             writer, recap_writer = FoundryWriter(), RecapWriter()
+            if args.facts == "mcp":
+                from worker.mcp_server import FactRegistry
+                from worker.mcp_writer import McpWriter
+
+                writer = McpWriter(FactRegistry())  # what the desk's MCP server serves
         desk = Desk(sink, writer, auto_approve=args.auto_approve, recap_writer=recap_writer,
                     insight_writer=TemplateWriter() if args.insights_writer == "template" else None)
     telemetry.configure()  # after the .env, when one is read above; nothing without APPLICATIONINSIGHTS_CONNECTION_STRING
@@ -128,6 +137,9 @@ def main() -> None:
         for t in recap["texts"]:
             print(f"           [{t['lang']}] {t['recap']}")
     print(f"{len(match.messages)} messages, {match.duplicates} duplicates dropped, {match.late} processed late; final score {match.score()}")
+    transports = getattr(getattr(desk, "writer", None), "transports", None)
+    if transports:
+        print(f"Writer facts: {transports['mcp']} through MCP, {transports['local']} local")
     if args.truth and isinstance(sink, MemorySink):
         spotter = next(iter(pipeline.spotters.values()))
         report = score_against_truth(spotter.cards, sink.audit, json.loads(args.truth.read_text(encoding="utf-8")))
