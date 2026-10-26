@@ -8,7 +8,9 @@ finish_reason, the latency, the HTTP 429 answers, the tokens and the cost. The t
 is still measured: the report says which numbers it cannot give, and infers the attempt of a model write from `verification.attempts`.
 
 The documents keep only their latest version, so the trace of an earlier version of a rewritten document is lost unless its audit entry
-holds it. The recap is run by hand (`python -m worker.recap`), outside the desk's cap of model calls per match, and is reported apart.
+holds it. The worker writes the recap at the final whistle, with what is left of the match's cap of model calls (`Desk.write_recap`); the
+report counts it in the cap and gives its calls apart. A recap rewritten by hand afterwards (`python -m worker.recap`) replaces that document.
+Audit entries without an `id` and documents without a `type` (the type is then inferred from the id) are read too.
 Token counts follow the Responses API: `output_tokens` already includes `reasoning_tokens`, so the cost is input and output tokens only.
 
 Usage:
@@ -28,7 +30,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-CALL_CAP = 40  # Desk(max_calls_per_match=40) in worker/desk.py: model calls a match may make for its cards, insights and storyline
+CALL_CAP = 40  # Desk(max_calls_per_match=40) in worker/desk.py: model calls a match may make for its cards, insights, storyline and recap
 DESK_TYPES = ("card", "insight", "storyline")
 TYPES = DESK_TYPES + ("recap",)
 RATE_LIMITED = re.compile(r"\b429\b|ratelimit|rate limit|too many requests", re.IGNORECASE)
@@ -90,7 +92,8 @@ def open_cosmos() -> dict:
 def load_cosmos(match_id: str, containers: dict | None = None) -> dict:
     """Documents and audit trail of one match in Cosmos DB: one query within the match's partition per container."""
     containers = containers or open_cosmos()
-    docs = [d for d in containers["cards"].query_items("SELECT * FROM c", partition_key=match_id) if d.get("type", "card") in TYPES]
+    docs = [dict(d, type=_type(d)) for d in containers["cards"].query_items("SELECT * FROM c", partition_key=match_id)]
+    docs = [d for d in docs if d["type"] in TYPES]
     audit = list(containers["audit"].query_items("SELECT * FROM c", partition_key=match_id))
     return {"match_id": match_id, "source": f"Cosmos DB, partition {match_id}", "found": ["cards", "audit"], "docs": docs, "audit": audit}
 
@@ -100,11 +103,24 @@ def load_cosmos(match_id: str, containers: dict | None = None) -> dict:
 
 def _kind(doc_id: str, by_id: dict) -> str:
     if doc_id in by_id:
-        return by_id[doc_id]["type"]
+        return _type(by_id[doc_id])
     for kind in TYPES:
         if doc_id.startswith(kind + "-"):
             return kind
     return "card"
+
+
+def _type(doc: dict) -> str:
+    """The document's type, or the one its id implies (`card-...`, `recap-...`, `storyline-...`), else "other" (left out of the report)."""
+    if doc.get("type"):
+        return doc["type"]
+    doc_id = str(doc.get("id") or "")
+    return next((kind for kind in TYPES if doc_id.startswith(kind + "-")), "other")
+
+
+def _audit_key(entry: dict):
+    """What tells a repeated audit line from another write: its id, or without one its document, version, writer and time."""
+    return entry.get("id") or (entry.get("card_id"), entry.get("version", 1), entry.get("by"), entry.get("at"))
 
 
 def _trace(holder: dict) -> dict:
@@ -128,10 +144,11 @@ def writes(run: dict) -> list[dict]:
     by_id = {d["id"]: d for d in run["docs"] if d.get("id")}
     out, seen, covered = [], set(), set()
     for entry in run["audit"]:
-        if entry.get("action") != "written" or entry.get("id") in seen:
+        key = _audit_key(entry)
+        if entry.get("action") != "written" or key in seen:
             continue
-        seen.add(entry.get("id"))
-        doc_id, version = entry.get("card_id", ""), entry.get("version", 1)
+        seen.add(key)
+        doc_id, version = entry.get("card_id") or "", entry.get("version", 1)
         trace = _trace(entry)
         doc = by_id.get(doc_id)
         duo_writer = None
@@ -142,10 +159,10 @@ def writes(run: dict) -> list[dict]:
         covered.add(doc_id)
         out.append(_record(_kind(doc_id, by_id), doc_id, version, entry.get("by"), entry.get("attempts"), entry.get("verified"), trace, duo_writer))
     for doc in run["docs"]:
-        if doc.get("id") in covered or doc["type"] not in TYPES or "writer" not in doc and "verification" not in doc:
+        if doc.get("id") in covered or _type(doc) not in TYPES or "writer" not in doc and "verification" not in doc:
             continue
         v = doc.get("verification") if isinstance(doc.get("verification"), dict) else {}
-        out.append(_record(doc["type"], doc.get("id", ""), doc.get("version", 1), doc.get("writer"), v.get("attempts"), v.get("verified"), _trace(doc),
+        out.append(_record(_type(doc), doc.get("id", ""), doc.get("version", 1), doc.get("writer"), v.get("attempts"), v.get("verified"), _trace(doc),
                            doc.get("duo_writer")))
     return out
 
@@ -280,8 +297,9 @@ def report(run: dict, price_in: float | None = None, price_out: float | None = N
           row("Cost (USD)", cost), ""]
     desk_calls = sum(r["attempts"] for r in records if r["type"] in DESK_TYPES)
     recap_calls = sum(r["attempts"] for r in records if r["type"] == "recap")
-    L += [f"Model calls of the desk (cards, insights, storyline) against the cap of {cap} per match: {desk_calls}/{cap}"
-          + (" (cap reached: later writes used the template)" if desk_calls >= cap else "") + f". Recap, outside the cap: {recap_calls}.", ""]
+    calls = desk_calls + recap_calls
+    L += [f"Model calls of the match against the cap of {cap} per match: {calls}/{cap}" + (" (cap reached: later writes used the template)" if calls >= cap else "")
+          + f"; cards, insights and storyline {desk_calls}, recap {recap_calls}.", ""]
     if price_in is not None and price_out is not None:
         L += [f"Prices used: {price_in} USD per million input tokens, {price_out} USD per million output tokens.", ""]
     else:

@@ -1,6 +1,6 @@
 """From the wire to the desk: one Match and one Spotter per match, and a sink that stores what they produce.
 
-The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription. With a desk, the desk writes every card, audits every card action once (the Spotter's action goes to the audit trail only when there is no desk), and at the final whistle writes the post-match recap from the cards as the store has them.
+The same pipeline runs on a replay file (offline, or as the fallback when Service Bus is down) and on the Service Bus subscription. With a desk, the desk writes every card, audits every card action once (the Spotter's action goes to the audit trail only when there is no desk), and at the final whistle writes the post-match recap from the cards as the store has them. Each draft and each card action of the desk runs in a span (`worker.telemetry`), recorded only when traces are configured.
 """
 
 import copy
@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from winprob.skellam import SkellamWinProb
+from worker import telemetry
 from worker.match import Match, make_model
 from worker.spotter import Spotter
 
@@ -332,14 +333,18 @@ class Pipeline:
                 card = spotter.cards[result["event_id"]]
                 if "action" in result:
                     if self.desk is not None:
-                        self.desk.on_action(card, result, teams)  # audits the action once, with its own fields, and stores the card
+                        with telemetry.span("desk.action", match_id=match.match_id, card_id=card["id"], kind=card["moment"], action=result["action"], cause=result.get("cause")) as s:
+                            self.desk.on_action(card, result, teams)  # audits the action once, with its own fields, and stores the card
+                            telemetry.annotate(s, **(telemetry.outcome(card) if result["action"] == "rewrite" else {"status": card.get("status"), "version": card.get("version")}))
                     else:
                         self.sink.action(result, card)
                 else:
                     self._season(match, card)
                     self.sink.card(result)
                     if self.desk is not None:
-                        self.desk.write(card, teams)
+                        with telemetry.span("desk.write", match_id=match.match_id, card_id=card["id"], kind=card["moment"]) as s:
+                            self.desk.write(card, teams)
+                            telemetry.annotate(s, **telemetry.outcome(card))
                 out.append(result)
             self._insights(match, spotter, m, teams)
             if hasattr(self.sink, "state") and (produced or m["type"] in ("period_end", "full_time", "correction") or len(timeline) % self.state_every == 0):
@@ -360,7 +365,9 @@ class Pipeline:
             seen = tuple(sorted((c["id"], c.get("status"), c.get("version", 1)) for c in cards))
             if only_if_changed and self._recapped.get(match.match_id) == seen:
                 return
-            self.recaps[match.match_id] = write(cards, match_state(match, spotter, timeline), self.storylines.get(match.match_id))
+            with telemetry.span("desk.write_recap", match_id=match.match_id, card_id=f"recap-{match.match_id}", kind="recap", cards=len(cards)) as s:
+                self.recaps[match.match_id] = write(cards, match_state(match, spotter, timeline), self.storylines.get(match.match_id))
+                telemetry.annotate(s, **telemetry.outcome(self.recaps[match.match_id]))
             self._recapped[match.match_id] = seen
         except Exception as error:  # the final whistle is processed, and the flush goes on, even if the recap fails
             log.warning("recap of %s failed: %s: %s", match.match_id, type(error).__name__, str(error)[:300])
@@ -384,7 +391,7 @@ class Pipeline:
             if store is not None:
                 store(doc)
             if needs_text and write is not None:
-                write(doc, teams)
+                self._write_insight(write, doc, teams)
                 if store is not None:
                     store(doc)  # the texts and the status the desk set, whether or not it stored them itself
 
@@ -429,9 +436,16 @@ class Pipeline:
         store = getattr(self.sink, "insight", None)
         write = getattr(self.desk, "write_insight", None) if self.desk is not None else None
         if write is not None:
-            write(doc, teams)
+            self._write_insight(write, doc, teams)
         if store is not None:
             store(doc)
+
+    @staticmethod
+    def _write_insight(write, doc: dict, teams: dict[str, str]) -> None:
+        """The desk's draft of an insight or of the storyline, in a span."""
+        with telemetry.span("desk.write_insight", match_id=doc.get("match_id"), card_id=doc.get("id"), kind=doc.get("kind") or doc.get("type")) as s:
+            write(doc, teams)
+            telemetry.annotate(s, **telemetry.outcome(doc))
 
     def insights(self, match_id: str) -> list[dict]:
         """Every insight written for a match, superseded ones included."""
