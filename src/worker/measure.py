@@ -111,8 +111,11 @@ def _kind(doc_id: str, by_id: dict) -> str:
 
 
 def _type(doc: dict) -> str:
-    """The document's type, or the one its id implies (`recap-...`, `storyline-...`), else a card."""
-    return doc.get("type") or _kind(str(doc.get("id") or ""), {})
+    """The document's type, or the one its id implies (`card-...`, `recap-...`, `storyline-...`), else "other" (left out of the report)."""
+    if doc.get("type"):
+        return doc["type"]
+    doc_id = str(doc.get("id") or "")
+    return next((kind for kind in TYPES if doc_id.startswith(kind + "-")), "other")
 
 
 def _audit_key(entry: dict):

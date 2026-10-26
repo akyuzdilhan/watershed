@@ -165,6 +165,6 @@ def test_audit_entries_without_an_id_and_documents_without_a_type_are_counted(de
 
 def test_cosmos_documents_without_a_type_are_typed_from_their_id(desk):
     local = measure.load_local(desk)
-    docs = [{k: v for k, v in d.items() if k != "type"} for d in local["docs"]]
+    docs = [{k: v for k, v in d.items() if k != "type"} for d in local["docs"]] + [{"id": "state-m-1", "match_id": "m-1"}]  # the match state: no desk type
     run = measure.load_cosmos("m-1", {"cards": FakeContainer(docs), "audit": FakeContainer(local["audit"])})
     assert sorted(d["type"] for d in run["docs"]) == ["card", "card", "card", "insight", "recap", "storyline"]
