@@ -296,6 +296,12 @@ def test_the_shot_map_picker_offers_teams_and_halves(demo_feed):
     assert panels.graphic_figure(demo_feed, "shots", None).layout.meta["filter"] == {"team": None, "half": None}
 
 
+def test_the_momentum_picker_sets_the_slice(demo_feed):
+    items = panels.graphic_items(demo_feed, "momentum")
+    assert [o["value"] for o in items] == ["slice:5", "slice:3", "slice:1"] and items[0]["label"] == "5-minute bars"
+    assert [panels.graphic_figure(demo_feed, "momentum", v).layout.meta["minutes"] for v in ("slice:1", "slice:3", None)] == [1, 3, 5]
+
+
 def test_the_former_pressing_figure_is_named_for_what_it_counts(demo_feed):
     fig = graphics.pressing_figure(demo_feed)
     assert fig.layout.title.text.startswith("<b>Opponents near the ball</b>") and f"within {tactics.PRESS_RADIUS_M:g} m of the opponent on the ball" in fig.layout.title.text

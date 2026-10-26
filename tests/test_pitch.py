@@ -203,7 +203,26 @@ def test_momentum_bars_sum_the_threat_added_and_carry_the_curve(demo_feed):
     assert [t.type for t in fig.data] == ["bar", "bar", "scatter", "scatter", "scatter"]
     xs = list(fig.data[2].x)
     assert xs == sorted(xs)  # the second half continues after the first-half added time
-    assert len(graphics.momentum_figure(demo_feed, None).data) == 2
+    assert [t.type for t in graphics.momentum_figure(demo_feed, None).data] == ["bar", "bar", "scatter", "scatter"]  # bars and the rolling averages
+
+
+def test_momentum_marks_goals_var_and_red_cards_and_takes_the_slice(demo_feed):
+    marks = graphics.match_marks(demo_feed)
+    assert [m["kind"] for m in marks].count("goal") == 7 and [m["kind"] for m in marks].count("voided") == 2 and [m["kind"] for m in marks].count("red") == 1
+    labels = [m["label"] for m in marks]
+    assert "1-2 52'" in labels and "5-2 88'" in labels and "× 63' VAR" in labels and "78' red card" in labels
+    fig = graphics.momentum_figure(demo_feed, None, minutes=3)
+    dashes = [s.line.dash for s in fig.layout.shapes if s.name in ("goal", "voided", "red")]
+    assert dashes.count("solid") == 7 and dashes.count("dash") == 2 and dashes.count("dot") == 1  # told apart by the dash, not only the colour
+    texts = [a.text for a in fig.layout.annotations]
+    assert "<b>1-2 52'</b>" in texts and "HT" in texts
+    goal_colors = {s.line.color for s in fig.layout.shapes if s.name == "goal"}
+    assert goal_colors == {pitch.THEMES["dark"]["home"], pitch.THEMES["dark"]["away"]}  # the scorer's colour
+    assert fig.layout.meta["minutes"] == 3 and fig.layout.meta["window"] == 5 and fig.data[0].width == pytest.approx(3 * 0.85)
+    roll = graphics.rolling_threat(graphics.momentum_series(demo_feed, 5)["home"], 5, 0.0, 3)
+    first = [p["threat"] for p in graphics.momentum_series(demo_feed, 5)["home"] if p["period"] == 1][:2]
+    assert roll[0][1] == pytest.approx(sum(first) / 2, abs=1e-3)  # centred window, cut at the start of the period
+    assert graphics.label_rows([10, 12, 30, 31, 33], 7.5) == [0, 1, 0, 1, 2]
 
 
 def test_penalty_and_direct_free_kick_views():

@@ -278,6 +278,10 @@ def set_pieces_map(feed: dict, team: str, theme="dark", width: int | None = 900)
 
 # --- momentum ---------------------------------------------------------------------------------------
 
+RED_CARDS = {"red", "second_yellow"}
+MOMENTUM_SLICES = (5, 3, 1)  # minutes per bar offered in the picker
+
+
 def _first_half_extra(feed: dict) -> float:
     top = max((a["clock_s"] for a in feed["actions"] if a.get("period") == 1), default=2700.0)
     return max(0.0, (top - 2700.0) / 60)
@@ -287,8 +291,12 @@ def _x(period: int, clock_s: float, extra: float) -> float:
     return clock_s / 60 + (extra if period and period >= 2 else 0.0)
 
 
+def _minute_axis(extra: float) -> dict:
+    return {"tickvals": [0, 15, 30, 45] + [m + extra for m in (60, 75, 90)], "ticktext": ["0'", "15'", "30'", "45'", "60'", "75'", "90'"], "gridcolor": "rgba(148,163,184,0.15)"}
+
+
 def momentum_series(feed: dict, minutes: int = 5) -> dict:
-    """Threat added and xG per slice of `minutes` per team: `{home: [{x, threat, xg}], away: [...]}`, x the slice's start on a continuous minute axis. Shots VAR ruled out are not in the xG."""
+    """Threat added and xG per slice of `minutes` per team: `{home: [{x, period, index, threat, xg}], away: [...]}`, x the slice's middle on a continuous minute axis. Shots VAR ruled out are not in the xG."""
     extra = _first_half_extra(feed)
     out = {}
     for side in ("home", "away"):
@@ -296,49 +304,116 @@ def momentum_series(feed: dict, minutes: int = 5) -> dict:
         threat = {(b["period"], b["index"]): b for b in T.per_bucket(mine, lambda a: max(T.threat_added(a), 0.0), minutes, sum)}
         xg = {(b["period"], b["index"]): b for b in T.per_bucket([a for a in mine if a.get("shot") and not a.get("voided")], lambda a: a["shot"]["xg"], minutes, sum)}
         keys = sorted(set(threat) | set(xg))
-        out[side] = [{"x": _x(p, T.PERIOD_START_S.get(p, 0) + k * minutes * 60, extra) + minutes / 2, "period": p, "threat": round(threat.get((p, k), {}).get("value", 0.0), 4),
+        out[side] = [{"x": _x(p, T.PERIOD_START_S.get(p, 0) + k * minutes * 60, extra) + minutes / 2, "period": p, "index": k, "threat": round(threat.get((p, k), {}).get("value", 0.0), 4),
                       "xg": round(xg.get((p, k), {}).get("value", 0.0), 3)} for p, k in keys]
     return out
 
 
+def rolling_threat(series: list[dict], minutes: int, extra: float, window: int) -> list[tuple[float, float]]:
+    """(x, mean threat of the `window` slices centred on it) for every slice of every period, empty slices counted as 0, the mean taken within a period."""
+    out = []
+    for period in sorted({p["period"] for p in series}):
+        vals = {p["index"]: p["threat"] for p in series if p["period"] == period}
+        dense = [vals.get(k, 0.0) for k in range(max(vals) + 1)]
+        half = window // 2
+        for k in range(len(dense)):
+            part = dense[max(0, k - half):k + half + 1]
+            out.append((_x(period, T.PERIOD_START_S.get(period, 0) + k * minutes * 60, extra) + minutes / 2, round(sum(part) / len(part), 4)))
+    return out
+
+
+def match_marks(feed: dict) -> list[dict]:
+    """Goals (counted, labelled with the score after them, or ruled out by VAR) and red cards, in match order: `{kind, label, team, period, clock_s, minute_label, event_id}`."""
+    score = {"home": 0, "away": 0}
+    out = []
+    for a in feed["actions"]:
+        if T.any_goal(a):
+            if a.get("voided"):
+                out.append({"kind": "voided", "label": f"× {a.get('minute_label', '')} VAR"})
+            else:
+                score[a["team"]] += 1
+                out.append({"kind": "goal", "label": f"{score['home']}-{score['away']} {a.get('minute_label', '')}"})
+        elif a.get("card") in RED_CARDS:
+            out.append({"kind": "red", "label": f"{a.get('minute_label', '')} red card"})
+        else:
+            continue
+        out[-1].update(team=a["team"], period=a.get("period", 1), clock_s=a["clock_s"], minute_label=a.get("minute_label", ""), event_id=a["event_id"])
+    return out
+
+
+def label_rows(xs: list[float], gap: float) -> list[int]:
+    """A row per label, so that two labels on one row are at least `gap` apart (xs in increasing order)."""
+    last: list[float] = []
+    out = []
+    for x in xs:
+        k = next((i for i, v in enumerate(last) if x - v >= gap), len(last))
+        if k == len(last):
+            last.append(x)
+        else:
+            last[k] = x
+        out.append(k)
+    return out
+
+
+def _vmarks(fig: go.Figure, marks: list[dict], t: dict, extra: float, ceiling: float, step: float, yref: str = "y") -> int:
+    """Goal and red-card lines from -`ceiling` to `ceiling`, home labels above, away labels below, one row every `step`; returns the number of rows used."""
+    rows = 0
+    for side, sign in (("home", 1), ("away", -1)):
+        mine = [m for m in marks if m["team"] == side]
+        xs = [_x(m["period"], m["clock_s"], extra) for m in mine]
+        for m, x, row in zip(mine, xs, label_rows(xs, 7.5)):
+            rows = max(rows, row + 1)
+            color = t["text"] if m["kind"] == "red" else t[side]
+            fig.add_shape(type="line", x0=x, x1=x, y0=-ceiling, y1=ceiling, yref=yref, name=m["kind"],
+                          line={"color": color, "width": 2 if m["kind"] == "goal" else 1.5, "dash": {"goal": "solid", "voided": "dash", "red": "dot"}[m["kind"]]})
+            fig.add_annotation(x=x, y=sign * (ceiling + step * row), yref=yref, text=f"<b>{m['label']}</b>" if m["kind"] == "goal" else m["label"], showarrow=False,
+                               yanchor="bottom" if sign > 0 else "top", font={"size": 11, "color": color}, bgcolor=t["paper"], name=m["kind"])
+    return rows
+
+
 def momentum_figure(feed: dict, timeline: list[dict] | None = None, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
-    """Mirrored bars of threat added per `minutes` (home up, away down), goals marked, and the win-probability curve in a second panel with its own axis."""
+    """Mirrored bars of threat added per `minutes` (home up, away down) under a rolling average line per team; goals as vertical lines in the scorer's colour with the score (dashed with a cross when VAR ruled them out), red cards dotted, half-time marked; the desk's win probability on a right-hand axis when a `timeline` is given (the home team's, the draw and the away win in its hover)."""
     t = _t(theme)
     teams = team_names(feed.get("info"))
     extra = _first_half_extra(feed)
     series = momentum_series(feed, minutes)
-    rows = 2 if timeline else 1
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.55, 0.45] if rows == 2 else [1.0],
-                        subplot_titles=[f"Threat added per {minutes} minutes", "Win probability"][:rows])
+    window = max(3, round(15 / minutes))
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    top = max([abs(p["threat"]) for s in series.values() for p in s] + [0.1])
     for side, sign in (("home", 1), ("away", -1)):
         pts = series[side]
-        fig.add_trace(go.Bar(x=[p["x"] for p in pts], y=[sign * p["threat"] for p in pts], name=f"{teams[side]} threat", marker={"color": t[side], "line": {"width": 0}},
-                             width=minutes * 0.85, customdata=[[p["threat"], p["xg"]] for p in pts],
-                             hovertemplate=f"{teams[side]}<br>threat added %{{customdata[0]:.2f}}<br>shots xG %{{customdata[1]:.2f}}<extra></extra>"), row=1, col=1)
-    top = max([abs(p["threat"]) for s in series.values() for p in s] + [0.1])
-    for a in feed["actions"]:
-        if T.any_goal(a):
-            sign = 1 if a["team"] == "home" else -1
-            fig.add_annotation(x=_x(a.get("period", 1), a["clock_s"], extra), y=sign * top * 1.08, text=("x " if a.get("voided") else "") + f"{a.get('minute_label', '')}",
-                               showarrow=False, font={"size": 11, "color": t["muted"] if a.get("voided") else t["text"]}, row=1, col=1)
-    fig.update_yaxes(range=[-top * 1.25, top * 1.25], zeroline=True, zerolinecolor=t["muted"], gridcolor="rgba(148,163,184,0.15)", title_text="xG units", row=1, col=1)
+        fig.add_trace(go.Bar(x=[p["x"] for p in pts], y=[sign * p["threat"] for p in pts], name=f"{teams[side]} threat", marker={"color": t[side], "line": {"width": 0}, "opacity": 0.5},
+                             width=minutes * 0.85, customdata=[[p["threat"], p["xg"]] for p in pts], legendgroup=side,
+                             hovertemplate=f"{teams[side]}<br>threat added %{{customdata[0]:.2f}}<br>shots xG %{{customdata[1]:.2f}}<extra></extra>"), secondary_y=False)
+    for side, sign in (("home", 1), ("away", -1)):
+        roll = rolling_threat(series[side], minutes, extra, window)
+        fig.add_trace(go.Scatter(x=[x for x, _ in roll], y=[sign * v for _, v in roll], mode="lines", name=f"{teams[side]} {window * minutes}-min average", legendgroup=side,
+                                 line={"color": t[side], "width": 3, "shape": "spline", "smoothing": 0.6, "dash": "solid" if side == "home" else "dash"}, hoverinfo="skip"), secondary_y=False)
     if timeline:
         period_of = {a["event_id"]: a.get("period", 1) for a in feed["actions"]}
         period, pts = 1, []
         for p in sorted(timeline, key=lambda p: p["seq"]):
             period = period_of.get(p.get("event_id"), period)
             pts.append((_x(period, p["clock_s"], extra), p))
-        for key, color, name in (("home", t["home"], f"{teams['home']} win"), ("draw", t["muted"], "Draw"), ("away", t["away"], f"{teams['away']} win")):
-            fig.add_trace(go.Scatter(x=[x for x, _ in pts], y=[p[key] * 100 for _, p in pts], mode="lines", name=name, line={"color": color, "width": 2},
-                                     customdata=[p.get("minute_label", "") for _, p in pts], hovertemplate="%{customdata} %{y:.0f}%<extra>" + name + "</extra>"), row=2, col=1)
-        fig.update_yaxes(range=[0, 100], ticksuffix="%", gridcolor="rgba(148,163,184,0.15)", row=2, col=1)
-    ticks = [0, 15, 30, 45] + [m + extra for m in (60, 75, 90)]
-    fig.update_xaxes(tickvals=ticks, ticktext=["0'", "15'", "30'", "45'", "60'", "75'", "90'"], gridcolor="rgba(148,163,184,0.15)")
+        fig.add_trace(go.Scatter(x=[x for x, _ in pts], y=[p["home"] * 100 for _, p in pts], mode="lines", name=f"{teams['home']} win probability (right axis)",
+                                 line={"color": t["text"], "width": 1.3, "shape": "hv"}, opacity=0.7, customdata=[[p.get("minute_label", ""), p["draw"] * 100, p["away"] * 100] for _, p in pts],
+                                 hovertemplate=f"%{{customdata[0]}} {teams['home']} win %{{y:.0f}}%, draw %{{customdata[1]:.0f}}%, {teams['away']} win %{{customdata[2]:.0f}}%<extra></extra>"),
+                      secondary_y=True)
+        fig.update_yaxes(range=[-5, 105], tickvals=[0, 25, 50, 75, 100], ticktext=["0%", "25%", "50%", "75%", "100%"], showgrid=False, zeroline=False, title_text="win probability", secondary_y=True)
+    ceiling, step = top * 1.2, top * 0.17
+    rows = _vmarks(fig, match_marks(feed), t, extra, ceiling, step)
+    span = ceiling + step * max(rows, 1) + top * 0.05
     fig.add_vline(x=45 + extra, line={"color": t["muted"], "width": 1, "dash": "dot"})
+    fig.add_annotation(x=45 + extra, y=-span, yref="y", text="HT", showarrow=False, yanchor="bottom", xanchor="left", xshift=3, font={"size": 11, "color": t["muted"]})
+    fig.update_yaxes(range=[-span, span], zeroline=True, zerolinecolor=t["muted"], gridcolor="rgba(148,163,184,0.15)", title_text="threat added (xG)", secondary_y=False)
+    fig.update_xaxes(**_minute_axis(extra))
+    wp = f"; thin line, right axis: {teams['home']} win probability" if timeline else ""
+    sub = (f"Bars: threat added per {minutes} min, {teams['home']} up, {teams['away']} down; thick lines: {window * minutes}-min average{wp}"
+           "<br>Solid verticals: goals and the score; dashed with ×: ruled out by VAR; dotted: red cards")
     fig.update_layout(paper_bgcolor=t["paper"], plot_bgcolor=t["paper"], font={"family": t["font"], "color": t["text"], "size": 12}, barmode="relative", bargap=0.1,
-                      title={"text": _title("Momentum", f"bars: threat added by completed passes and carries, {teams['home']} up, {teams['away']} down; labels: goals (x: ruled out)"),
-                             "x": 0.02, "xanchor": "left"},
-                      legend={"orientation": "h", "y": -0.08, "x": 0}, margin={"l": 50, "r": 16, "t": 90, "b": 50}, height=560 if rows == 2 else 360, hovermode="closest")
+                      title={"text": _title("Momentum", sub), "x": 0.02, "xanchor": "left"},
+                      legend={"orientation": "h", "y": -0.1, "x": 0, "yanchor": "top"}, margin={"l": 60, "r": 60 if timeline else 16, "t": 96, "b": 60}, height=480, hovermode="closest",
+                      meta={"minutes": minutes, "window": window, "marks": [m["event_id"] for m in match_marks(feed)]})
     if width:
         fig.update_layout(width=width)
     return fig

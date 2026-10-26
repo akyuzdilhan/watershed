@@ -185,6 +185,8 @@ def graphic_items(feed: dict, kind: str) -> list[dict]:
     if kind == "shots":
         return [{"value": "all", "label": "Both teams"}, *({"value": s, "label": teams[s]} for s in ("home", "away")),
                 {"value": "h1", "label": "First half"}, {"value": "h2", "label": "Second half"}]
+    if kind == "momentum":
+        return [{"value": f"slice:{m}", "label": f"{m}-minute bars"} for m in G.MOMENTUM_SLICES]
     if kind == "buildups":
         return [{"value": a["event_id"], "label": f"{a.get('minute_label', '')} {teams[a['team']]} {'goal' if T.any_goal(a) else 'chance'}" + (" (ruled out)" if a.get("voided") else "")
                  + f", {G._who(a)}, xG {a['shot']['xg']:.2f}"} for a in G.moments(feed)]
@@ -215,7 +217,8 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
         half = {"h1": 1, "h2": 2}.get(item or "")
         return _sized(G.shot_map(feed, THEME, None, team=team, half=half), 620)
     if kind == "momentum":
-        return _sized(G.momentum_figure(feed, timeline, THEME, width=None), 600 if timeline else 380)
+        minutes = int(item.partition(":")[2]) if item and item.startswith("slice:") and item.partition(":")[2].isdigit() else 5
+        return _sized(G.momentum_figure(feed, timeline, THEME, minutes=minutes, width=None), 520)
     if not item:
         return empty_figure("Nothing of this kind in the match so far.")
     if kind == "buildups":
@@ -242,8 +245,8 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
 
 
 NOTES = {
-    "shots": "Marker size is the xG of the shot. Purple crosses are goals VAR ruled out: drawn, but left out of the goals, shots and xG above the pitch.",
-    "momentum": "Threat added: value of where completed passes and carries ended minus where they started (value = xG of a shot from there). Win probability from the desk's match state.",
+    "shots": "Marker size is the xG of the shot (key under the pitch); pick a team or a half above. Purple crosses are goals VAR ruled out: drawn, but left out of the goals, shots and xG above the pitch.",
+    "momentum": "Threat added: value of where completed passes and carries ended minus where they started (value = xG of a shot from there). Pick the bar width above; the thick lines average about 15 minutes. Win probability from the desk's match state.",
     "buildups": "The possession behind the goal or chance (last 10 actions). Arrow width: threat added; the shot arrow: xG.",
     "setpieces": "Delivery width: value of the landing point. Play the animation: delivery, first contact, what followed.",
     "direct": "Seen from behind the taker. The box shows where the keeper stood in the frame.",
