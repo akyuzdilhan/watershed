@@ -673,7 +673,7 @@ VISITOR = {"X-Forwarded-For": "203.0.113.7"}
 def refresh_body(card_id: str, sig=None, n: int = 1, lang: str = "en") -> tuple[list, list, list]:
     inputs = [{"id": "c-tick", "property": "n_intervals", "value": n}, {"id": "c-rev", "property": "data", "value": 0},
               {"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card_id},
-              {"id": "c-lang", "property": "value", "value": lang}]
+              {"id": "c-lang", "property": "value", "value": lang}, {"id": "c-replay", "property": "data", "value": None}]
     return inputs, [{"id": "c-sig", "property": "data", "value": sig}], ["c-tick.n_intervals"]
 
 
@@ -1179,3 +1179,50 @@ def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_d
     right = find(console.layout(None), lambda c: "col-right" in (getattr(c, "className", "") or "") and "c-wp" in component_ids(c.children))[0]
     assert "c-context" in component_ids(right.children)
     assert [v["label"] for v in panels.VIEWS] == ["Desk", "All graphics", "All insights and storyline"]
+
+
+@pytest.fixture(scope="module")
+def auto_desk(tmp_path_factory):
+    """The demo as deployed: the desk auto-approves verified cards, so the 63' goal went on air before VAR ruled it out."""
+    root = tmp_path_factory.mktemp("auto")
+    run_desk(root, auto_approve=True)
+    return store.FileStore(root)
+
+
+def test_the_replay_shows_the_desk_as_it_stood_at_a_minute_and_writes_nothing(auto_desk):
+    s = auto_desk
+    s.cache_s = 0.0
+    folder = s.root / MATCH
+    before = {p.name: p.read_bytes() for p in folder.iterdir()}
+    points, _, breaks = console.axis(s.state(MATCH)["wp_timeline"])
+    at = lambda label: console.label_x(label, points, breaks) + 1  # noqa: E731  (the end of that minute)
+
+    def shown(label: str):
+        out = console.refresh(MATCH, None, None, store=s, t=at(label))
+        cards = {c["id"]: c for c in s.cards(MATCH)}
+        return out, {cards[o["value"]]["minute_label"]: o["label"] for o in out[0]}
+
+    out, rundown = shown("50'")
+    assert sorted(rundown) == ["14'", "31'"] and out[5].startswith("Varleigh 0-2 Yarnford") and "FT" not in out[5]
+    assert len(out[4].data[0].x) < len(points) and out[4].layout.xaxis.range[1] == points[-1]["x"]  # the curve cut at the minute, the axis to full time
+    out, rundown = shown("63'")
+    assert "On air" in texts_in(rundown["63'"]) and "VAR check" in texts_in(rundown["63'"]) and "Retracted" not in texts_in(rundown["63'"])
+    assert out[5].startswith("Varleigh 3-2 Yarnford") and "66'" not in rundown
+    out, rundown = shown("65'")
+    assert "Retracted on air" in texts_in(rundown["63'"]) and out[5].startswith("Varleigh 2-2 Yarnford")
+    picked = next(c for c in s.cards(MATCH) if c["minute_label"] == "63'")
+    view = console.refresh(MATCH, picked["id"], None, store=s, t=at("63'"))
+    assert view[6:9] == (True, True, True)  # a replay decides nothing
+    assert "Retracted" not in texts_in(view[3]) and "VAR decision" not in texts_in(view[3]) and "On the VAR ruling" not in texts_in(view[2])
+    full = console.refresh(MATCH, None, None, store=s)
+    assert console.refresh(MATCH, None, None, store=s, t=points[-1]["x"] + 5)[5] == full[5] and full[5].startswith("Varleigh 5-2 Yarnford") and "FT" in full[5]
+    end, marks, value, minute = console.replay_range(MATCH, s)
+    assert value == end >= points[-1]["x"] and marks[end] == "FT" and "HT" in marks.values() and minute is None
+    assert {p.name: p.read_bytes() for p in folder.iterdir()} == before  # nothing written
+
+
+def test_the_replay_control_is_in_the_header_for_everyone():
+    for user in ("producer-1", None):
+        top = find(console.layout(user), lambda c: getattr(c, "className", "") == "top")[0]
+        assert {"c-replay-play", "c-replay-t", "c-replay-tick", "c-replay"} <= component_ids(top.children) and "Replay the match" in texts_in(top)
+    assert console.REPLAY_STEP_MS == 500

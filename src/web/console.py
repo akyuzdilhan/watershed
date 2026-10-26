@@ -371,10 +371,12 @@ def axis(timeline: list[dict]) -> tuple[list[dict], dict[str, float], list[float
     return out, {p["event_id"]: p["x"] for p in out}, breaks
 
 
-def figure(state: dict | None, cards: list[dict], selected: str | None = None) -> go.Figure:
+def figure(state: dict | None, cards: list[dict], selected: str | None = None, x_max: float | None = None) -> go.Figure:
+    """The win-probability curve with the cards on it; `x_max` keeps the axis to full time while a replay draws the curve up to its minute."""
     fig = go.Figure()
     teams = (state or {}).get("teams") or {"home": "Home", "away": "Away"}
     points, x_of, breaks = axis((state or {}).get("wp_timeline") or [])
+    breaks = breaks or list((state or {}).get("replay_breaks") or [])  # a replay before half-time keeps the axis of the whole match
     xs = [p["x"] for p in points]
     for key, name in (("home", f"{teams['home']} win"), ("draw", "Draw"), ("away", f"{teams['away']} win")):
         fig.add_trace(go.Scatter(x=xs, y=[p[key] * 100 for p in points], name=name, mode="lines", line={"color": COLORS[key], "width": 2},
@@ -409,11 +411,74 @@ def figure(state: dict | None, cards: list[dict], selected: str | None = None) -
         ticks += [60, 75, 90]
     fig.update_layout(
         template="plotly_dark", paper_bgcolor=COLORS["surface"], plot_bgcolor=COLORS["surface"], margin={"l": 44, "r": 12, "t": 12, "b": 36}, height=320,
-        font={"color": COLORS["ink2"], "size": 12}, hovermode="closest", uirevision="wp",
+        font={"color": COLORS["ink2"], "size": 12}, hovermode="closest", uirevision="replay" if x_max else "wp",
         legend={"orientation": "h", "y": -0.18, "x": 0, "font": {"color": COLORS["ink2"]}},
-        xaxis={"tickvals": tickvals, "ticktext": [f"{m}'" for m in ticks], "gridcolor": COLORS["grid"], "zeroline": False},
+        xaxis={"tickvals": tickvals, "ticktext": [f"{m}'" for m in ticks], "gridcolor": COLORS["grid"], "zeroline": False, **({"range": [0, x_max], "autorange": False} if x_max else {})},
         yaxis={"range": [0, 100], "ticksuffix": "%", "gridcolor": COLORS["grid"], "zeroline": False})
     return fig
+
+
+# --- replay: the desk as it stood at a minute of the match, read from what the store holds, never written ---
+
+def full_time(state: dict | None) -> float:
+    """The last minute of the match on the continuous axis (`axis`), 0 without a timeline."""
+    points, _, _ = axis((state or {}).get("wp_timeline") or [])
+    return points[-1]["x"] if points else 0.0
+
+
+def label_x(label: str | None, points: list[dict], breaks: list[float]) -> float | None:
+    """Where a minute label ("64'", "45+2'") sits on the axis: its first point on the timeline, else the minute it says (added time of the first half before the break)."""
+    if not label:
+        return None
+    hit = next((p["x"] for p in points if p.get("minute_label") == label), None)
+    if hit is not None:
+        return hit
+    try:
+        base, _, extra = str(label).strip("'").partition("+")
+        m = int(base) + (int(extra) if extra else 0)
+    except ValueError:
+        return None
+    return m + (breaks[0] - 45 if breaks and int(base) > 45 else 0)
+
+
+def card_at(card: dict, entries: list[dict], t: float, x_of_label) -> dict:
+    """A card as it stood at minute `t`: retracted only from the minute of its retraction (before it, on air if it was approved, else waiting), under a VAR check between the hold and the release or the ruling. Approvals carry no match minute and keep their place."""
+    feed = [(x_of_label(e.get("minute_label")), e) for e in entries if e.get("by") == "feed" and e.get("minute_label")]
+    past = [e for x, e in feed if x is not None and x <= t]
+    c = dict(card)
+    if card.get("status") == "retracted" and not any(e.get("action") == "retracted" for e in past):
+        c["status"] = "approved" if any(e.get("action") == "approved" for e in entries) else "pending"
+        for k in ("retracted_on_air", "ruled_out", "duo_ruling", "var_decision"):
+            c.pop(k, None)
+    flags = [e.get("action") == "hold" for e in past if e.get("action") in ("hold", "release", "retracted")]
+    c["under_review"] = bool(flags and flags[-1]) and c["status"] != "retracted"
+    return c
+
+
+def replay(cards: list[dict], state: dict | None, audit: list[dict], t: float | None) -> tuple[list[dict], dict | None, list[dict], float | None]:
+    """(cards, state, audit, full time) at minute `t`: the cards of the moments up to `t` as they stood then (`card_at`), the score counted from their goals, the curve and the clock cut at `t`, the feed's actions after `t` left out of the audit. `t` None or at full time: everything as stored, and no full time."""
+    if t is None or not state or not state.get("wp_timeline"):
+        return cards, state, audit, None
+    points, x_of, breaks = axis(state["wp_timeline"])
+    end = points[-1]["x"]
+    if t >= end:
+        return cards, state, audit, None
+    def at(label: str | None) -> float | None:  # a feed action is placed mid-minute: the audit keeps its minute label, not its second
+        x = label_x(label, points, breaks)
+        return None if x is None else x + 0.5
+
+    by_card: dict[str, list[dict]] = {}
+    for e in audit:
+        by_card.setdefault(e.get("card_id"), []).append(e)
+    shown = [card_at(c, by_card.get(c["id"], []), t, at) for c in cards if x_of.get(c.get("event_id"), (c.get("clock_s") or 0) / 60) <= t]
+    score = {"home": 0, "away": 0}
+    for c in shown:
+        if c.get("moment") == "goal" and c.get("status") != "retracted" and c.get("team") in score:
+            score[c["team"]] += 1
+    seen = [p for p in state["wp_timeline"] if x_of.get(p["event_id"], 0) <= t]
+    clock = max(seen, key=lambda p: x_of.get(p["event_id"], 0))["minute_label"] if seen else "0'"
+    kept = [e for e in audit if not (e.get("by") == "feed" and (at(e.get("minute_label")) or 0) > t)]
+    return shown, dict(state, score=score, final=False, minute_label=clock, wp_timeline=seen, replay_breaks=breaks), kept, end
 
 
 def scoreline(state: dict | None) -> str:
@@ -435,13 +500,17 @@ def _approve_styles_cb(_sig, match_id, card_id):
     return approve_styles((get_store().card(match_id, card_id) if match_id and card_id else None))
 
 
-def context(match_id: str | None, card_id: str | None, lang: str | None, last_sig: str | None, store=None):
-    """(the selected card's graphic and insights under the curve, signature), `panels.card_context`; no_update for both when the card, its insights, the storyline and the language did not change."""
+def context(match_id: str | None, card_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None):
+    """(the selected card's graphic and insights under the curve, signature), `panels.card_context`; no_update for both when the card, its insights, the storyline and the language did not change. `t` (the replay's minute) leaves out the insights written after it."""
     store = store or get_store()
     card = store.card(match_id, card_id) if match_id and card_id else None
     if card is None:
         return [], None
     docs, story = store.insights(match_id), store.storyline(match_id)
+    state = store.state(match_id) or {}
+    if t is not None and t < full_time(state):
+        points, x_of, breaks = axis(state.get("wp_timeline") or [])
+        docs = [d for d in docs if (x_of.get(d.get("event_id")) if d.get("event_id") in x_of else (label_x(d.get("minute_label"), points, breaks) or 0)) <= t]
     feed = store.feed(match_id)
     sig = _sig(match_id, card_id, card.get("status"), card.get("version"), panels.tied_insights(docs, card), (story or {}).get("texts"), lang, (feed or {}).get("last_seq"))
     if sig == last_sig:
@@ -449,8 +518,8 @@ def context(match_id: str | None, card_id: str | None, lang: str | None, last_si
     return panels.card_context(card, feed, docs, story, lang), sig
 
 
-def _context_cb(_sig, match_id, card_id, lang, last_sig):
-    return context(match_id, card_id, lang, last_sig)
+def _context_cb(_sig, match_id, card_id, lang, last_sig, t=None):
+    return context(match_id, card_id, lang, last_sig, t=t)
 
 
 def button_states(card: dict | None) -> tuple[bool, bool, bool]:
@@ -481,21 +550,23 @@ def match_options(current: str | None, store=None) -> tuple[list[dict], str | No
 REFRESH_OUTPUTS = 10
 
 
-def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, rev: int | None = None, store=None, read_only: bool = False, lang: str | None = DEFAULT_LANG):
+def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, rev: int | None = None, store=None, read_only: bool = False, lang: str | None = DEFAULT_LANG,
+            t: float | None = None):
     """(rundown options, selected card, detail, heading, figure, scoreline, approve/edit/reject disabled, signature); no_update everywhere when nothing changed.
 
-    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the earliest waiting card is picked, else the most recent (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled."""
+    The rundown is in match order with the cards waiting for a decision on top (`rundown_order`); without a selection the earliest waiting card is picked, else the most recent (`default_pick`). The detail shows the language `lang` (`LANG_NAMES`). It is sent again, with the heading, only when the selected card, its history, the feedback or the language changed: a note being typed survives the ticks that only move the clock or another card. `read_only` (a visitor in public mode) draws the detail without producer controls or data, every button disabled. `t` (the replay's minute) shows the desk as it stood then (`replay`), every button disabled; None: as it stands."""
     store = store or get_store()
     lang = lang if lang in LANG_NAMES else DEFAULT_LANG
     if not match_id:
         return [], None, detail(None, []), card_head(None), figure(None, []), "No match on the desk yet", True, True, True, None
-    cards, state, audit, fb_docs = rundown_order(store.cards(match_id)), store.state(match_id), store.audit(match_id), store.feedback_docs(match_id)
+    cards, state, audit, x_max = replay(store.cards(match_id), store.state(match_id), store.audit(match_id), t)
+    cards, fb_docs = rundown_order(cards), store.feedback_docs(match_id)
     ids = [c["id"] for c in cards]
     picked = selected if selected in ids else default_pick(cards)
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
-    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang)
+    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang, x_max is not None)
     sig = _sig(detail_sig, cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), (state or {}).get("final"), len(audit))
     last = last_sig if isinstance(last_sig, dict) else {}
     if sig == last.get("all"):
@@ -503,9 +574,9 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     changed = detail_sig != last.get("detail")
     view = detail(card, audit, fb_docs, teams, read_only, lang=lang, head=False) if changed else no_update
     head = card_head(card, read_only) if changed else no_update
-    buttons = (True, True, True) if read_only else button_states(card)
+    buttons = (True, True, True) if read_only or x_max is not None else button_states(card)  # a replay decides nothing
     # the selection is written back only when it changes, so a refresh never closes an edit in progress
-    return (rundown_options(cards), picked if picked != selected else no_update, view, head, figure(state, cards, picked), scoreline(state), *buttons,
+    return (rundown_options(cards), picked if picked != selected else no_update, view, head, figure(state, cards, picked, x_max), scoreline(state), *buttons,
             {"all": sig, "detail": detail_sig})
 
 
@@ -666,7 +737,7 @@ def layout(user: str | None) -> html.Div:
                      dcc.Dropdown(id="c-match", clearable=False, className="match-picker", placeholder="Match"),
                      html.Div(id="c-score", className="scoreline"),
                      dcc.RadioItems(id="c-view", options=panels.VIEWS, value="desk", className="view-switch", inputClassName="view-radio", labelClassName="view-label"),
-                     viewer(user)], className="top"),
+                     replay_bar(), viewer(user)], className="top"),
         panels.graphics_pane(),
         panels.insights_pane(),
         html.Main([
@@ -692,8 +763,47 @@ def layout(user: str | None) -> html.Div:
     ], className="console read-only" if read_only else "console")
 
 
-def _refresh_cb(_n, rev, match_id, selected, lang, last_sig):
-    return refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None, lang=lang)
+REPLAY_STEP_MS = 500  # one match minute every half second: a 95-minute match in about 48 s
+# Play starts from the minute shown (from kick-off when it stands at full time) and pauses; each tick moves one minute and stops at full time.
+REPLAY_STEP = """function(play, tick, value, max, paused) {
+    var trig = (window.dash_clientside.callback_context.triggered[0] || {}).prop_id || "";
+    value = value === null || value === undefined ? max : value;
+    if (trig.indexOf("c-replay-play") === 0) {
+        if (!paused) { return [window.dash_clientside.no_update, true, "Play"]; }
+        return [value >= max ? 0 : value, false, "Pause"];
+    }
+    var next = Math.min(value + 1, max);
+    return next >= max ? [max, true, "Play"] : [next, false, "Pause"];
+}"""
+# The slider's minute, or null at its right end: the desk as it stands (full time, or live)
+REPLAY_MINUTE = "function(value, max) { return value === null || value === undefined || value >= max ? null : value; }"
+
+
+def replay_range(match_id: str | None, store=None) -> tuple[int, dict, int, None]:
+    """(slider max, marks, value, replay minute) for a match: the slider spans kick-off to full time and starts at its right end, the desk as it stands."""
+    state = ((store or get_store()).state(match_id) if match_id else None) or {}
+    end = max(int(full_time(state) + 0.999), 1)
+    _, _, breaks = axis(state.get("wp_timeline") or [])
+    marks = {0: "0'"}
+    if breaks:
+        marks[round(breaks[0])] = "HT"
+    marks[end] = "FT" if state.get("final") else "now"
+    return end, marks, end, None
+
+
+def _replay_range_cb(match_id):
+    return replay_range(match_id)
+
+
+def replay_bar() -> html.Div:
+    """Replay the match: Play and a minute slider, for everyone (read only too); the console shows the desk as it stood at that minute, the store is never written."""
+    return html.Div([html.Span("Replay the match", className="muted small"), html.Button("Play", id="c-replay-play", className="btn btn-small", n_clicks=0),
+                     html.Div(dcc.Slider(id="c-replay-t", min=0, max=100, step=1, value=100, marks={0: "0'", 100: "FT"}, allow_direct_input=False), className="replay-slider"),
+                     dcc.Interval(id="c-replay-tick", interval=REPLAY_STEP_MS, disabled=True), dcc.Store(id="c-replay", data=None)], className="replay")
+
+
+def _refresh_cb(_n, rev, match_id, selected, lang, last_sig, t=None):
+    return refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None, lang=lang, t=t)
 
 
 def _edit_cb(_edit, _cancel, _rev, card_id, match_id):
@@ -753,7 +863,13 @@ def register(app) -> None:
         Output("c-rundown", "options"), Output("c-rundown", "value"), Output("c-detail", "children"), Output("c-head", "children"), Output("c-wp", "figure"),
         Output("c-score", "children"), Output("c-approve", "disabled"), Output("c-edit", "disabled"), Output("c-reject", "disabled"), Output("c-sig", "data"),
         Input("c-tick", "n_intervals"), Input("c-rev", "data"), Input("c-match", "value"), Input("c-rundown", "value"), Input("c-lang", "value"),
-        State("c-sig", "data"))(_refresh_cb)
+        State("c-sig", "data"), Input("c-replay", "data"))(_refresh_cb)
+    app.callback(Output("c-replay-t", "max"), Output("c-replay-t", "marks"), Output("c-replay-t", "value"), Output("c-replay", "data", allow_duplicate=True),
+                 Input("c-p-match", "data"), prevent_initial_call="initial_duplicate")(_replay_range_cb)
+    app.clientside_callback(REPLAY_STEP, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled"), Output("c-replay-play", "children"),
+                            Input("c-replay-play", "n_clicks"), Input("c-replay-tick", "n_intervals"), State("c-replay-t", "value"), State("c-replay-t", "max"),
+                            State("c-replay-tick", "disabled"), prevent_initial_call=True)
+    app.clientside_callback(REPLAY_MINUTE, Output("c-replay", "data"), Input("c-replay-t", "value"), State("c-replay-t", "max"), prevent_initial_call=True)
     app.callback(Output("c-edit-panel", "children"), Output("c-edit-actions", "style"),
                  Input("c-edit", "n_clicks"), Input("c-cancel-edit", "n_clicks"), Input("c-rev", "data"), Input("c-rundown", "value"), State("c-match", "value"),
                  prevent_initial_call=True)(_edit_cb)
@@ -768,5 +884,5 @@ def register(app) -> None:
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
     app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
     app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
-                 State("c-lang", "value"), State("c-ctx-sig", "data"))(_context_cb)
+                 State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"))(_context_cb)
     panels.register(app)
