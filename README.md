@@ -78,7 +78,7 @@ pytest                                     # optional, about 5 minutes
 1. `league history` writes the 50 seasons of the fictional league to `data/history/9` in under 10 seconds ("History of seed 9: 1976/77 to 2025/26, 19000 matches, 4000 players").
 2. `worker` replays the demo match offline with the template writer, so no model is called (about 10 seconds). It prints the 11 cards in English, French and Spanish, a hold then a retract on the 63' and 69' goals, the rewrite of the 31' goal at 33', the facts of the insight engine, the recap in three languages, the final score 5-2, and a report against the ground truth with `"recall": 1.0`, `"precision": 1.0` and `"card_actions_correct": true`. It writes the desk, recap included, to `data/desk/demo-0007/`.
 3. `web.app` serves the console at http://127.0.0.1:8050 and the overlay at http://127.0.0.1:8050/overlay. Locally you are the producer: open the 66' goal card, click Edit, change a number and approve the edit: the Verifier refuses it.
-4. `pytest` runs the 726 tests without Azure and without model calls.
+4. `pytest` runs the 829 tests without Azure and without model calls.
 
 To replay the match again, first clear its desk: `python -m worker.reset --match demo-0007 --desk-dir data/desk --yes` (the worker appends to the audit trail). To write with the model instead of the templates, add `--writer foundry` and set `FOUNDRY_PROJECT_ENDPOINT` and `FOUNDRY_MODEL` in `.env` (see `.env.example`), with an `az login` account allowed to call the Foundry project; that calls the model up to 40 times for the match. `python -m worker.recap data/desk/demo-0007` writes the recap again on its own.
 
@@ -355,7 +355,7 @@ A new role assignment can take 5 to 10 minutes to apply; the publisher says so i
 
 ## Tests
 
-`pytest` runs 726 tests in about 5 minutes (some parametrised over 20 matches, the generator checks over 200), without Azure and without model calls: the Writer is replaced by the template, or by scripted replies where the retry, the time limits and the trace are tested. The main files:
+`pytest` runs 829 tests in about 5 minutes (some parametrised over 20 matches, the generator checks over 200), without Azure and without model calls: the Writer is replaced by the template, or by scripted replies where the retry, the time limits and the trace are tested. The main files:
 
 | File | What it proves |
 |---|---|
