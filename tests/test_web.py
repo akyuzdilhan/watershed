@@ -1548,3 +1548,12 @@ def test_the_intro_points_at_the_first_card_pulled_off_air(desk):
     goal = card_at(desk, "63'")
     fake = type("S", (), {"cards": lambda self, m: [dict(c, status="retracted", retracted_on_air=True) if c["id"] == goal["id"] else c for c in cards]})()
     assert console.intro_target(MATCH, fake) == ("See the VAR retraction (63')", {}, goal["id"])
+
+
+def test_insights_on_a_moment_never_come_from_later_in_the_match():
+    from web.panels import tied_insights
+
+    card = {"event_id": "e52", "clock_s": 3070.0}
+    at_goal = {"id": "i1", "event_id": "e52", "clock_s": 3070.0, "status": "approved", "value": 40}
+    counting_later = {"id": "i2", "event_id": "e83", "evidence": ["e52", "e57", "e66", "e83"], "clock_s": 4980.0, "status": "approved", "value": 80}
+    assert [d["id"] for d in tied_insights([at_goal, counting_later], card)] == ["i1"]

@@ -602,13 +602,19 @@ def card_graphic(feed: dict | None, card: dict | None) -> tuple[str, str | None]
     return "", None
 
 
+MOMENT_WINDOW_S = 90  # an insight written up to a minute and a half after the card still belongs to its moment
+
+
 def tied_insights(docs: list[dict], card: dict | None, limit: int = 3) -> list[dict]:
-    """The insights about a card's moment: written at it, explaining it (a run or line break before the goal) or counting it, those still standing first."""
+    """The insights about a card's moment: written at it, explaining it (a run or line break before the goal) or counting it, those still standing first; never one written later in the match (the 83' four-goal haul counts the 52' goal, but is not part of that moment)."""
     if not card:
         return []
     ev = card.get("event_id")
+    until = card.get("clock_s")
 
     def rank(d: dict) -> int | None:
+        if isinstance(until, (int, float)) and isinstance(d.get("clock_s"), (int, float)) and d["clock_s"] > until + MOMENT_WINDOW_S:
+            return None
         if d.get("event_id") == ev or (d.get("figure") or {}).get("goal_event_id") == ev:
             return 0
         return 1 if ev in (d.get("evidence") or []) else None
