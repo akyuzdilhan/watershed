@@ -10,7 +10,7 @@ A local prototype, behind options, for criterion 2 of the judging (agentic desig
 | The Writer through MCP | `src/worker/mcp_writer.py` | `--writer foundry --facts mcp`: the Writer reads `get_moment` from the server, with the same prompt, tool and JSON as today, and falls back to the local tool if MCP cannot open |
 | Wren and Joss as two agents | `src/worker/duo_agents.py`, `src/worker/agent_desk.py` | `--duo agents`: after the card is on the desk with its template duo, two Agent Framework agents with their own MCP tools speak in a GroupChat whose running order is fixed by code; every turn passes the Verifier before the other agent hears it (one retry); the verified duo replaces the template one, otherwise the template stays and the audit says why |
 
-Without these options nothing changes: same outputs byte for byte, and none of these modules is imported. They need the `agentic` extra (`pip install -e ".[azure,agents,agentic]"`), which the worker image does not install: in the deployed demo, the Writer reads its facts through its local tool and the duo comes from the Writer or the templates.
+Without these options nothing changes: same outputs byte for byte, and none of these modules is imported. They need the `agentic` extra (`pip install -c src/worker/constraints.txt -e ".[azure,agents,agentic]"`, the constraints pinning its packages too), which the worker image does not install: in the deployed demo, the Writer reads its facts through its local tool and the duo comes from the Writer or the templates.
 
 ## How to run it
 

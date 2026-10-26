@@ -55,3 +55,8 @@ typing-extensions==4.16.0
 typing-inspection==0.4.4
 urllib3==2.8.0
 yarl==1.25.1
+# Pins for the agentic extra on top (pip install -c src/worker/constraints.txt ".[azure,agents,agentic]", docs/notes/agentic.md), read on 26/10/2026 from the same
+# environment. The image does not install them: a constraint only pins a package that something asks for, and .[azure,agents] asks for none of these.
+agent-framework-orchestrations==1.4.0
+mcp==2.3.0
+tenacity==9.1.4
