@@ -1546,8 +1546,13 @@ def test_full_time_closes_the_rundown_with_the_recap_the_turning_points_and_the_
 def test_the_replay_control_is_in_the_header_for_everyone():
     for user in ("producer-1", None):
         top = find(console.layout(user), lambda c: getattr(c, "className", "") == "top")[0]
-        assert {"c-replay-play", "c-replay-t", "c-replay-tick", "c-replay"} <= component_ids(top.children) and "Replay the match" in texts_in(top)
+        assert {"c-replay-play", "c-replay-t", "c-replay-tick", "c-replay", "c-replay-now"} <= component_ids(top.children)
+        assert "Replay the match" not in texts_in(top)  # no label that reads as a second, disabled button
+        play = find(top, lambda c: getattr(c, "id", None) == "c-replay-play")[0]
+        assert play.children == "▶ Play" and play.title == "Replay the match minute by minute"
     assert console.REPLAY_STEP_MS == 500
+    assert '"▶ Play"' in console.REPLAY_STEP and '"❚❚ Pause"' in console.REPLAY_STEP and '"PLAY"' not in console.REPLAY_STEP
+    assert "'❚❚ Pause'" in console.INTRO_REPLAY and "'▶ Play'" in console.INTRO_RETRACTION
 
 
 def test_replay_the_match_and_play_read_as_primary_buttons():

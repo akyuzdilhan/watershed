@@ -1248,9 +1248,11 @@ def viewer(user: str | None) -> html.Div:
 INTRO = ("Every match tells a story no other match tells. Watershed finds it live with AI agents on Microsoft Foundry: every number verified, "
          "a producer in control, corrected on air when VAR changes its mind.")
 # The intro's Replay the match: the replay from kick-off, playing (the state `REPLAY_STEP` leaves after Play), on the desk
-INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk', true]; }"
+# The header's Play button, as icon and word (no "Replay the match" label next to it: it read as a second, disabled button)
+PLAY, PAUSE, PLAY_TIP = "▶ Play", "❚❚ Pause", "Replay the match minute by minute"
+INTRO_REPLAY = "function(n) { return [0, false, '" + PAUSE + "', 'desk', true]; }"
 # The intro's VAR retraction: the desk as it stands (the replay stopped at its right end), that card selected
-INTRO_RETRACTION = "function(n, card, max) { if (!card || !card.id) { return window.dash_clientside.no_update; } return [card.id, max, null, true, 'Play', 'desk']; }"
+INTRO_RETRACTION = "function(n, card, max) { if (!card || !card.id) { return window.dash_clientside.no_update; } return [card.id, max, null, true, '" + PLAY + "', 'desk']; }"
 # The intro's VAR retraction is shown once the retraction has happened: the replay stopped at its right end (full time), or its minute at or past the
 # retraction (`card.t`, where `replay` places it); hidden before, so the replay never gives it away. `intro_var_shown` says the same in Python.
 INTRO_VAR_SHOW = """function(value, paused, card, max) {
@@ -1380,12 +1382,12 @@ REPLAY_STEP = """function(play, tick, value, max, paused) {
     var trig = (window.dash_clientside.callback_context.triggered[0] || {}).prop_id || "";
     value = value === null || value === undefined ? max : value;
     if (trig.indexOf("c-replay-play") === 0) {
-        if (!paused) { return [window.dash_clientside.no_update, true, "Play"]; }
-        return [value >= max ? 0 : value, false, "Pause"];
+        if (!paused) { return [window.dash_clientside.no_update, true, "PLAY"]; }
+        return [value >= max ? 0 : value, false, "PAUSE"];
     }
     var next = Math.min(value + 1, max);
-    return next >= max ? [max, true, "Play"] : [next, false, "Pause"];
-}"""
+    return next >= max ? [max, true, "PLAY"] : [next, false, "PAUSE"];
+}""".replace('"PLAY"', '"' + PLAY + '"').replace('"PAUSE"', '"' + PAUSE + '"')
 # The slider's minute, or null at its right end: the desk as it stands (full time, or live)
 REPLAY_MINUTE = "function(value, max) { return value === null || value === undefined || value >= max ? null : value; }"
 # The match minute next to Play while the replay stands before its right end, as the clock says it (the minute under way: 0 to 1 is 1'): the slider is on the continuous
@@ -1417,7 +1419,7 @@ def _replay_range_cb(match_id):
 
 def replay_bar() -> html.Div:
     """Replay the match: Play and a minute slider, for everyone (read only too); the console shows the desk as it stood at that minute, the store is never written."""
-    return html.Div([html.Span("Replay the match", className="muted small"), html.Button("Play", id="c-replay-play", className="btn btn-small btn-cta", n_clicks=0),
+    return html.Div([html.Button(PLAY, id="c-replay-play", className="btn btn-small btn-cta", n_clicks=0, title=PLAY_TIP),
                      html.Span(id="c-replay-now", className="replay-now", **{"aria-live": "polite"}),
                      html.Div(dcc.Slider(id="c-replay-t", min=0, max=100, step=1, value=100, marks={0: "0'", 100: "FT"}, allow_direct_input=False), className="replay-slider"),
                      dcc.Interval(id="c-replay-tick", interval=REPLAY_STEP_MS, disabled=True), dcc.Store(id="c-replay", data=None)], className="replay")
