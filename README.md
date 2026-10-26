@@ -1,16 +1,16 @@
 # Watershed
 
-Football's fine margins, measured live and explained to you.
+Every match tells a story no other match tells. Watershed finds it live and hands it to the commentators while it still matters.
 
-> **For judges.** Watershed is an editorial desk for live football graphics on Microsoft Foundry, Microsoft Agent Framework and Azure Container Apps; target category: Best Enterprise Solution.
+> **For judges.** Watershed finds what makes a football match unique while it is played (the storyline before kick-off, the turning points, what this match has that 50 seasons of history never saw, the tactical detail behind each goal) and hands it to the commentary team, with AI agents on Microsoft Foundry and Microsoft Agent Framework, running on Azure Container Apps.
 > - **Live demo:** [read-only judge view, no sign-in](https://ca-web-ob4grgftye7tm.happyocean-d5f87e00.swedencentral.azurecontainerapps.io); add `/overlay` for the lower-third as it would air.
-> - **What to look at:** the 63' goal card, written by the model, verified number by number, put on air, then retracted when VAR ruled the goal out, with its audit trail ([How to test](#how-to-test), about 4 minutes).
+> - **What to look at:** "All insights and storyline" (the relegation stakes before kick-off, then at 83' the first four-goal haul by a substitute in 50 seasons), and the 63' goal card: written by the model, verified number by number, put on air, then retracted when VAR ruled the goal out, with its audit trail ([How to test](#how-to-test), about 4 minutes).
 > - **Video:** [VIDEO URL]. **Project page:** [PROJECT PAGE URL].
 > - **Run it locally:** Python 3.12, no Azure and no model call: [How to test, locally](#locally-no-azure-needed).
 
-Watershed is an editorial desk for live football broadcasts. It reads a match event feed as it arrives, measures how far each key moment moves the win probability, and has an Agent Framework agent that calls gpt-5.4-nano on Microsoft Foundry write the reason in English, French and Spanish, with every number checked against the data by code. A producer approves each card (the on-screen graphic of a moment) before it goes on air, and the desk retracts or rewrites a card when the feed changes its mind (a VAR overturn, a goal credited to another player).
+Every football match has its own story: the moments that turn it, and what it has that no other match had. Watershed finds that story as the match event feed arrives and gives it to the commentators while it still matters. Before kick-off it sets out the storyline: the table, the relegation stakes, form and head-to-head. During the match it measures how far each key moment moves the win probability to find the turning points, compares the match with 50 seasons of a fictional league history and tells what is rare in seasons ("the first four-goal haul by a substitute in 50 seasons"), and an Analyst agent on gpt-5-mini notes the tactical detail behind each goal from the 360 freeze frames (where the ball was won, how many defenders a pass took out). At the final whistle a recap agent writes the match report.
 
-Watershed works alongside human commentators: with each card it suggests a few lines for the commentary team, written for two fictional voices. It writes text only; nothing is voiced.
+Each key moment becomes a card (the on-screen graphic of a moment), written in English, French and Spanish by the Writer, an Agent Framework agent that calls gpt-5.4-nano on Microsoft Foundry, with a few suggested lines for two fictional commentators. Code checks every number against the data, a producer approves each card before it goes on air, and when the feed changes its mind (a VAR overturn, a goal credited to another player) the desk retracts or rewrites the card on air. Watershed works alongside human commentators: it writes text only, nothing is voiced.
 
 All match data is synthetic, produced by the match engine in this repository. No real match, club, player, footage or logo is used.
 
@@ -101,7 +101,7 @@ Each eligible card then prints a line such as `duo agents:dry: wren, joss (playe
 
 ## Why it matters
 
-A broadcast graphic that says "Yarnford equalise" and stays on screen after VAR rules the goal out is an error the audience sees live. Feeds correct themselves all the time: goals are voided, scorers are reassigned after a deflection, actions arrive late or twice. A system that writes on-air text from a feed has to treat those corrections as normal traffic, keep a person in charge of what airs, and never let a language model invent a number. Watershed is built around those three constraints:
+A commentator has a few seconds to say why a moment counts and what this match has that others did not. The facts exist (the table, the history of the league, the shape of each goal), but nobody can search 50 seasons between two attacks. Watershed runs that search live and puts the result in front of the commentary team. Because those facts go on air they have to be right: feeds correct themselves all the time (goals voided, scorers reassigned after a deflection, actions arriving late or twice), and a language model must never invent a number. A graphic that says "Yarnford equalise" and stays on screen after VAR rules the goal out is an error the audience sees live. Three rules keep the story trustworthy:
 
 - **Every number comes from code.** The win probabilities, the swing and the value of a chance are computed deterministically; the model only writes sentences and must declare, for each number, the field it took it from. A deterministic Verifier rejects anything else.
 - **A producer decides what airs.** Cards wait in `pending` until approved, edited or rejected; every step is in the audit trail. An auto-approve mode exists for unattended judging: each such approval is recorded as `auto-approve` in the audit trail and the lower-third shows "auto-approved".

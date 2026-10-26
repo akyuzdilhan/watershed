@@ -981,8 +981,8 @@ def viewer(user: str | None) -> html.Div:
     return html.Div(parts, className="who read-note")
 
 
-INTRO = ("A live football editorial desk on a synthetic match: an AI agent explains each key moment, code verifies every number, a producer approves, "
-         "VAR pulls cards off air.")
+INTRO = ("Every match tells a story no other match tells. Watershed finds it live with AI agents on Microsoft Foundry: every number verified, "
+         "a producer in control, corrected on air when VAR changes its mind.")
 # The intro's Replay the match: the replay from kick-off, playing (the state `REPLAY_STEP` leaves after Play), on the desk
 INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk', true]; }"
 # The intro's VAR retraction: the desk as it stands (the replay stopped at its right end), that card selected
