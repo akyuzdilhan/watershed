@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from dash import no_update
+from dash import html, no_update
 from flask import Flask
 
 from generator import generate_match
@@ -217,13 +217,11 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
 
 
 def test_a_scorer_correction_is_shown_in_the_console_and_on_the_overlay(desk):
-    rewritten = next(c for c in desk.cards(MATCH) if c.get("version", 1) >= 2)
-    assert rewritten.get("previous_player")  # the desk records the scorer the feed first credited
-    rewritten = {k: v for k, v in rewritten.items() if k != "previous_player"}
-    first = next(m for m in matchfeed.load(REPLAY_DIR / f"{MATCH}.jsonl.gz") if m["type"] == "action" and m["event_id"] == rewritten["event_id"])  # the goal as first credited
-    previous, now = first["player"]["name"], rewritten["player"]["name"]
-    assert previous != now
-    corrected = dict(rewritten, previous_player=previous)
+    corrected = next(c for c in desk.cards(MATCH) if c.get("version", 1) >= 2)
+    first = next(m for m in matchfeed.load(REPLAY_DIR / f"{MATCH}.jsonl.gz") if m["type"] == "action" and m["event_id"] == corrected["event_id"])  # the goal as first credited
+    previous, now = first["player"]["name"], corrected["player"]["name"]
+    assert previous != now and corrected.get("previous_player") == previous  # the desk records the scorer the feed first credited
+    rewritten = {k: v for k, v in corrected.items() if k != "previous_player"}
     assert f"Scorer corrected: {previous} → {now}" in texts_in(console.detail(corrected, []))
     assert "Scorer corrected" not in texts_in(console.detail(rewritten, []))  # no field: nothing changes
     assert "Scorer corrected" not in texts_in(console.detail(dict(corrected, version=1), []))
@@ -768,8 +766,10 @@ def test_graphics_tab_draws_every_kind_from_the_feed(feed_desk):
         assert panels.graphics(MATCH, kind, value if value is not no_update else None, "graphics", sig, feed_desk)[2] is no_update  # unchanged: nothing re-sent
     _, _, fig, _, _ = panels.graphics(MATCH, "momentum", None, "graphics", None, feed_desk)
     assert len(fig.data) == 5  # threat bars and the desk's win-probability curve
-    _, _, fig, _, _ = panels.graphics(MATCH, "tactics", "run:demo-0007-v2-a01178:home-20", "graphics", None, feed_desk)
-    assert fig.layout.meta["offside"]["margin_m"] == 0.25
+    _, _, fig, note, _ = panels.graphics(MATCH, "tactics", "run:demo-0007-v2-a01178:home-20", "graphics", None, feed_desk)
+    assert "margin_m" not in fig.layout.meta["offside"] and fig.layout.meta["offside"]["line_x"]  # the figure never carries the margin
+    folded = find(note, lambda c: isinstance(c, html.Details))
+    assert len(folded) == 1 and folded[0].open is False and "0.25 m beyond the line" in texts_in(folded[0])  # the producer's, folded
     assert panels.graphics(MATCH, "shots", None, "desk", None, feed_desk) == (no_update,) * 5  # hidden tab
 
 
@@ -806,7 +806,9 @@ def test_insights_and_storyline_are_decided_through_the_desk_and_reach_the_overl
     options, value, detail, fig, story, a_off, r_off, sa_off, sr_off, _ = panels.insights(MATCH, run["id"], "insights", None, store=feed_desk)
     assert [o["value"] for o in options] == [d["id"] for d in sorted(docs, key=lambda d: -d["value"])]
     assert not a_off and not r_off and not sa_off and "Fourth against sixth" in texts_in(story)
-    assert "A quarter of a metre." in texts_in(detail) and fig.layout.meta["offside"]["margin_m"] == 0.25
+    assert "A quarter of a metre." in texts_in(detail) and "margin_m" not in fig.layout.meta["offside"]
+    folded = find(detail, lambda c: isinstance(c, html.Details))
+    assert len(folded) == 1 and "margin_m" in [c.title for c in find(folded[0], lambda c: getattr(c, "className", "") == "fact-key")]
     assert panels.decide_doc("approve", MATCH, run["id"], None, feed_desk) == ("Sign in to approve or reject.", False)
     message, done = panels.decide_doc("approve", MATCH, run["id"], "producer-1", feed_desk)
     assert done, message

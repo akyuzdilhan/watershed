@@ -131,6 +131,36 @@ def words(node) -> str:
     return " ".join(out)
 
 
+def unfolded(node):
+    """The components of a callback answer outside any "Producer details" (an `html.Details`), what a screen capture shows with the details closed."""
+    if isinstance(node, list):
+        for n in node:
+            yield from unfolded(n)
+    elif isinstance(node, dict):
+        if "props" in node and "type" in node:
+            if node["type"] == "Details":
+                return
+            yield node
+            yield from unfolded(node["props"].get("children"))
+        else:
+            for v in node.values():
+                yield from unfolded(v)
+
+
+def unfolded_words(node) -> str:
+    """Every string shown with the producer details closed."""
+    out = []
+    for c in unfolded(node):
+        kids = c["props"].get("children")
+        out += [str(k) for k in (kids if isinstance(kids, list) else [kids]) if isinstance(k, (str, int, float)) and not isinstance(k, bool)]
+    return " ".join(out)
+
+
+def folded_words(node) -> str:
+    """Every string under "Producer details"."""
+    return " ".join(words(c) for c in components(node) if c["type"] == "Details")
+
+
 def feedback_ids(node) -> list:
     return [c["props"]["id"] for c in components(node) if isinstance(c["props"].get("id"), dict) and c["props"]["id"].get("type") in ("fb", "fb-r", "fb-n")]
 
@@ -337,17 +367,24 @@ def test_a_visitor_sees_the_graphics_without_the_offside_margins(public, monkeyp
     seen = {who: dash_post("c-g-figure.figure", values, "c-g-item.value", headers) for who, headers in (("visitor", {}), ("producer", PRODUCER))}
     labels = {who: {o["value"]: o["label"] for o in out["c-g-item"]["options"]} for who, out in seen.items()}
     runs = [v for v in labels["producer"] if v.startswith("run:")]
-    assert runs and labels["visitor"].keys() == labels["producer"].keys()  # the same items, every run listed
-    assert f"{abs(margin):.2f} m beyond the line" in labels["producer"][item]
-    for v in runs:
-        assert " m beyond" not in labels["visitor"][v] and " m inside" not in labels["visitor"][v] and labels["visitor"][v].endswith(" the line")
-    assert margins_in(seen["producer"]["c-g-figure"]["figure"]) and margins_in(seen["visitor"]["c-g-figure"]["figure"]) == []
-    visitor = seen["visitor"]["c-g-figure"]["figure"]
-    assert visitor["layout"]["meta"]["offside"]["line_x"] and "beyond the second-last defender" in visitor["layout"]["title"]["text"]  # the line and the call stay
+    assert runs and labels["visitor"] == labels["producer"]  # the same items and labels, every run listed
+    for v in runs:  # a label cannot be folded: never the margin, for the producer either
+        assert " m beyond" not in labels["producer"][v] and " m inside" not in labels["producer"][v] and labels["producer"][v].endswith(" the line")
+    assert margins_in(seen["producer"]["c-g-figure"]["figure"]) == margins_in(seen["visitor"]["c-g-figure"]["figure"]) == []
+    for who in ("visitor", "producer"):
+        fig = seen[who]["c-g-figure"]["figure"]
+        assert fig["layout"]["meta"]["offside"]["line_x"] and "beyond the second-last defender" in fig["layout"]["title"]["text"]  # the line and the call stay
+    shown = f"{abs(margin):.2f} m"
+    producer_note, visitor_note = seen["producer"]["c-g-note"]["children"], seen["visitor"]["c-g-note"]["children"]
+    assert shown in folded_words(producer_note) and shown not in unfolded_words(producer_note)  # the producer's margin, folded
+    folded = [c for c in components(producer_note) if c["type"] == "Details"]
+    assert len(folded) == 1 and not folded[0]["props"].get("open")  # closed by default
+    assert shown not in str(visitor_note) and "Details" not in str(visitor_note)
     shots = dash_post("c-g-figure.figure", {**ON_GRAPHICS, "c-g-kind.value": "shots"}, "c-g-kind.value")
     assert shots["c-g-figure"]["figure"]["data"]  # every other graphic as the producer sees it
-    monkeypatch.setenv("PUBLIC_MODE", "0")  # locally, the local producer sees everything
-    assert margins_in(dash_post("c-g-figure.figure", values, "c-g-item.value")["c-g-figure"]["figure"])
+    monkeypatch.setenv("PUBLIC_MODE", "0")  # locally, the local producer gets the folded margin too
+    local = dash_post("c-g-figure.figure", values, "c-g-item.value")
+    assert margins_in(local["c-g-figure"]["figure"]) == [] and shown in folded_words(local["c-g-note"]["children"])
 
 
 def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypatch):
@@ -379,7 +416,10 @@ def test_a_visitor_sees_insights_storyline_and_recap_read_only(public, monkeypat
     assert fact_keys(seen["visitor", rare["key"]]["c-i-detail"]) == set(rare["headline_facts"]) - hidden
     assert panels.PRODUCER_ONLY_NOTE in words(seen["visitor", rare["key"]]["c-i-detail"]) and panels.PRODUCER_ONLY_NOTE not in words(seen["producer", rare["key"]]["c-i-detail"])
     assert "margin_m" in fact_keys(seen["producer", run["key"]]["c-i-detail"]) and "margin_m" not in fact_keys(seen["visitor", run["key"]]["c-i-detail"])
-    assert margins_in(seen["producer", run["key"]]["c-i-figure"]["figure"]) and margins_in(seen["visitor", run["key"]]["c-i-figure"]["figure"]) == []
+    assert margins_in(seen["producer", run["key"]]["c-i-figure"]["figure"]) == margins_in(seen["visitor", run["key"]]["c-i-figure"]["figure"]) == []  # never on the figure
+    margin = f"{run['headline_facts']['margin_m']}"
+    producer_detail = seen["producer", run["key"]]["c-i-detail"]
+    assert margin in folded_words(producer_detail) and f"{margin} m" not in unfolded_words(producer_detail)  # the producer's margin, folded with the facts
     for shown in (words(seen["visitor", run["key"]]["c-i-detail"]), words(seen["visitor", run["key"]]["c-s-detail"])):  # the duo's lines: proposed text, signed by persona
         assert "Suggested lines" in shown and "never voiced" in shown and "Commentary" not in shown, shown
     assert f"{PERSONAS['wren'].short}: " in words(seen["visitor", run["key"]]["c-i-detail"]) and "wren: " not in words(seen["visitor", run["key"]]["c-i-detail"])

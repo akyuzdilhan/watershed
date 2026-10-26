@@ -2,7 +2,7 @@
 
 Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Every sentence of a document on the desk carries the producer feedback controls (`fb_controls`, wired in `console`). Under the storyline, "After the match" shows the recap the worker writes at the final whistle (`Store.recap`): read only, nothing to approve. Like `console`, the functions below are plain functions that `register` wires as callbacks.
 
-In public mode a visitor who is not signed in gets every panel read only (`read_only`): no thumbs, Approve and Reject disabled, and nothing that stays with the producer, that is the offside margin (run labels, facts, run figures) and the counts, rates and bits behind a rarity (`PRODUCER_ONLY_FACTS`, `rarity.basis`). They are left out on the server, not hidden in the page, and a decision without a producer is refused there too (`decide_doc`). The producer gets them folded under "Producer details" (`producer_details`, closed by default), and insight titles never carry the margin, so a screen capture of the producer's view shows no margin unless the producer opens it. Insight types and fact fields read as words (`web.labels`), and a language the model and the templates write directly is labelled like on the overlay ("AI-written, not reviewed").
+In public mode a visitor who is not signed in gets every panel read only (`read_only`): no thumbs, Approve and Reject disabled, and nothing that stays with the producer, that is the offside margin (run labels, facts, run figures) and the counts, rates and bits behind a rarity (`PRODUCER_ONLY_FACTS`, `rarity.basis`). They are left out on the server, not hidden in the page, and a decision without a producer is refused there too (`decide_doc`). The producer gets them folded under "Producer details" (`producer_details`, closed by default): run labels, insight titles and run figures never carry the margin, for the producer either, so a screen capture of the producer's view shows no margin unless the producer opens the details. Insight types and fact fields read as words (`web.labels`), and a language the model and the templates write directly is labelled like on the overlay ("AI-written, not reviewed").
 """
 
 import hashlib
@@ -177,8 +177,8 @@ def texts_block(doc: dict, verdicts: dict | None = None, pane: str = "i") -> lis
 
 # --- match graphics ---------------------------------------------------------------------------------
 
-def graphic_items(feed: dict, kind: str, read_only: bool = False) -> list[dict]:
-    """The items of a kind of graphic; `read_only` labels the runs without their offside margin."""
+def graphic_items(feed: dict, kind: str) -> list[dict]:
+    """The items of a kind of graphic; a run is labelled without its offside margin, for everyone (`run_margin_details` folds it for the producer)."""
     names = player_names(feed.get("info"))
     teams = team_names(feed.get("info"))
     who = lambda pid: names.get(pid, pid)  # noqa: E731
@@ -197,15 +197,16 @@ def graphic_items(feed: dict, kind: str, read_only: bool = False) -> list[dict]:
         breaks = sorted(T.line_breaks(feed["actions"], 4), key=lambda r: (-r["bypassed"], r["seq"]))[:8]
         out += [{"value": f"lb:{r['event_id']}", "label": f"Line break {r['minute_label']}: {who(r['passer_id'])}, {r['bypassed']} defenders bypassed"} for r in breaks]
         runs = sorted(T.runs_behind(feed["actions"]), key=lambda r: abs(r["margin_m"]))[:8]
-        out += [{"value": f"run:{r['event_id']}:{r['runner_id']}", "label": f"Run {r['minute_label']}: {who(r['runner_id'])} " + ("" if read_only else f"{abs(r['margin_m']):.2f} m ")
-                 + f"{'beyond' if r['margin_m'] > 0 else 'inside'} the line"} for r in runs]
+        out += [{"value": f"run:{r['event_id']}:{r['runner_id']}", "label": f"Run {r['minute_label']}: {who(r['runner_id'])} {'beyond' if r['margin_m'] > 0 else 'inside'} the line"}
+                for r in runs]
         spaces = sorted(T.space_at_reception(feed["actions"]), key=lambda r: -r["space_m"])[:6]
         out += [{"value": f"space:{r['event_id']}", "label": f"Space {r['minute_label']}: {who(r['receiver_id'])} {r['space_m']:.1f} m free"} for r in spaces]
         return out
     return []
 
 
-def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict] | None = None, read_only: bool = False) -> go.Figure:
+def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict] | None = None) -> go.Figure:
+    """The figure of a graphic; a run is drawn without its offside margin, for everyone."""
     if kind == "shots":
         return _sized(G.shot_map(feed, THEME, None), 600)
     if kind == "momentum":
@@ -229,7 +230,7 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
             return _sized(G.line_break_figure(feed, rest, THEME, None))
         if tag == "run":
             event_id, _, runner = rest.partition(":")
-            return _sized(G.run_figure(feed, event_id, runner or None, THEME, width=None, show_margin=not read_only))
+            return _sized(G.run_figure(feed, event_id, runner or None, THEME, width=None, show_margin=False))
         if tag == "space":
             return _sized(G.space_figure(feed, rest, THEME, None))
     return empty_figure("Pick a graphic.")
@@ -245,8 +246,22 @@ NOTES = {
 }
 
 
+def run_margin_details(feed: dict, item: str | None) -> html.Details | None:
+    """The offside margin of the run picked in the tactics graphics, folded under "Producer details"; None for any other item."""
+    tag, _, rest = (item or "").partition(":")
+    if tag != "run":
+        return None
+    event_id, _, runner = rest.partition(":")
+    run = next((r for r in T.runs_behind(feed["actions"]) if r["event_id"] == event_id and (not runner or r["runner_id"] == runner)), None)
+    if run is None:
+        return None
+    side = "beyond" if run["margin_m"] > 0 else "inside"
+    return producer_details([html.Div(f"Offside margin {abs(run['margin_m']):.2f} m {side} the line" + (", as VAR measured it" if run.get("official") else ", measured on the frame")
+                                      + ": never on air or to visitors", className="muted small")])
+
+
 def graphics(match_id: str | None, kind: str | None, item: str | None, view: str | None, last_sig: str | None, store=None, read_only: bool = False):
-    """(item options, item value, figure, note, signature); no_update everywhere when the tab is hidden or nothing changed. `read_only` (a visitor in public mode) leaves the offside margins out of the labels and the figures."""
+    """(item options, item value, figure, note, signature); no_update everywhere when the tab is hidden or nothing changed. Labels and figures never carry the offside margin; a producer (not `read_only`) finds the margin of the run picked under "Producer details" in the note."""
     if view != "graphics":
         return (no_update,) * 5
     store = store or get_store()
@@ -257,17 +272,19 @@ def graphics(match_id: str | None, kind: str | None, item: str | None, view: str
     if feed is None or not feed["actions"]:
         return [], None, empty_figure("No feed for this match: set REPLAY_DIR, or put feed.jsonl.gz in the desk folder."), "", None
     state = store.state(match_id) or {}
-    options = graphic_items(feed, kind, read_only)
+    options = graphic_items(feed, kind)
     values = [o["value"] for o in options]
     picked = item if item in values else (values[-1] if kind in ("buildups",) and values else values[0] if values else None)
     sig = _sig(match_id, kind, picked, feed["last_seq"], state.get("last_seq") if kind == "momentum" else None, read_only)
     if sig == last_sig:
         return (no_update,) * 5
     try:
-        fig = graphic_figure(feed, kind, picked, state.get("wp_timeline") if kind == "momentum" else None, read_only)
+        fig = graphic_figure(feed, kind, picked, state.get("wp_timeline") if kind == "momentum" else None)
     except (StopIteration, KeyError, ValueError, IndexError) as error:
         fig = empty_figure(f"Cannot draw this graphic: {error}")
-    return options, picked if picked != item else no_update, fig, NOTES.get(kind, ""), sig
+    folded = None if read_only or kind != "tactics" else run_margin_details(feed, picked)
+    note = NOTES.get(kind, "") if folded is None else [html.P(NOTES.get(kind, "")), folded]
+    return options, picked if picked != item else no_update, fig, note, sig
 
 
 def graphics_pane() -> html.Section:
@@ -275,7 +292,7 @@ def graphics_pane() -> html.Section:
         html.Div([dcc.Dropdown(id="c-g-kind", options=KINDS, value="shots", clearable=False, className="match-picker"),
                   dcc.Dropdown(id="c-g-item", options=[], clearable=False, className="match-picker g-item", placeholder="Moment")], className="g-controls"),
         dcc.Graph(id="c-g-figure", figure=empty_figure("Loading."), config={"displayModeBar": False}, className="g-figure"),
-        html.P(id="c-g-note", className="muted small"), dcc.Store(id="c-g-sig"), dcc.Store(id="c-p-match"), dcc.Interval(id="c-g-tick", interval=PANEL_REFRESH_MS, disabled=True)],
+        html.Div(id="c-g-note", className="muted small"), dcc.Store(id="c-g-sig"), dcc.Store(id="c-p-match"), dcc.Interval(id="c-g-tick", interval=PANEL_REFRESH_MS, disabled=True)],
         id="c-pane-graphics", className="col pane", style={"display": "none"})
 
 
@@ -329,7 +346,7 @@ def insight_title(d: dict) -> str:
 
 
 def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts: dict | None = None, read_only: bool = False) -> tuple[html.Div, go.Figure]:
-    """The selected insight: texts, duo lines, facts and figure. `read_only` (a visitor): no thumbs, no producer-only fact, no rarity basis, a run figure without its margin; a producer gets the producer-only facts and the rarity basis folded (`facts_view`)."""
+    """The selected insight: texts, duo lines, facts and figure. `read_only` (a visitor): no thumbs, no producer-only fact, no rarity basis; a producer gets the producer-only facts (the offside margin among them) and the rarity basis folded (`facts_view`). A run figure never carries its margin."""
     if d is None:
         return html.Div("No insight yet. Tactical candidates appear here once the feed has goals to explain.", className="muted"), empty_figure("No insight selected.")
     rarity = d.get("rarity") or {}
@@ -346,7 +363,7 @@ def insight_detail(d: dict | None, feed: dict | None, from_desk: bool, verdicts:
         parts += suggested_lines(duo)
     basis = (str(rarity["basis"]) + (f" ({rarity['surprisal_bits']} bits)" if rarity.get("surprisal_bits") is not None else "")) if rarity.get("basis") else None
     parts += facts_view(d.get("headline_facts") or {}, d.get("field_meanings") or {}, read_only, basis)
-    fig = G.insight_figure(d, feed, THEME, None, show_margin=not read_only) if feed else None
+    fig = G.insight_figure(d, feed, THEME, None, show_margin=False) if feed else None
     return html.Div(parts), _sized(fig) if fig is not None else empty_figure("No figure for this insight.")
 
 
@@ -485,7 +502,7 @@ def view_styles(view: str | None) -> tuple[dict, dict, dict, bool, bool]:
 
 
 def _graphics_cb(_n, match_id, kind, item, view, last_sig):
-    """Every visitor sees the graphics; without a producer (public mode) the offside margins are left out."""
+    """Every visitor sees the graphics; only a producer gets the folded offside margin of a run."""
     return graphics(match_id, kind, item, view, last_sig, read_only=security.producer() is None)
 
 
