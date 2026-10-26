@@ -323,14 +323,9 @@ def names_ok(text: str, facts: dict, extra: set[str] | frozenset = frozenset()) 
     """Capitalised words that are neither in the facts nor at the start of a sentence: possible invented names. A Title Case headline lists its
     words too: the instructions ask for sentence case, and the retry note says so."""
     allowed = " ".join(str(v) for v in facts.values())
-    words = re.findall(r"(?<![.!?:]\s)(?<![¡¿])(?<!^)\b([A-ZÀ-Ý][\wÀ-ÿ'-]+)", text)
-<<<<<<< HEAD
+    words = re.findall(r"(?<![.!?:]\s)(?<![¡¿])(?<!^)\b([A-ZÀ-ÝĄĆĘŁŃŚŹŻČĎĚŇŘŠŤŮŽŐŰ][\w'-]+)", text)
     words = [re.sub(r"['’]s?$", "", w) for w in words]  # Scarpetta's
-    return sorted({w for w in words if w not in allowed and w not in extra and w != "VAR"})
-=======
-    words = [re.sub(r"['’]s?$", "", w) for w in words]  # Lightfoot's
     return sorted({w for w in words if w not in allowed and w not in extra and w not in COMMON_CAPITALISED})
->>>>>>> lotB2-writer
 
 
 # --- style rules ----------------------------------------------------------------------------------
