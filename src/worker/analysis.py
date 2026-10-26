@@ -349,10 +349,14 @@ def analysis_issues(line: str, lang: str) -> list[dict]:
     return found
 
 
-MORE_WORDS = {"en": r"(?i)\b(?:above|more|bigger|larger|higher|greater|over|up from)\b", "fr": r"(?i)\b(?:plus|au-dessus|supérieure?s?)\b",
-              "es": r"(?i)\b(?:más|por encima|mayor(?:es)?|superior(?:es)?)\b"}
-LESS_WORDS = {"en": r"(?i)\b(?:below|less|smaller|lower|deeper|fewer|under|down from)\b", "fr": r"(?i)\b(?:moins|en dessous|en deçà|inférieure?s?)\b",
-              "es": r"(?i)\b(?:menos|por debajo|menor(?:es)?|inferior(?:es)?)\b"}
+# a comparison is a comparative with its "than" (que, de lo), or above/below: "58% earlier", "plus tôt" or "under pressure" compare nothing
+_THAN = {"en": r"(?:\s+\S+){0,3}?\s+than\b", "fr": r"(?:\s+\S+){0,3}?\s+qu(?:e\b|['’])", "es": r"(?:\s+\S+){0,3}?\s+(?:que|de lo)\b"}
+MORE_WORDS = {"en": r"(?i)\b(?:more|bigger|larger|higher|greater|wider)\b" + _THAN["en"] + r"|\babove\b|\bup from\b",
+              "fr": r"(?i)\bplus\b" + _THAN["fr"] + r"|\bau-dessus\b|\bsupérieure?s?\b",
+              "es": r"(?i)\bmás\b" + _THAN["es"] + r"|\bpor encima\b|\bmayor(?:es)?\b|\bsuperior(?:es)?\b"}
+LESS_WORDS = {"en": r"(?i)\b(?:less|smaller|lower|deeper|fewer|tighter)\b" + _THAN["en"] + r"|\bbelow\b|\bdown from\b",
+              "fr": r"(?i)\bmoins\b" + _THAN["fr"] + r"|\ben dessous\b|\ben deçà\b|\binférieure?s?\b",
+              "es": r"(?i)\bmenos\b" + _THAN["es"] + r"|\bpor debajo\b|\bmenor(?:es)?\b|\binferior(?:es)?\b"}
 PAIRS = (("shooter_space_m", "typical_space_m"), ("opponent_line_before_shot_m", "opponent_line_usual_m"), ("team_threat_share_before_shot_pct", "team_threat_share_earlier_pct"))
 CONTROL_WORDS = {"en": r"(?i)\b(?:in control|on top|dominat\w*|the advantage|took over|taken over|in charge|controll\w*)\b",
                  "fr": r"(?i)(?:\bla main\b|\bl['’]ascendant\b|\bdomin\w*|\bmaîtris\w*|\bcontrôl\w*)", "es": r"(?i)\b(?:mandaba|mandar|domin\w*|control\w*|adueñ\w*|el mando)\b"}
@@ -548,7 +552,7 @@ Bad and good:
 - bad: "Kosznik's pass released Carter to finish." when shooter_name is Méndez (only the shooter finishes)
 - bad (French): "Le Yarnford presse, et la défense du Varleigh recule." good: "Yarnford presse, et Varleigh recule."
 
-Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...], "es": [...]} with the requested languages, each a list of 2 or 3 notes {"line": string, "claims": [{"value": number, "source_field": string}]}. The same notes in every language, each written natively, not translated word for word. A compliant reply for a goal (Varleigh, ball won by Brett Rivero's tackle 19 m from his own goal, move_tempo quick counter, the shot 12 s later; 63% of the threat in the ten minutes before the shot after 28% before, in control and rising):
+Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...], "es": [...]} with the requested languages, each a list of 2 or 3 notes {"line": string, "claims": [{"value": number, "source_field": string}]}. Claims are for numbers only: never claim a reading or a name (rising, in control, quick counter). The same notes in every language, each written natively, not translated word for word. A compliant reply for a goal (Varleigh, ball won by Brett Rivero's tackle 19 m from his own goal, move_tempo quick counter, the shot 12 s later; 63% of the threat in the ten minutes before the shot after 28% before, in control and rising):
 <example>
 """
 ANALYST_INSTRUCTIONS = ANALYST_INSTRUCTIONS.replace("<writer_rules>", "\n".join(_writer_rule(lang) for lang in ("fr", "es"))).replace(
