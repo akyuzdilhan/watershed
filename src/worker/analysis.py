@@ -197,9 +197,9 @@ NOTES = {
                     "es": "Contra la corriente del partido: el {team} tenía el {team_threat_share_recent_pct}% de la amenaza en los {threat_window_min} minutos previos al tiro, {team_threat_share_change_pts} puntos menos que en los {threat_window_min} anteriores."},
     "move": {"en": "A move of {passes_in_move} passes in {move_duration_s} s, finished from a {xg_pct}% chance (expected goals).",
              "fr": "Une action de {passes_in_move} passes en {move_duration_s} s, conclue sur une occasion à {xg_pct} % de but (expected goals).",
-             "es": "Una jugada de {passes_in_move} pases en {move_duration_s} s, rematada con un {xg_pct}% de probabilidad de gol (goles esperados)."},
+             "es": "Una jugada de {passes_in_move} pases en {move_duration_s} s, rematada en una ocasión del {xg_pct}% de gol esperado."},
     "xg": {"en": "{shooter}'s shot was a {xg_pct}% chance (expected goals).", "fr": "Le tir {de_shooter} était une occasion à {xg_pct} % de but (expected goals).",
-           "es": "El tiro de {shooter} tenía un {xg_pct}% de probabilidad de gol (goles esperados)."},
+           "es": "El tiro de {shooter} era una ocasión del {xg_pct}% de gol esperado."},
 }
 NOTES = {key: {lang: fr_typography(v) if lang == "fr" else v for lang, v in by_lang.items()} for key, by_lang in NOTES.items()}
 HOW["fr"] = fr_typography(HOW["fr"])
@@ -365,7 +365,7 @@ Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...
 
 Numbers: write each number exactly as given, never compute a new one, no sign (never +12). Fields ending in _pct take a % sign; fields ending in _m are metres ("6.1 m", French and Spanish "6,1 m"); fields ending in _s are seconds; fields ending in _pts are percentage points: write the word points (puntos) right after the number, and never with a verb of league points (take, gain, win, earn, prendre, gagner, ganar, sumar). Never a count of matches, a rate across the league, a ratio ("3 times more") or bits. An offside is "by a whisker" ("d'un rien", "por muy poco") or "clear" ("net", "claro"), never a distance. No centimetres.
 
-Style: sentence case, a capital on the first word and on names from the facts only. Punctuation: never the long dash (em dash). French: club names without article ("Varleigh", "pour Yarnford", never "le Varleigh" or "d'Yarnford"; make the club the subject if an article would fall before it), a space before % and :, never "swing" or "momentum". Spanish: the article before a club name ("el Varleigh", "del Yarnford"), never "swing" or "momentum".
+Style: sentence case, a capital on the first word and on names from the facts only. Punctuation: never the long dash (em dash). French: never "chance" or "chances" in a sentence that does not name a club (say "occasion"); club names without article ("Varleigh", "pour Yarnford", never "le Varleigh" or "d'Yarnford"; make the club the subject if an article would fall before it), a space before % and :, never "swing" or "momentum". Spanish: never "probabilidad", "opciones" or "posibilidades" in a sentence that does not name a club (say "ocasión"); the article before a club name ("el Varleigh", "del Yarnford"), never "swing" or "momentum".
 """
 ANALYST_REPLY_RULE = "Reply with the JSON object only; every number in claims, from get_analysis_facts only."
 

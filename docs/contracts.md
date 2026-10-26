@@ -37,6 +37,7 @@ Every document carries `match_id`, the partition key in Cosmos DB.
 | `verification` | `{verified, attempts, attempts_log, fallback_reason}` | `attempts`: model calls made for this version; `attempts_log` and `fallback_reason`: the trace (below) |
 | `writer_config` | `{deployment, effort, max_tokens, prompt_sha}` or null | the model writer called for this version (trace, below); null when no model was called |
 | `history` | array of `{action, by, version}` | short form of the audit trail |
+| `analysis` | object | only with `--analyst template` or `foundry` ("Analyst notes" below), on goal, save and chance cards; absent otherwise |
 
 ### Writer trace
 
@@ -71,6 +72,7 @@ One entry per step, each written once:
 | Spotter, without a desk | `{id, match_id, card_id, event_id, action, cause, message_id, minute_label}` | `hold`, `release`, `retract`, `rewrite` |
 | Desk, for a card action from the feed | `{id, match_id, card_id, action, by: "feed", version, at, event_id, message_id, minute_label, cause}`, plus `was_on_air` on `retracted` | `hold`, `release`, `retracted`, `rewrite_requested` |
 | Desk, for a draft or a decision | `{id, match_id, card_id, action, by, version, at}`, plus `verified`, `attempts`, `attempts_log`, `fallback_reason` and `writer_config` on `written` (the writer trace; the `feedback` entry is described under producer feedback) | `written`, `approved`, `edited`, `rejected`, `feedback`; `model_paused` (`failures`, `seconds`, `error`) and `model_resumed` (`failures`) by `desk`, the circuit breaker |
+| Desk with the Analyst (`--analyst`, see "Analyst notes") | `{id, match_id, card_id, action, by, version, at}`, plus `verified`, `attempts`, `attempts_log`, `fallback_reason`, `writer_config` on `analysis_written` (`by` the model name or `template`; `cause: retracted` when the goal was ruled out before the notes were applied), `cause` on `analysis_retracted` (`by: feed`) | `analysis_written`, `analysis_retracted` |
 | Desk with the duo by agents (`--duo agents`, see "Agents and MCP") | `{id, match_id, card_id, action, by: "agents:<model>", version, at, cause}`, plus `turns`, `runs`, `ms`, `tools` on `duo_written`, `reason` and `kept` (who wrote the duo that stays: the Writer's model or `template`) on `duo_fallback` | `duo_written`, `duo_fallback` |
 | Insight engine | `{id, match_id, card_id (the insight id), action, by: "insights", version, at}`, plus `cause`, `superseded_by` and `was_on_air` on `superseded` | `proposed`, `updated`, `revived`, `superseded` |
 
@@ -206,3 +208,23 @@ Options of `python -m worker` (all off by default):
 | `--duo-calls` | agent runs per match for the duo (default 36), apart from the Writer's 40; a turn or a retry is one run; a job reserves the runs of its turns when it is submitted, and is not submitted (`budget`) when they are not free |
 | `--duo-min-value` | minimum `value_pts` of a card for the agents (default 10) |
 | `--duo-deadline` | seconds for one exchange from its start (default 30); beyond, the template duo stays |
+
+## Analyst notes (`card.analysis`, behind `--analyst`)
+
+Written by `worker.analysis.AnalystDesk` after the card is stored (docs/notes/analyst.md); text for the producer and the commentators, never voiced, never approved. Without `--analyst template` or `--analyst foundry` the field is absent and nothing of it is imported.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `status` | `proposed` or `retracted` | `retracted` once VAR rules the goal out: the notes are withdrawn, never used |
+| `retracted_cause` | string | the cause of the retraction (`var_offside`, `var_handball`...); only when retracted |
+| `card_version` | int | the card version the notes were written for; a rewrite gets new notes |
+| `facts_version` | int | version of `analysis_facts` (1) |
+| `texts` | `{lang: [{line, claims: [{value, source_field}]}]}` | 2 or 3 notes per language (`en`, `fr`, `es`), each claim a field of `facts` |
+| `writer` | string | the Analyst's model name, `dry` offline, or `template` |
+| `verified` | bool | the Verifier passed every note (`verify_analysis`) |
+| `machine_translated` | array of language codes | `es`, as on the card |
+| `facts`, `field_meanings` | object | the facts the notes were checked against and the meaning of each field |
+| `verification` | `{attempts, attempts_log, fallback_reason, report}` | the writer trace, as on a card; `fallback_reason` also `budget` (the Analyst's calls per match, `--analyst-calls`, were spent) or `error:<type>` (the job failed) |
+| `writer_config` | `{deployment, effort, max_tokens, prompt_sha}` or null | as on a card; null without a model call |
+
+The Analyst's tool, `get_analysis_facts(card_id)`, returns `{"facts", "field_meanings"}` as JSON, like `get_moment`, or `{"error": message}`.

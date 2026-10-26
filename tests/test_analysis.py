@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from web.matchfeed import build, load
-from worker.analysis import (ANALYST_INSTRUCTIONS, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, dry_analyst, feed_actions, note_scores,
+from worker.analysis import (ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, dry_analyst, feed_actions, fill_note, note_scores,
                              parse_analysis, template_analysis, verify_analysis)
 from worker.desk import Desk
 from worker.pipeline import MemorySink, Pipeline
@@ -108,6 +108,18 @@ def test_french_and_spanish_decimals_use_a_comma():
     lines = {lang: template_analysis(facts, [lang], count=1)[lang][0]["line"] for lang in LANGS}
     assert "6.1 m" in lines["en"] and "6,1 m" in lines["fr"] and "6,1 m" in lines["es"]
     assert all(verify_analysis({lang: template_analysis(facts, [lang], count=2)[lang]}, [lang], facts)["languages"][lang]["count_ok"] is False for lang in LANGS)
+
+
+def test_every_note_verifies_in_every_language_when_its_facts_are_there(feed):
+    facts, _ = facts_at(feed, "52'")
+    facts = facts | {"high_regain": True, "shooter_space_m": 6.1, "match_median_space_m": 2.3, "opponent_line_moved": "higher", "opponent_line_change_m": 4}
+    cases = [(key, how) for key in NOTES for how in (HOW["en"] if key in ("high_regain", "counter", "build_up") else ["tackle"])]
+    for key, how in cases:
+        for lang in LANGS:
+            note = fill_note(NOTES[key][lang], facts | {"regain_how": how, "regain_player": "Otto Meyer"}, lang)
+            assert note is not None, (key, how, lang)
+            report = verify_analysis({lang: [{"line": note[0], "claims": note[1]}] * 2}, [lang], facts | {"regain_player": "Otto Meyer"})
+            assert report["verified"], (key, how, lang, report["lines"][0])
 
 
 def good(feed):

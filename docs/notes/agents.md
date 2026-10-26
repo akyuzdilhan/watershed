@@ -17,6 +17,7 @@ The Verifier stays the authority: every number an agent writes is claimed agains
 | `--duo agents` (`--writer template` or `foundry`) | `AgentDesk`: the card as today with the template duo, then Wren and Joss | `mcp_server`, `duo_agents`, `agent_desk` |
 | `--duo-dry` | an offline model for Wren and Joss (`DryChatClient`): it speaks the template lines and Joss calls `player_history` once through MCP | |
 | `--duo-calls N` (36), `--duo-min-value V` (10), `--duo-deadline S` (30) | the duo's run cap per match, the minimum `value_pts`, the seconds per exchange | |
+| `--analyst template\|foundry` (`--analyst-dry`, `--analyst-calls N`, 12) | `worker.analysis.AnalystDesk`: tactical notes on each goal, save or chance after the card is stored, by the templates or a third agent on Foundry, off the card's path; only the `agents` extra (docs/notes/analyst.md) | `analysis` |
 | `python -m worker.mcp_server --desk-dir D [--history H]` | the same server on stdio over a desk folder, for any MCP host | `mcp_server` |
 
 A subprocess test checks that the default path imports neither `mcp`, `agent_framework_orchestrations` nor any of the four modules.
