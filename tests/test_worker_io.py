@@ -804,12 +804,13 @@ class DocumentSink(MemorySink):
         self.events.upsert_item(m)
 
 
-OFFSIDE_CALL_WORDS = re.compile(r"(?i)whisker|clearly|clear offside|that close|d'un rien|pour un rien|si peu|hors-jeu net|por muy poco|tan poco|fuera de juego claro|\d\s?cm\b|centim")
+MARGIN_AS_NUMBER = re.compile(r"(?i)\d\s?(?:cm|mm|m)\b|centim|millim|\bm[eè]tres?\b|\bmeters?\b|\bmetros?\b")  # a distance given as a number: never on air
+CALL_WORDS = {"tight": re.compile(r"(?i)whisker|d'un rien|por muy poco|por un pelo"), "clear": re.compile(r"(?i)\bclear|hors-jeu net|\bnet\b|\bclaro\b")}  # how close, in words: may go on air
 
 
 @pytest.mark.parametrize("clear", [False, True])
-def test_the_offside_margin_and_its_call_stay_off_air(demo, tmp_path, clear):
-    """The feed sends the margin of the offside VAR rules out: tight in the demo, clear when the same correction sends 60 cm. It stays in the card's var_decision, for the producer: the duo's lines on the ruling and the recap written at the whistle (recap.json) say offside, never how close it was, whether the sink keeps the feed in a list or, like Cosmos DB, in a container."""
+def test_the_offside_margin_stays_off_air_and_its_call_is_said_in_words(demo, tmp_path, clear):
+    """The feed sends the margin of the offside VAR rules out: tight in the demo, clear when the same correction sends 60 cm. The margin stays in the card's var_decision, for the producer: the duo's lines on the ruling and the recap written at the whistle (recap.json) say offside and how close it was in words, from the call (by a whisker, or clear), never the margin as a number, whether the sink keeps the feed in a list or, like Cosmos DB, in a container."""
     stream, _ = demo
     void = next(m for m in stream if m["type"] == "correction" and m["op"] == "void" and m["cause"] == "var_offside")
 
@@ -838,8 +839,12 @@ def test_the_offside_margin_and_its_call_stay_off_air(demo, tmp_path, clear):
         lines = [l["line"] for c in ruled for l in c["duo_ruling"]]
         texts = [t[part] for t in recap["texts"] for part in ("recap", "fan", "analyst")]
         assert any("offside" in l.lower() for l in lines) and "offside" in next(t["recap"] for t in recap["texts"] if t["lang"] == "en")  # the reason is said
-        assert [x for x in lines + texts if OFFSIDE_CALL_WORDS.search(x)] == []
-        assert all(g["margin_cm"] is None for g in recap["analysis"]["disallowed_goals"]) and not [k for k in recap["facts"] if "offside_call" in k or "margin" in k]
+        call = "clear" if clear else "tight"
+        assert any(CALL_WORDS[call].search(l) for l in lines) and CALL_WORDS[call].search(next(t["recap"] for t in recap["texts"] if t["lang"] == "en"))  # the call, in words
+        figures = {f"{margin:g}", f"{margin:g}".replace(".", ","), f"{round(100 * margin)} cm", f"{round(100 * margin)}cm"}
+        assert [x for x in lines + texts if MARGIN_AS_NUMBER.search(x) or any(f in x for f in figures)] == []  # never the margin as a number
+        assert all(g["margin_cm"] is None for g in recap["analysis"]["disallowed_goals"]) and not [k for k in recap["facts"] if "margin" in k]
+        assert [v for k, v in recap["facts"].items() if k.endswith("_offside_call")] == [call]
 
 
 def test_loading_the_worker_loads_no_model_client():

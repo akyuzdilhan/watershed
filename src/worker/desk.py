@@ -129,7 +129,7 @@ class Desk:
             card["retracted_on_air"] = was_on_air
             cause = str(action.get("cause", ""))
             if card["moment"] == "goal" and cause.startswith("var_"):
-                # the margin and its call stay in var_decision, for the console: what reads ruled_out (the duo, the recap) writes for air
+                # the margin stays in var_decision, for the producer; the duo and the recap take the call from it (writer.var_ruling) and say it in words
                 card["ruled_out"] = {"reason": cause[4:], "cause": cause, "minute_label": action.get("minute_label"), "margin_cm": None}
                 card["duo_ruling"], _ = ruling_duo(card, teams, self.languages, self.memory(card["match_id"]))
             self._audit(card, "retracted", "feed", {**detail, "was_on_air": was_on_air})

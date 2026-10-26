@@ -937,7 +937,7 @@ def test_a_card_ruled_out_shows_the_var_reason_and_what_the_duo_says(desk):
     assert ruled["status"] == "retracted" and ruled["ruled_out"]["reason"] == "offside" and ruled.get("duo_ruling")
     teams = desk.state(MATCH)["teams"]
     producer, visitor = console.detail(ruled, desk.audit(MATCH), [], teams), console.detail(ruled, desk.audit(MATCH), [], teams, read_only=True)
-    assert ruled["ruled_out"]["margin_cm"] is None  # the margin and its call stay in var_decision, for the producer
+    assert ruled["ruled_out"]["margin_cm"] is None  # the margin stays in var_decision, for the producer
     call = console.VAR_CALLS[ruled["var_decision"]["call"]]
     assert f"VAR decision: Offside, {call}" in texts_in(producer) and f"{ruled['var_decision']['margin_m']:.2f} m" in texts_in(producer)
     assert f"VAR decision: Offside, {call}" in texts_in(visitor) and " m, producer only" not in texts_in(visitor)
