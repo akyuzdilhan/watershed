@@ -2,17 +2,22 @@
 Every test uses an in-memory exporter or a fake one: no network."""
 
 import pytest
-from opentelemetry import trace
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from generator import generate_match
-from worker import telemetry
-from worker.desk import Desk
-from worker.pipeline import MemorySink, Pipeline
-from worker.writer import TemplateWriter
+trace = pytest.importorskip("opentelemetry.trace")
+pytest.importorskip("opentelemetry.sdk.trace")
+pytest.importorskip("azure.monitor.opentelemetry.exporter")
+
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
+
+from generator import generate_match  # noqa: E402
+from worker import telemetry  # noqa: E402
+from worker.desk import Desk  # noqa: E402
+from worker.pipeline import MemorySink, Pipeline  # noqa: E402
+from worker.writer import TemplateWriter  # noqa: E402
 
 CONNECTION = "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.invalid/"
-ALLOWED = {"match_id", "card_id", "kind", "action", "cause", "cards", "writer", "verified", "attempts", "fallback_reason", "status", "version", "deployment", "prompt_sha"}
+ALLOWED = {"match_id", "card_id", "kind", "action", "cause", "cards", "writer", "verified", "attempts", "fallback_reason", "status", "version", "deployment", "prompt_sha",
+           "input_tokens", "output_tokens", "reasoning_tokens", "finish_reason", "error.type"}
 
 
 @pytest.fixture(scope="module")
@@ -153,3 +158,42 @@ def test_a_bad_connection_string_leaves_the_worker_without_traces(monkeypatch, i
     with telemetry.span("desk.write", card_id="x") as s:
         assert s is None
 
+
+def test_an_exception_leaves_its_type_on_the_span_and_not_its_message():
+    exporter = InMemorySpanExporter()
+    telemetry.configure({telemetry.ENV: CONNECTION}, exporter=exporter)
+    with pytest.raises(RuntimeError), telemetry.span("desk.write_recap", card_id="recap-m-1"):
+        raise RuntimeError("the reply quoted a whole paragraph of the recap")
+    (s,) = exporter.get_finished_spans()
+    assert s.attributes["error.type"] == "RuntimeError" and s.status.status_code == trace.StatusCode.ERROR
+    assert not s.events and not s.status.description
+
+
+def test_the_tokens_of_the_model_attempts_are_on_the_span():
+    doc = {"writer": "model", "verification": {"verified": True, "attempts": 2, "attempts_log": [
+        {"attempt": 1, "writer": "model", "verified": False, "finish_reason": "length", "usage": {"input_tokens": 900, "output_tokens": 300, "reasoning_tokens": 200}},
+        {"attempt": 2, "writer": "model", "verified": True, "finish_reason": "stop", "usage": {"input_tokens": 950, "output_tokens": 250, "reasoning_tokens": None}}]},
+        "writer_config": {"deployment": "nano", "prompt_sha": "0123456789ab"}}
+    out = telemetry.outcome(doc)
+    assert (out["input_tokens"], out["output_tokens"], out["reasoning_tokens"], out["finish_reason"]) == (1850, 550, 200, "stop")
+    assert set(telemetry.outcome({"verification": {"attempts_log": []}})) <= ALLOWED - {"input_tokens", "output_tokens", "reasoning_tokens", "finish_reason"}
+
+
+def test_a_distro_that_set_the_global_provider_before_failing_keeps_one_provider(monkeypatch, isolated):
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    def half_done(**kwargs):
+        monkeypatch.setattr(trace, "get_tracer_provider", lambda: provider)
+        raise ValueError("an instrumentation failed")
+
+    monkeypatch.setattr(telemetry, "_azure_monitor", lambda: half_done)
+    assert telemetry.configure({telemetry.ENV: CONNECTION})
+    assert isolated == []  # no second provider offered
+    with telemetry.span("desk.write", card_id="x"):
+        pass
+    assert [s.name for s in exporter.get_finished_spans()] == ["desk.write"]

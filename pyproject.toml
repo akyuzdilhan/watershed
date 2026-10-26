@@ -12,7 +12,7 @@ dependencies = ["numpy>=2.5.4", "scipy>=1.18.1"]
 
 [project.optional-dependencies]
 azure = ["azure-servicebus>=7.15.0", "azure-identity>=1.26.0", "azure-cosmos>=4.17.1", "python-dotenv>=1.2.4"]
-agents = ["agent-framework-core>=1.23", "agent-framework-foundry>=1.15", "azure-monitor-opentelemetry>=1.8.10,<2"]
+agents = ["agent-framework-core>=1.23", "agent-framework-foundry>=1.15", "opentelemetry-sdk>=1.45.1", "azure-monitor-opentelemetry-exporter>=1.0.0b58"]
 web = ["dash>=4.4.1", "plotly>=7.1.0"]
 dev = ["pytest>=9.1.1", "common-data-format-validator>=0.1.1"]
 

@@ -1,13 +1,15 @@
 """Traces of the worker in Application Insights, only when APPLICATIONINSIGHTS_CONNECTION_STRING is set.
 
-`configure()` sets up the export: `azure.monitor.opentelemetry.configure_azure_monitor` when that package is installed (the worker image has it, through the
-`agents` extra), else the OpenTelemetry SDK with `AzureMonitorTraceExporter` from azure-monitor-opentelemetry-exporter. It then turns on the Agent Framework
+`configure()` sets up the export: the OpenTelemetry SDK with `AzureMonitorTraceExporter` from azure-monitor-opentelemetry-exporter (both in the `agents`
+extra, so in the worker image), or `azure.monitor.opentelemetry.configure_azure_monitor` when that package happens to be installed (the image does not
+install it). It then turns on the Agent Framework
 instrumentation without sensitive data (`enable_instrumentation(enable_sensitive_data=False)`: model calls are traced with their durations, token counts and
 model names, never with the prompts or the replies, whatever ENABLE_SENSITIVE_DATA says). Without the variable nothing is configured, nothing is imported, and
 `span()` costs a function call.
 
 The pipeline wraps each draft and each card action of the desk in a span (`span()`), with the ids, the kind, the writer, the verdict of the Verifier and the
-fallback reason as attributes. No text of a card, an insight or a recap is ever put on a span.
+fallback reason as attributes. No text of a card, an insight or a recap is ever put on a span, nor the message of an exception that crosses one: the
+span keeps only its type (`error.type`), as the Agent Framework does without sensitive data.
 """
 
 import contextlib
@@ -88,8 +90,14 @@ def configure(environ: Mapping[str, str] | None = None, exporter=None) -> bool:
             try:
                 distro(connection_string=connection_string, resource=resource)
             except Exception as error:  # an option it does not take, or a failed setup: the SDK path still exports
-                log.warning("configure_azure_monitor failed, exporting through the SDK: %s: %s", type(error).__name__, str(error)[:200])
-                distro = None
+                from opentelemetry import trace
+
+                if isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
+                    log.warning("configure_azure_monitor failed (%s), exporting through the SDK", type(error).__name__)
+                    distro = None
+                else:  # it set the global provider before failing, and OpenTelemetry sets it once: the desk's spans go there too, with the Agent Framework's
+                    log.warning("configure_azure_monitor failed (%s) after setting the tracer provider; the spans go to that provider", type(error).__name__)
+                    _tracer, _provider = trace.get_tracer(TRACER_NAME), None
             else:
                 from opentelemetry import trace
 
@@ -98,10 +106,10 @@ def configure(environ: Mapping[str, str] | None = None, exporter=None) -> bool:
             _tracer, _provider = _sdk(connection_string, resource, exporter)
         _instrument_agent_framework()
     except Exception as error:  # a bad connection string or a missing package: no traces, the desk still runs
-        log.warning("traces not exported: %s: %s", type(error).__name__, str(error)[:200])
+        log.warning("traces not exported: %s", type(error).__name__)
         _tracer = _provider = None
         return False
-    log.info("traces exported to Application Insights (%s)", "azure-monitor-opentelemetry" if _provider is None else "opentelemetry-sdk")
+    log.info("traces exported to Application Insights (%s)", "opentelemetry-sdk" if _provider is not None else "global tracer provider")
     return True
 
 
@@ -128,8 +136,15 @@ def span(name: str, **attributes) -> Iterator[object | None]:
     if _tracer is None:
         yield None
         return
-    with _tracer.start_as_current_span(name, attributes=_clean(attributes)) as s:
-        yield s
+    with _tracer.start_as_current_span(name, attributes=_clean(attributes), record_exception=False, set_status_on_exception=False) as s:
+        try:
+            yield s
+        except Exception as error:  # the type only: an exception message can quote a text or a reply
+            from opentelemetry.trace import StatusCode
+
+            s.set_attribute("error.type", type(error).__name__)
+            s.set_status(StatusCode.ERROR)
+            raise
 
 
 def annotate(s, **attributes) -> None:
@@ -137,9 +152,26 @@ def annotate(s, **attributes) -> None:
         s.set_attributes(_clean(attributes))
 
 
+def _usage(log_: object) -> dict:
+    """Token totals and the last finish reason over `verification.attempts_log`; nothing when the document has no attempt log."""
+    attempts = [a for a in log_ if isinstance(a, dict)] if isinstance(log_, list) else []
+    if not attempts:
+        return {}
+    usages = [a["usage"] for a in attempts if isinstance(a.get("usage"), dict)]
+
+    def total(key: str) -> int | None:
+        values = [u[key] for u in usages if isinstance(u.get(key), int)]
+        return sum(values) if values else None
+
+    return {"input_tokens": total("input_tokens"), "output_tokens": total("output_tokens"), "reasoning_tokens": total("reasoning_tokens"),
+            "finish_reason": attempts[-1].get("finish_reason")}
+
+
 def outcome(doc: dict) -> dict:
-    """What a span keeps of a written document: who wrote it, the Verifier's verdict, why the template replaced the model, and the status. No text."""
+    """What a span keeps of a written document: who wrote it, the Verifier's verdict, why the template replaced the model, the tokens of the model
+    attempts, and the status. No text."""
     v = doc.get("verification") if isinstance(doc.get("verification"), dict) else {}
     config = doc.get("writer_config") if isinstance(doc.get("writer_config"), dict) else {}
     return {"writer": doc.get("writer"), "verified": v.get("verified"), "attempts": v.get("attempts"), "fallback_reason": v.get("fallback_reason"),
-            "status": doc.get("status"), "version": doc.get("version"), "deployment": config.get("deployment"), "prompt_sha": config.get("prompt_sha")}
+            "status": doc.get("status"), "version": doc.get("version"), "deployment": config.get("deployment"), "prompt_sha": config.get("prompt_sha"),
+            **_usage(v.get("attempts_log"))}
