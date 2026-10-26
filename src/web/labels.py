@@ -2,7 +2,7 @@
 
 import re
 
-ACTIONS = {"written": "Written", "approved": "Approved", "approved_under_review": "Confirmed during a VAR check", "rejected": "Rejected", "edited": "Edited", "retracted": "Retracted", "rewrite_requested": "Rewrite requested",
+ACTIONS = {"written": "Written", "approved": "Published", "approved_under_review": "Published during a VAR check", "rejected": "Rejected", "edited": "Edited", "retracted": "Retracted", "rewrite_requested": "Rewrite requested",
            "hold": "Held for a VAR check", "release": "Released after the check", "feedback": "Feedback", "superseded": "Superseded"}
 FACT_TYPES = {  # the prefix of an insight key (worker.insights, worker.tactics), longest first when matched
     "hat-trick-speed": "Fastest hat-trick", "ht-lead-lost": "Half-time lead lost", "stat-of-the-match": "Stat of the match", "possession-swing": "Possession swing",

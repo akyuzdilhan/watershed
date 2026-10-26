@@ -103,7 +103,7 @@ def test_a_half_written_file_keeps_the_last_good_read(desk):
 def test_approve_and_reject_go_through_the_desk_and_are_audited(desk):
     goal, other = card_at(desk, "66'"), card_at(desk, "14'")
     message, done = console.decide("approve", MATCH, goal["id"], "producer-1")
-    assert done and "approved by Producer" in message and "producer-1" not in message  # the screen names the producer, the audit keeps who
+    assert done and "published by Producer" in message and "producer-1" not in message  # the screen names the producer, the audit keeps who
     message, done = console.decide("reject", MATCH, other["id"], "producer-1")
     assert done
     on_disk = {c["id"]: c for c in json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))}
@@ -118,7 +118,7 @@ def test_a_card_under_var_review_needs_an_explicit_confirmation(desk):
     goal = card_at(desk, "66'")
     cards = json.loads((desk.root / MATCH / "cards.json").read_text(encoding="utf-8"))
     (desk.root / MATCH / "cards.json").write_text(json.dumps([dict(c, under_review=True) if c["id"] == goal["id"] else c for c in cards]), encoding="utf-8")
-    assert console.approve_styles(card_at(desk, "66'")) == ({"display": "none"}, {})  # Approve is replaced by "Approve during VAR check"
+    assert console.approve_styles(card_at(desk, "66'")) == ({"display": "none"}, {})  # Publish is replaced by "Publish during VAR check"
     assert console.approve_styles(card_at(desk, "14'")) == ({}, {"display": "none"})
     message, done = console.decide("approve", MATCH, goal["id"], "producer-1")
     assert not done and "VAR check" in message and card_at(desk, "66'")["status"] == "pending"
@@ -126,7 +126,7 @@ def test_a_card_under_var_review_needs_an_explicit_confirmation(desk):
     assert done and "during the VAR check, confirmed by Producer" in message and card_at(desk, "66'")["status"] == "approved"
     entries = [e for e in desk.audit(MATCH) if e.get("card_id") == goal["id"]]
     assert [(e["action"], e["by"]) for e in entries[-2:]] == [("approved_under_review", "producer-1"), ("approved", "producer-1")] and entries[-2]["force"] is True
-    assert "Confirmed during a VAR check  by Producer" in texts_in(console.history_view(card_at(desk, "66'"), desk.audit(MATCH), False))
+    assert "Published during a VAR check  by Producer" in texts_in(console.history_view(card_at(desk, "66'"), desk.audit(MATCH), False))
     assert console.decide("approve-var", MATCH, goal["id"], None)[1] is False  # still a producer decision
 
 
@@ -264,8 +264,8 @@ def test_the_summary_line_says_verified_traced_writer_time_and_status(desk):
     assert line.startswith("Verified") and f"every number traced to a fact ({n})" in line and "written by the templates" in line and "waiting for a producer" in line
     assert console.decide("approve", MATCH, goal["id"], "ana@example.com")[1]
     goal = card_at(desk, "66'")
-    assert "on air, approved by Producer" in summary_of(console.detail(goal, desk.audit(MATCH), [], teams))
-    assert "on air, approved by a producer" in summary_of(console.detail(goal, desk.audit(MATCH), [], teams, read_only=True))
+    assert "on air, published by Producer" in summary_of(console.detail(goal, desk.audit(MATCH), [], teams))
+    assert "on air, published by a producer" in summary_of(console.detail(goal, desk.audit(MATCH), [], teams, read_only=True))
     timed = dict(goal, writer="gpt-5.4-nano", verification=dict(goal["verification"], attempts_log=[{"attempt": 1, "latency_s": 20.1, "rejected": []}, {"attempt": 2, "latency_s": 2.5, "rejected": []}]))
     line = summary_of(console.detail(timed, desk.audit(MATCH), [], teams, read_only=True))
     assert "gpt-5.4-nano · 22.6 s · on air" in line and "ana@example.com" not in line
@@ -601,7 +601,7 @@ def test_approve_callback_refuses_without_sign_in_in_public_mode(desk, monkeypat
     body = {
         "output": "..c-message.children...c-rev.data..",
         "outputs": [{"id": "c-message", "property": "children"}, {"id": "c-rev", "property": "data"}],
-        "inputs": [{"id": "c-approve", "property": "n_clicks", "value": 1}, {"id": "c-reject", "property": "n_clicks", "value": None},
+        "inputs": [{"id": "c-approve", "property": "n_clicks", "value": 1},
                    {"id": "c-approve-edit", "property": "n_clicks", "value": None}, {"id": "c-approve-var", "property": "n_clicks", "value": None}],
         "state": [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card["id"]},
                   {"id": "c-rev", "property": "data", "value": 0}, pattern, pattern, pattern, pattern],
@@ -613,7 +613,7 @@ def test_approve_callback_refuses_without_sign_in_in_public_mode(desk, monkeypat
     assert card_at(desk, "66'")["status"] == "pending"
     monkeypatch.setenv("PUBLIC_MODE", "0")
     response = app.server.test_client().post("/_dash-update-component", json=body)
-    assert "approved by Producer" in response.get_data(as_text=True) and "local-producer" not in response.get_data(as_text=True)
+    assert "published by Producer" in response.get_data(as_text=True) and "local-producer" not in response.get_data(as_text=True)
     assert audit_of(desk, card["id"])[-1] == ("approved", "local-producer")
     assert card_at(desk, "66'")["status"] == "approved"
 
@@ -699,11 +699,11 @@ def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypa
     monkeypatch.setenv("PUBLIC_MODE", "1")
     monkeypatch.setenv("EASY_AUTH_ENABLED", "true")
     with app.server.test_request_context("/"):
-        rundown, _, detail, head, fig, score, approve_off, edit_off, reject_off, _, _ = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)
+        rundown, _, detail, head, fig, score, approve_off, edit_off, _, _ = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)
     text = texts_in(detail) + texts_in(head)
     en = next(t for t in goal["texts"] if t["lang"] == "en")
     assert len(rundown) == 11 and en["headline"] in text and "5-2" in score and len(fig.data) >= 3
-    assert approve_off and edit_off and reject_off
+    assert approve_off and edit_off
     assert not feedback_ids(detail) and not feedback_ids(detail, "fb-r") and not feedback_ids(detail, "fb-n")  # no thumbs, reasons or notes
     history = texts_in(find(detail, lambda c: getattr(c, "className", "") == "history"))
     assert "ana@example.com" not in text and "by a producer" in history and "feedback" not in history and "Producer feedback" not in text
@@ -734,7 +734,7 @@ def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypat
 
     def decision(button: str, card: dict, headline: str | None = None) -> tuple[list, list, list]:
         edits = [[{"id": hid, "property": "id", "value": hid}], [{"id": hid, "property": "value", "value": headline}], [], []] if headline else [[], [], [], []]
-        inputs = [{"id": b, "property": "n_clicks", "value": 1 if b == button else None} for b in ("c-approve", "c-reject", "c-approve-edit", "c-approve-var")]
+        inputs = [{"id": b, "property": "n_clicks", "value": 1 if b == button else None} for b in ("c-approve", "c-approve-edit", "c-approve-var")]
         state = [{"id": "c-match", "property": "value", "value": MATCH}, {"id": "c-rundown", "property": "value", "value": card["id"]},
                  {"id": "c-rev", "property": "data", "value": 0}, *edits]
         return inputs, state, [f"{button}.n_clicks"]
@@ -753,8 +753,8 @@ def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypat
         return inputs, [{"id": "c-match", "property": "value", "value": MATCH}], ["c-edit.n_clicks"]
 
     for headers in (VISITOR, {**VISITOR, security.PRINCIPAL_HEADER: ""}):  # nobody signed in
-        for body in (decision("c-approve", goal), decision("c-reject", other), decision("c-approve-edit", goal, "Edited by a visitor"), decision("c-approve-var", goal)):
-            assert "Sign in to approve or reject cards" in dash_post(DECIDE, *body, headers=headers).get_data(as_text=True)
+        for body in (decision("c-approve", goal), decision("c-approve-edit", goal, "Edited by a visitor"), decision("c-approve-var", goal)):
+            assert "Sign in to publish cards" in dash_post(DECIDE, *body, headers=headers).get_data(as_text=True)
         for body in (judge("fb", goal, "down"), judge("fb-r", goal, "too_long"), judge("fb-n", goal, "Too long by half")):
             assert "Sign in to give feedback" in dash_post("c-i-rev.data@", *body, headers=headers).get_data(as_text=True)
         panel = dash_post("c-edit-panel.children", *edit_open(goal), headers=headers).get_json()["response"]
@@ -764,9 +764,11 @@ def test_visitors_cannot_decide_edit_or_judge_and_a_producer_can(desk, monkeypat
     producer = {**VISITOR, security.PRINCIPAL_HEADER: "ana@example.com"}
     panel = dash_post("c-edit-panel.children", *edit_open(goal), headers=producer).get_json()["response"]
     assert len(panel["c-edit-panel"]["children"]) == len(goal["texts"])
-    approved, rejected = (dash_post(DECIDE, *decision(b, c), headers=producer).get_data(as_text=True) for b, c in (("c-approve", goal), ("c-reject", other)))
+    approved = dash_post(DECIDE, *decision("c-approve", goal), headers=producer).get_data(as_text=True)
+    with app.server.test_request_context("/", headers=producer):
+        rejected = console.decide("reject", MATCH, other["id"], security.producer())[0]  # no Reject button: the desk's reject stays for the API
     judged = dash_post("c-i-rev.data@", *judge("fb-r", goal, "too_long"), headers=producer).get_data(as_text=True)
-    assert "approved by Producer" in approved and "Rejected by Producer" in rejected and "not relevant (too long), by Producer" in judged
+    assert "published by Producer" in approved and "Rejected by Producer" in rejected and "not relevant (too long), by Producer" in judged
     assert not any("ana@example.com" in answer for answer in (approved, rejected, judged))
     assert audit_of(desk, goal["id"])[-1] == ("feedback", "ana@example.com") and audit_of(desk, other["id"])[-1] == ("rejected", "ana@example.com")
     assert "with a note" in dash_post("c-i-rev.data@", *judge("fb-n", goal, "Too long by half"), headers=producer).get_data(as_text=True)
@@ -955,7 +957,8 @@ def test_decision_buttons_sit_between_the_heading_and_the_texts():
             return next(i for i, ids in enumerate(blocks) if cid in ids)
 
         assert at("c-head") < at("c-approve") < at("c-edit-panel") < at("c-detail") and at("c-lang") == at("c-head")  # the title and the language on one line
-        assert at("c-approve") == at("c-edit") == at("c-reject") and at("c-message") < at("c-detail")
+        assert at("c-approve") == at("c-edit") and at("c-message") < at("c-detail") and "c-reject" not in component_ids(page)  # no Reject button
+        assert [texts_in(find(page, lambda c, i=i: getattr(c, "id", None) == i)) for i in ("c-approve", "c-approve-var", "c-approve-edit")] == ["Publish", "Publish during VAR check", "Publish edited"]
         lang = find(page, lambda c: getattr(c, "id", None) == "c-lang")[0]
         assert lang.value == "en" and [(o["value"], o["label"]) for o in lang.options] == [("en", "EN"), ("fr", "FR"), ("es", "ES")]
         switch = find(page, lambda c: getattr(c, "className", "") == "lang-switch")[0]
@@ -974,7 +977,7 @@ def test_the_language_switch_through_the_dash_endpoint_for_a_visitor(desk, monke
     for lang in ("en", "fr", "es"):
         payload = dash_post(REFRESH, *refresh_body(goal["id"], lang=lang), headers=VISITOR).get_json()["response"]
         shown[lang] = json.dumps(payload["c-detail"], ensure_ascii=False)
-        assert payload["c-approve"]["disabled"] is True and payload["c-edit"]["disabled"] is True and payload["c-reject"]["disabled"] is True
+        assert payload["c-approve"]["disabled"] is True and payload["c-edit"]["disabled"] is True and "c-reject" not in payload
         assert not [i for i in json_ids(payload["c-detail"]) if isinstance(i, dict) and i.get("type", "").startswith("fb")]
         assert goal["player"]["name"] in json.dumps(payload["c-head"], ensure_ascii=False)
     for lang, t in text.items():
@@ -1070,6 +1073,7 @@ def test_readable_labels_for_fact_types_fields_and_audit_actions(desk):
     assert console.fact_label("streak") == "Streak" and console.fact_label("brand-new-thing-home-3") == "Brand new thing"
     assert console.field_label("varleigh_wp_before_pct") == "Varleigh win probability before (%)" and console.field_label("swing_pts") == "Swing (points)"
     assert console.field_label("shot_xg_pct") == "Shot xG (%)" and console.action_label("rewrite_requested") == "Rewrite requested"
+    assert console.action_label("approved") == "Published" and console.action_label("approved_under_review") == "Published during a VAR check"  # the stored action keeps its name
     ruled = card_at(desk, "63'")
     history = texts_in(find(console.detail(ruled, desk.audit(MATCH)), lambda c: getattr(c, "className", "") == "history"))
     assert "Retracted" in history and "Held for a VAR check" in history and "VAR offside" in history and "var_offside" not in history and "rewrite_requested" not in history

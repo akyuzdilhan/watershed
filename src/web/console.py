@@ -1,6 +1,6 @@
 """The console (`/`): the rundown of cards, the selected card with its texts, the claim behind every number and the Verifier's report, its history, the producer's decisions, and the win-probability curve.
 
-The rundown is in match order, the cards waiting for a decision grouped at the top. The selected card shows its heading, then Approve, Edit and Reject, then its texts in one language at a time (English by default, French and Spanish on the switch next to the buttons). Fact types, fields and audit actions read as words ("Half-time lead lost"), not keys. A card ruled out shows why VAR ruled it out and what the duo says about it (`duo_ruling`). The writing trace (`verification.attempts_log`, `fallback_reason`, `writer_config`) is shown when the card carries it. Without a selection the earliest card waiting for a decision is picked, else, at full time, the headline story (the first card VAR pulled off air, else the card of the highest value), else the most recent card of the match.
+The rundown is in match order, the cards waiting for a decision grouped at the top. The selected card shows its heading and the language pills (English by default, French and Spanish), then Publish and Edit for a producer (no Reject: a card nobody publishes stays unpublished; `decide("reject")` stays for the API), then its texts in one language at a time. Fact types, fields and audit actions read as words ("Half-time lead lost"), not keys. A card ruled out shows why VAR ruled it out and what the duo says about it (`duo_ruling`). The writing trace (`verification.attempts_log`, `fallback_reason`, `writer_config`) is shown when the card carries it. The detail follows the most recent card in time until the viewer clicks a card; Follow live follows again.
 
 What stays with the producer (the offside margin, the writer settings, the error causes and `fallback_reason`, which can hold a service's error message) is folded under "Producer details", closed by default (`panels.producer_details`), and the producer's identity never shows: the console says `security.display_name()` ("Producer", or `PRODUCER_DISPLAY_NAME`) in "Signed in as", in the decision messages and in the history, while the audit keeps the identity. A screen capture of the producer's view shows neither an address nor a margin unless the producer opens the details.
 
@@ -243,7 +243,7 @@ def latency(doc: dict) -> float | None:
 
 
 def status_words(card: dict, audit: list[dict], read_only: bool) -> str:
-    """Where the card stands, with who decided: "on air, approved by auto-approve", "waiting for a producer", "retracted by the feed (VAR offside)"."""
+    """Where the card stands, with who decided: "on air, published by auto-approve", "waiting for a producer", "retracted by the feed (VAR offside)"."""
     status = card.get("status")
     if status == "retracted":
         reason = var_reason(card)
@@ -253,7 +253,7 @@ def status_words(card: dict, audit: list[dict], read_only: bool) -> str:
         word = "approved" if status == "approved" else "rejected"
         entries = [e for e in audit if e.get("card_id") == card["id"] and e.get("action") == word and e.get("by")] or [h for h in card.get("history") or [] if h.get("action") == word]
         who = f" by {actor(entries[-1]['by'], word, card, read_only)}" if entries else ""
-        return ("on air, approved" if status == "approved" else "rejected") + who
+        return ("on air, published" if status == "approved" else "rejected") + who
     return "waiting for a producer" if status == "pending" else "being written"
 
 
@@ -507,7 +507,7 @@ def scoreline(state: dict | None) -> str:
 
 
 def approve_styles(card: dict | None) -> tuple[dict, dict]:
-    """(Approve, Approve during VAR check) styles: a card under a VAR check that can still go on air gets the second one only, an explicit confirmation (`Desk.approve(force=True)`)."""
+    """(Publish, Publish during VAR check) styles: a card under a VAR check that can still go on air gets the second one only, an explicit confirmation (`Desk.approve(force=True)`)."""
     show, hide = {}, {"display": "none"}
     var = bool(card and card.get("under_review") and card.get("status") in ("pending", "rejected"))
     return (hide, show) if var else (show, hide)
@@ -642,7 +642,7 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
 
 
 def edit_panel(open_: bool, match_id: str | None, card_id: str | None, store=None) -> tuple[list, dict]:
-    """The edit fields for every language of the card, and the style of the "Approve edited" button."""
+    """The edit fields for every language of the card, and the style of the "Publish edited" button."""
     hidden = {"display": "none"}
     if not open_ or not match_id or not card_id:
         return [], hidden
@@ -691,7 +691,7 @@ def check_edits(card: dict, texts: list[dict], teams: dict[str, str]) -> list[st
 def decide(action: str, match_id: str | None, card_id: str | None, by: str | None, edits: dict[str, dict] | None = None, store=None) -> tuple[str, bool]:
     """Applies a producer decision through the Desk, audited `by` the producer's identity; returns (message, done), the message naming the producer as `security.display_name()`."""
     if by is None:
-        return "Sign in to approve or reject cards.", False
+        return "Sign in to publish cards.", False
     who = security.display_name()
     if not match_id or not card_id:
         return "Select a card first.", False
@@ -702,7 +702,7 @@ def decide(action: str, match_id: str | None, card_id: str | None, by: str | Non
     try:
         if action == "approve":
             store.approve(match_id, card_id, by)
-            return f"On air, approved by {who}.", True
+            return f"On air, published by {who}.", True
         if action == "approve-var":
             store.approve(match_id, card_id, by, force=True)
             return f"On air during the VAR check, confirmed by {who}.", True
@@ -713,13 +713,13 @@ def decide(action: str, match_id: str | None, card_id: str | None, by: str | Non
             texts = edited_texts(card, edits or {})
             if texts is None:
                 store.approve(match_id, card_id, by)
-                return f"No change: on air as written, approved by {who}.", True
+                return f"No change: on air as written, published by {who}.", True
             teams = (store.state(match_id) or {}).get("teams") or {card["team"]: card["team_name"], ("away" if card["team"] == "home" else "home"): ""}
             problems = check_edits(card, texts, teams)
             if problems:
                 return "Edit refused by the Verifier. " + " | ".join(problems), False
             store.approve(match_id, card_id, by, texts=texts)
-            return f"Edited and on air, approved by {who}.", True
+            return f"Edited and on air, published by {who}.", True
     except ValueError as error:
         return f"Refused: {error}.", False
     return f"Unknown action {action}.", False
@@ -907,15 +907,14 @@ def layout(user: str | None) -> html.Div:
                           dcc.Store(id="c-rundown-folded", storage_type="local"), dcc.RadioItems(id="c-rundown", options=[], className="rundown", inputClassName="ru-radio", labelClassName="ru-label")], className="col col-left"),
             html.Section([
                 html.Div([html.Div(id="c-head", className="title-main"), lang_switch()], className="title-row"),
-                html.Div([html.Div([html.Button("Approve", id="c-approve", className="btn btn-approve", disabled=True),
-                                    html.Button("Approve during VAR check", id="c-approve-var", className="btn btn-approve btn-var", style={"display": "none"},
+                html.Div([html.Div([html.Button("Publish", id="c-approve", className="btn btn-approve", disabled=True),
+                                    html.Button("Publish during VAR check", id="c-approve-var", className="btn btn-approve btn-var", style={"display": "none"},
                                                 title="The goal may still be ruled out: it goes on air now, the confirmation is audited"),
-                                    html.Button("Edit", id="c-edit", className="btn", disabled=True),
-                                    html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden),
+                                    html.Button("Edit", id="c-edit", className="btn", disabled=True)], className="actions", **hidden),
                           *([] if read_only else [feedback_popover()])], className="detail-bar"),
                 html.Div(id="c-message", className="message", role="status"),
                 html.Div(id="c-edit-panel", className="edit-panel"),
-                html.Div([html.Button("Approve edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
+                html.Div([html.Button("Publish edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
                          id="c-edit-actions", className="actions", style={"display": "none"}),
                 html.Div(id="c-detail")], className="col col-middle"),
             html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", figure=panels.empty_figure("Loading."), config={"displayModeBar": False}),
@@ -1011,7 +1010,8 @@ def _refresh_cb(_n, rev, match_id, selected, lang, last_sig, t=None, follow=Fals
     except Exception:  # noqa: BLE001  (called outside a callback, by the tests)
         trigger = None
     follow = following(trigger, follow)
-    return (*refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None, lang=lang, t=t, follow=follow), follow)
+    out = refresh(match_id, selected, last_sig, rev, read_only=security.producer() is None, lang=lang, t=t, follow=follow)
+    return (*out[:8], *out[9:], follow)  # the console has no Reject button: a card nobody publishes stays unpublished (`decide("reject")` stays for the API)
 
 
 def _edit_cb(_edit, _cancel, _rev, card_id, match_id):
@@ -1020,13 +1020,13 @@ def _edit_cb(_edit, _cancel, _rev, card_id, match_id):
     return edit_panel(ctx.triggered_id == "c-edit", match_id, card_id)
 
 
-def _decide_cb(_a, _r, _e, _v, match_id, card_id, rev, h_ids, headlines, w_ids, whys):
-    action = {"c-approve": "approve", "c-reject": "reject", "c-approve-edit": "approve-edited", "c-approve-var": "approve-var"}.get(ctx.triggered_id)
+def _decide_cb(_a, _e, _v, match_id, card_id, rev, h_ids, headlines, w_ids, whys):
+    action = {"c-approve": "approve", "c-approve-edit": "approve-edited", "c-approve-var": "approve-var"}.get(ctx.triggered_id)
     if action is None:
         return no_update, no_update
     by = security.producer()
     if by is None:  # read only: refused before anything is read or written
-        return html.Span("Sign in to approve or reject cards.", className="error"), no_update
+        return html.Span("Sign in to publish cards.", className="error"), no_update
     edits: dict[str, dict] = {}
     for i, v in zip(h_ids, headlines):
         edits.setdefault(i["lang"], {})["headline"] = v
@@ -1069,7 +1069,7 @@ def register(app) -> None:
     app.callback(Output("c-match", "options"), Output("c-match", "value"), Input("c-tick", "n_intervals"), State("c-match", "value"))(lambda _n, current: match_options(current))
     app.callback(
         Output("c-rundown", "options"), Output("c-rundown", "value"), Output("c-detail", "children"), Output("c-head", "children"), Output("c-wp", "figure"),
-        Output("c-score", "children"), Output("c-approve", "disabled"), Output("c-edit", "disabled"), Output("c-reject", "disabled"), Output("c-sig", "data"),
+        Output("c-score", "children"), Output("c-approve", "disabled"), Output("c-edit", "disabled"), Output("c-sig", "data"),
         Output("c-follow", "data"),
         Input("c-tick", "n_intervals"), Input("c-rev", "data"), Input("c-match", "value"), Input("c-rundown", "value"), Input("c-lang", "value"),
         State("c-sig", "data"), Input("c-replay", "data"), Input("c-follow", "data"))(_refresh_cb)
@@ -1089,7 +1089,7 @@ def register(app) -> None:
                  Input("c-edit", "n_clicks"), Input("c-cancel-edit", "n_clicks"), Input("c-rev", "data"), Input("c-rundown", "value"), State("c-match", "value"),
                  prevent_initial_call=True)(_edit_cb)
     app.callback(Output("c-message", "children"), Output("c-rev", "data"),
-                 Input("c-approve", "n_clicks"), Input("c-reject", "n_clicks"), Input("c-approve-edit", "n_clicks"), Input("c-approve-var", "n_clicks"),
+                 Input("c-approve", "n_clicks"), Input("c-approve-edit", "n_clicks"), Input("c-approve-var", "n_clicks"),
                  State("c-match", "value"), State("c-rundown", "value"), State("c-rev", "data"),
                  State({"type": "c-edit-headline", "lang": ALL}, "id"), State({"type": "c-edit-headline", "lang": ALL}, "value"),
                  State({"type": "c-edit-why", "lang": ALL}, "id"), State({"type": "c-edit-why", "lang": ALL}, "value"),
