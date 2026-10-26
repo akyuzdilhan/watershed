@@ -1526,6 +1526,26 @@ def test_the_replay_control_is_in_the_header_for_everyone():
     assert console.REPLAY_STEP_MS == 500
 
 
+def test_replay_the_match_and_play_read_as_primary_buttons():
+    import re
+
+    css = (SRC / "web" / "assets" / "watershed.css").read_text(encoding="utf-8")
+    for rule in (".btn.btn-cta {", ".btn.btn-cta:hover {", ".btn.btn-cta:focus-visible {"):
+        assert rule in css
+    assert "cursor: pointer" in css.split(".btn.btn-cta {")[1].split("}")[0]
+    cta = re.search(r"--cta: (#[0-9a-f]{6});", css).group(1)
+
+    def lum(h):
+        c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    assert (1.05) / (lum(cta) + 0.05) >= 4.5  # white text on the accent: WCAG AA
+    page = console.layout(None)
+    for bid in ("c-intro-replay", "c-replay-play"):
+        assert "btn-cta" in find(page, lambda c, b=bid: getattr(c, "id", None) == b)[0].className
+    assert "Restart the replay" in console.INTRO_REPLAY_LABEL and "paused === false" in console.INTRO_REPLAY_LABEL  # while the replay plays
+
+
 def test_a_visitor_gets_a_one_line_intro_with_the_replay_and_the_var_retraction(desk):
     intro = find(console.layout(None), lambda c: getattr(c, "id", None) == "c-intro")
     assert len(intro) == 1 and console.INTRO in texts_in(intro[0]) and "Replay the match" in texts_in(intro[0])

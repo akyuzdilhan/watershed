@@ -1232,12 +1232,15 @@ INTRO_REPLAY = "function(n) { return [0, false, 'Pause', 'desk', true]; }"
 # The intro's VAR retraction: the desk as it stands (the replay stopped at its right end), that card selected
 INTRO_RETRACTION = "function(n, cardId, max) { if (!cardId) { return window.dash_clientside.no_update; } return [cardId, max, null, true, 'Play', 'desk']; }"
 INTRO_HIDE = "function(closed) { return closed ? {'display': 'none'} : {}; }"
+INTRO_REPLAY_LABELS = ("Replay the match", "Restart the replay")
+# The intro's replay button while the replay plays (its interval running): it starts it again from kick-off
+INTRO_REPLAY_LABEL = "function(paused) { return paused === false ? '" + INTRO_REPLAY_LABELS[1] + "' : '" + INTRO_REPLAY_LABELS[0] + "'; }"
 
 
 def intro() -> html.Div:
     """For a visitor of the read-only view, under the header: what the desk is in one line, Replay the match, the card VAR pulled off air (`intro_target`), and a close button remembered in this browser."""
     return html.Div([html.Span(INTRO, className="intro-text"),
-                     html.Div([html.Button("Replay the match", id="c-intro-replay", className="btn btn-small btn-cta", n_clicks=0),
+                     html.Div([html.Button(INTRO_REPLAY_LABELS[0], id="c-intro-replay", className="btn btn-small btn-cta", n_clicks=0),
                                html.Button("See the VAR retraction", id="c-intro-var", className="btn btn-small", n_clicks=0, style={"display": "none"}),
                                html.Button("×", id="c-intro-close", className="intro-close", n_clicks=0, title="Hide this line", **{"aria-label": "Hide this line"})],
                               className="intro-actions"),
@@ -1361,7 +1364,7 @@ def _replay_range_cb(match_id):
 
 def replay_bar() -> html.Div:
     """Replay the match: Play and a minute slider, for everyone (read only too); the console shows the desk as it stood at that minute, the store is never written."""
-    return html.Div([html.Span("Replay the match", className="muted small"), html.Button("Play", id="c-replay-play", className="btn btn-small", n_clicks=0),
+    return html.Div([html.Span("Replay the match", className="muted small"), html.Button("Play", id="c-replay-play", className="btn btn-small btn-cta", n_clicks=0),
                      html.Span(id="c-replay-now", className="replay-now", **{"aria-live": "polite"}),
                      html.Div(dcc.Slider(id="c-replay-t", min=0, max=100, step=1, value=100, marks={0: "0'", 100: "FT"}, allow_direct_input=False), className="replay-slider"),
                      dcc.Interval(id="c-replay-tick", interval=REPLAY_STEP_MS, disabled=True), dcc.Store(id="c-replay", data=None)], className="replay")
@@ -1483,6 +1486,7 @@ def register(app) -> None:
     app.callback(Output("c-intro-var", "children"), Output("c-intro-var", "style"), Output("c-intro-card", "data"), Input("c-p-match", "data"))(lambda m: intro_target(m))
     app.clientside_callback("function(n) { return true; }", Output("c-intro-closed", "data"), Input("c-intro-close", "n_clicks"), prevent_initial_call=True)
     app.clientside_callback(INTRO_HIDE, Output("c-intro", "style"), Input("c-intro-closed", "data"))
+    app.clientside_callback(INTRO_REPLAY_LABEL, Output("c-intro-replay", "children"), Input("c-replay-tick", "disabled"))
     app.clientside_callback(INTRO_REPLAY, Output("c-replay-t", "value", allow_duplicate=True), Output("c-replay-tick", "disabled", allow_duplicate=True),
                             Output("c-replay-play", "children", allow_duplicate=True), Output("c-view", "value", allow_duplicate=True),
                             Output("c-follow", "data", allow_duplicate=True), Input("c-intro-replay", "n_clicks"), prevent_initial_call=True)
