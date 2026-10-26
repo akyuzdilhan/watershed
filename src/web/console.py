@@ -435,6 +435,24 @@ def _approve_styles_cb(_sig, match_id, card_id):
     return approve_styles((get_store().card(match_id, card_id) if match_id and card_id else None))
 
 
+def context(match_id: str | None, card_id: str | None, lang: str | None, last_sig: str | None, store=None):
+    """(the selected card's graphic and insights under the curve, signature), `panels.card_context`; no_update for both when the card, its insights, the storyline and the language did not change."""
+    store = store or get_store()
+    card = store.card(match_id, card_id) if match_id and card_id else None
+    if card is None:
+        return [], None
+    docs, story = store.insights(match_id), store.storyline(match_id)
+    feed = store.feed(match_id)
+    sig = _sig(match_id, card_id, card.get("status"), card.get("version"), panels.tied_insights(docs, card), (story or {}).get("texts"), lang, (feed or {}).get("last_seq"))
+    if sig == last_sig:
+        return no_update, no_update
+    return panels.card_context(card, feed, docs, story, lang), sig
+
+
+def _context_cb(_sig, match_id, card_id, lang, last_sig):
+    return context(match_id, card_id, lang, last_sig)
+
+
 def button_states(card: dict | None) -> tuple[bool, bool, bool]:
     """(approve, edit, reject) disabled."""
     if card is None:
@@ -668,7 +686,8 @@ def layout(user: str | None) -> html.Div:
                          id="c-edit-actions", className="actions", style={"display": "none"}),
                 html.Div(id="c-detail")], className="col col-middle"),
             html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", config={"displayModeBar": False}),
-                          html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small")], className="col col-right"),
+                          html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small"),
+                          html.Div(id="c-context", className="context"), dcc.Store(id="c-ctx-sig")], className="col col-right"),
         ], id="c-pane-desk", className="desk"),
     ], className="console read-only" if read_only else "console")
 
@@ -748,4 +767,6 @@ def register(app) -> None:
                  Input({"type": "fb", "p": ALL, "k": ALL, "v": ALL}, "n_clicks"), Input({"type": "fb-r", "p": ALL, "k": ALL, "r": ALL}, "n_clicks"),
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
     app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
+    app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
+                 State("c-lang", "value"), State("c-ctx-sig", "data"))(_context_cb)
     panels.register(app)

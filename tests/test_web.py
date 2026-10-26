@@ -1158,3 +1158,24 @@ def test_feedback_callback_refuses_without_sign_in_in_public_mode(desk, monkeypa
     response = app.server.test_client().post("/_dash-update-component", json=body)
     assert "relevant, by Producer" in response.get_data(as_text=True)
     assert len(desk.feedback_docs(MATCH)) == 1
+
+
+def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_desk):
+    docs = write_docs(feed_desk)
+    goal, red = card_at(feed_desk, "63'"), card_at(feed_desk, "78'")
+    assert panels.card_graphic(feed_desk.feed(MATCH), goal) == ("buildups", goal["shot_event_id"])
+    assert panels.card_graphic(feed_desk.feed(MATCH), red) == ("", None)
+    tied = panels.tied_insights(docs, goal)
+    assert tied and all(d["event_id"] == goal["event_id"] or (d.get("figure") or {}).get("goal_event_id") == goal["event_id"] for d in tied)
+    out, sig = console.context(MATCH, goal["id"], "en", None, feed_desk)
+    graphs = find(out, lambda c: type(c).__name__ == "Graph")
+    assert len(graphs) == 1 and len(graphs[0].figure.data) >= 1
+    text = texts_in(out)
+    assert "This moment on the pitch" in text and f"Detail {tied[0]['key']}" in text and "Fourth against sixth" in text
+    assert "margin" not in text.lower()  # nothing kept for the producer
+    assert console.context(MATCH, goal["id"], "en", sig, feed_desk) == (no_update, no_update)  # unchanged: nothing re-sent
+    out, _ = console.context(MATCH, red["id"], "en", None, feed_desk)
+    assert not find(out, lambda c: type(c).__name__ == "Graph") and "All graphics" in texts_in(out)
+    right = find(console.layout(None), lambda c: "col-right" in (getattr(c, "className", "") or "") and "c-wp" in component_ids(c.children))[0]
+    assert "c-context" in component_ids(right.children)
+    assert [v["label"] for v in panels.VIEWS] == ["Desk", "All graphics", "All insights and storyline"]

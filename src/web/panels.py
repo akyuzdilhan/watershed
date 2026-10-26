@@ -1,4 +1,4 @@
-"""The console's match-graphics tab and its insights and storyline tab.
+"""The console's match-graphics tab ("All graphics"), its insights and storyline tab ("All insights and storyline"), and under the desk's curve the graphic and insights of the selected card (`card_context`).
 
 Graphics are drawn from the feed (`Store.feed`) with `web.graphics`; tactical details come from `worker.tactics` (pure functions, no model). Insight and storyline documents are read from the store; approve and reject go through `Store.decide_doc`, which uses the desk's own methods for them when it has some and degrades to a message when it has none. When the desk holds no insight yet, the panel lists the tactical candidates computed from the feed, marked as such, with nothing to approve. Every sentence of a document on the desk carries the producer feedback controls (`fb_controls`, wired in `console`). Under the storyline, "After the match" shows the recap the worker writes at the final whistle (`Store.recap`): read only, nothing to approve. Like `console`, the functions below are plain functions that `register` wires as callbacks.
 
@@ -488,9 +488,75 @@ def insights_pane() -> html.Div:
         id="c-pane-insights", className="desk pane", style={"display": "none"})
 
 
+# --- the selected card's graphic and insights, under the desk's curve ----------------------------------
+
+def card_graphic(feed: dict | None, card: dict | None) -> tuple[str, str | None]:
+    """(kind, item) of the match graphic that goes with a card: the build-up of its goal, chance or save, a penalty seen from behind the taker; ("", None) for a card with none (a red card)."""
+    if not feed or not feed.get("actions") or not card:
+        return "", None
+    shot = card.get("shot_event_id") or card.get("event_id")
+    for kind in ("direct", "buildups"):
+        if shot in [o["value"] for o in graphic_items(feed, kind)]:
+            return kind, shot
+    return "", None
+
+
+def tied_insights(docs: list[dict], card: dict | None, limit: int = 3) -> list[dict]:
+    """The insights about a card's moment: written at it, explaining it (a run or line break before the goal) or counting it, those still standing first."""
+    if not card:
+        return []
+    ev = card.get("event_id")
+
+    def rank(d: dict) -> int | None:
+        if d.get("event_id") == ev or (d.get("figure") or {}).get("goal_event_id") == ev:
+            return 0
+        return 1 if ev in (d.get("evidence") or []) else None
+
+    tied = [(rank(d), d) for d in docs]
+    tied = sorted(((r, d) for r, d in tied if r is not None), key=lambda x: (x[1].get("status") == "superseded", x[0], -(x[1].get("value") or 0)))
+    return [d for _, d in tied[:limit]]
+
+
+def text_in(doc: dict | None, lang: str | None) -> dict | None:
+    """The text of a document in `lang`, else English, else the first."""
+    texts = [t for t in (doc or {}).get("texts") or [] if isinstance(t, dict)]
+    return next((t for t in texts if t.get("lang") == lang), next((t for t in texts if t.get("lang") == "en"), texts[0] if texts else None))
+
+
+def insight_line(d: dict, lang: str | None) -> html.Div:
+    """One insight in a few words: its minute and type, its status, then its headline and why in the language picked (a candidate: its title)."""
+    t = text_in(d, lang)
+    words = [html.Div(t.get("headline", ""), className="ctx-headline"), html.Div(t.get("why", ""), className="why small")] if t else [html.Div(insight_title(d), className="ctx-headline")]
+    return html.Div([html.Div([html.Span(f"{d.get('minute_label') or ''} {insight_type(d)}", className="muted small"),
+                               html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta"),
+                     *words], className="ctx-insight")
+
+
+def card_context(card: dict | None, feed: dict | None, docs: list[dict], story: dict | None, lang: str | None = None) -> list:
+    """Under the desk's curve: the match graphic of the selected card (`card_graphic`), the insights tied to it (`tied_insights`) and the storyline's headline. Nothing that stays with the producer: no fact table, no margin (a run is drawn without it)."""
+    if card is None:
+        return []
+    out = [html.H3("This moment on the pitch")]
+    kind, item = card_graphic(feed, card)
+    if kind:
+        try:
+            fig = _sized(graphic_figure(feed, kind, item), 380)
+        except (StopIteration, KeyError, ValueError, IndexError) as error:
+            fig = empty_figure(f"Cannot draw this graphic: {error}")
+        out += [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(NOTES[kind], className="muted small")]
+    else:
+        out.append(html.P("No pitch graphic for this moment; every graphic of the match is under All graphics.", className="muted small"))
+    out.append(html.H3("Insights on this moment"))
+    out += [insight_line(d, lang) for d in tied_insights(docs, card)] or [html.P("None for this moment; every insight is under All insights and storyline.", className="muted small")]
+    t = text_in(story, lang)
+    if t:
+        out += [html.H3("Storyline"), html.Div(t.get("headline", ""), className="ctx-headline")]
+    return out
+
+
 # --- wiring ------------------------------------------------------------------------------------------
 
-VIEWS = [{"value": "desk", "label": "Desk"}, {"value": "graphics", "label": "Match graphics"}, {"value": "insights", "label": "Insights and storyline"}]
+VIEWS = [{"value": "desk", "label": "Desk"}, {"value": "graphics", "label": "All graphics"}, {"value": "insights", "label": "All insights and storyline"}]
 
 
 def view_styles(view: str | None) -> tuple[dict, dict, dict, bool, bool]:

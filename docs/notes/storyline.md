@@ -41,7 +41,7 @@ Method: the rest of the season is played `n_sims` times once per score, with the
 - **Pipeline**: builds the storyline once at kick-off from `--league-seed` and `--matchday` (`Pipeline._storyline`) and writes it through the desk like an insight: `storyline.json` locally, `type: "storyline"` in the `cards` container in Azure.
 - **Writer**: for goal and red-card cards, the pipeline merges `live_context(storyline, state)` at the score after the moment into the card (`Pipeline._season`, `season_context`), and `card_facts` passes it to the Writer prefixed `season_`, without league table points (`league_points_field`). A table that would read the same as after the last goal that counts is not passed again.
 - **Recap**: `post_match(storyline, final score)` is merged into the recap facts (`recap.season_facts`).
-- **Console**: the Insights and storyline view shows the pre-match card, its suggested lines and its facts, with Approve and Reject; `threads` are stored and not shown.
+- **Console**: the All insights and storyline view shows the pre-match card, its suggested lines and its facts, with Approve and Reject; `threads` are stored and not shown.
 - **Insights**: the `milestone` and `streak` threads are not turned into insights.
 
 ## What is imperfect
