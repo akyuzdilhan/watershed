@@ -27,13 +27,17 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .match-picker { min-width: 280px; color: #111; }
 .scoreline { font-variant-numeric: tabular-nums; font-weight: 600; white-space: pre; }
 .who { margin-left: auto; }
-.replay { display: flex; align-items: center; gap: 8px; flex: 1 1 300px; min-width: 260px; max-width: 420px; }
-.replay-slider { flex: 1; min-width: 200px; }
+.replay { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 240px; max-width: 460px; }
+.replay > .muted { white-space: nowrap; }
+.replay-slider { flex: 1; min-width: 80px; padding: 0 10px; }
 .replay-slider .dash-slider, .replay-slider .rc-slider { margin: 0; }
 .replay-slider .dash-slider-mark { color: var(--ink-2); font-size: 11px; font-weight: 600; }
-.replay-now { min-width: 3.5em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.replay-now { min-width: 2.8em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
 .replay-now:empty { display: none; }
 .btn-small { padding: 3px 12px; font-size: 13px; }
+/* narrower screens: the header keeps one row down to 1280 px (the subtitle and the gaps give way), then the replay takes a row of its own */
+@media (max-width: 1500px) { .console .top { gap: 12px; } .top .brand + .muted { display: none; } .top .match-picker { min-width: 220px; width: 220px; flex: 0 0 220px; } .view-switch label { padding: 4px 8px; } }
+@media (max-width: 1279px) { .replay { order: 10; flex-basis: 100%; max-width: none; } }
 @media (max-width: 600px) { .replay { min-width: 100%; max-width: none; } .match-picker { min-width: 0; width: 100%; } }
 /* the visitor's intro line under the header (read-only view only) */
 .intro { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 16px 0; padding: 8px 12px; background: var(--surface-1); border: 1px solid var(--line); border-left: 3px solid var(--var); border-radius: 8px; }
