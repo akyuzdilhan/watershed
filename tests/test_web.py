@@ -237,6 +237,18 @@ def test_card_detail_traces_every_number_to_its_field_and_shows_the_verifier(des
     assert "Not verified" in texts_in(find(shown, lambda c: getattr(c, "className", "") == "summary"))
 
 
+def test_the_analyst_notes_carry_one_fold_of_their_numbers_and_say_who_wrote_them(desk):
+    card = card_at(desk, "72'")
+    analysis = {"texts": {"en": [{"line": "Varleigh had 63% of the threat.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]}]},
+                "writer": "gpt-5-mini", "verified": True, "facts": {"team_threat_share_before_shot_pct": 63}, "field_meanings": {}}
+    view = console.detail(dict(card, analysis=analysis), [], [], desk.state(MATCH)["teams"], read_only=True)
+    summaries = [texts_in(s) for s in find(view, lambda c: type(c).__name__ == "Summary")]
+    assert [s for s in summaries if "numbers come from" in s] == [summaries[0], "Where the analyst's numbers come from (1)"]  # the card's fold under its text, one under the notes
+    assert summaries[0].startswith("Where the card's numbers come from") and "Written by gpt-5-mini, verified" in texts_in(view)
+    template = console.detail(dict(card, analysis=dict(analysis, writer="template")), [], [], desk.state(MATCH)["teams"], read_only=True)
+    assert "Written by the template (model refused or off), verified" in texts_in(template)
+
+
 def summary_of(view) -> str:
     return texts_in(find(view, lambda c: getattr(c, "className", "") == "summary"))
 
@@ -271,7 +283,7 @@ def test_claims_are_deduplicated_with_where_they_are_used():
     joss = console.speaker_name("joss")
     assert [(r["value"], r["field"], r["where"]) for r in rows] == [("58", "a_pct", ["text", joss]), ("28", "swing_pts", ["text"]), ("30", "b_pct", [joss])]
     fold = console.claims_view(rows)
-    assert fold.open is False and texts_in(fold.children[0]) == "Where each number comes from (3)" and console.CLAIMS_NOTE in texts_in(fold)
+    assert fold.open is False and texts_in(fold.children[0]) == "Where the card's numbers come from (3)" and console.CLAIMS_NOTE in texts_in(fold)
     assert "Number Fact Meaning Used in" in texts_in(fold) and f"text, {joss}" in texts_in(fold)
     assert "No number" in texts_in(console.claims_view([]))
 

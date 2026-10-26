@@ -477,11 +477,14 @@ def test_the_analysis_block_renders(demo):
     card = next(c for c in sink.cards.values() if c["minute_label"] == "52'")
     block = analysis_block(card, "fr")
     words = texts_of(block)
-    assert isinstance(block, html.Div) and TITLE in words and NEVER_VOICED in words and SOURCES in words and WITHDRAWN not in words
+    assert isinstance(block, html.Div) and TITLE in words and NEVER_VOICED in words and any(w.startswith(SOURCES) for w in words) and WITHDRAWN not in words
     assert card["analysis"]["texts"]["fr"][0]["line"] in words and card["analysis"]["texts"]["en"][0]["line"] not in words
     assert "Team threat share recent pct" in words or any("threat" in w.lower() for w in words)
     assert card["analysis"]["texts"]["en"][0]["line"] in texts_of(analysis_block(card, "de"))  # a missing language falls back to English
-    assert "Written by template, verified, machine-translated" in texts_of(analysis_block(card, "es"))
+    assert "Written by the template (model refused or off), verified, machine-translated" in texts_of(analysis_block(card, "es"))
+    assert "Written by gpt-5-mini, verified" in texts_of(analysis_block(dict(card, analysis=dict(card["analysis"], writer="gpt-5-mini")), "en"))
+    failed = dict(card, analysis=dict(card["analysis"], verification={"fallback_reason": "service error 500 at https://example.invalid"}))
+    assert "example.invalid" not in texts_of(analysis_block(failed, "en"))  # the template's reason stays with the producer
     ruled_out = next(c for c in sink.cards.values() if c["minute_label"] == "63'")
     assert WITHDRAWN in texts_of(analysis_block(ruled_out, "en"))
     assert analysis_block({"id": "x"}, "en") is None and analysis_block(None) is None

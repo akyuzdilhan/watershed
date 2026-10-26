@@ -102,6 +102,7 @@ def claim_rows(texts: list[dict], duo_lines: list[dict], facts: dict, meanings: 
     return list(rows.values())
 
 
+CLAIMS_TITLE = "Where the card's numbers come from"
 CLAIMS_NOTE = "Each number in the text and the suggested lines, the fact it is taken from, and what that fact means. The Verifier rejects any number without a fact."
 
 
@@ -112,7 +113,7 @@ def claims_view(rows: list[dict]) -> html.Details:
                      html.Td(r["meaning"] or ("" if r["ok"] else "not a fact of this card"), className="muted small" if r["ok"] else "claim-bad small"),
                      html.Td(", ".join(r["where"]), className="muted small")]) for r in rows]
     inside = [html.P(CLAIMS_NOTE, className="muted small"), html.Table([html.Thead(head), html.Tbody(body)], className="claims") if rows else html.Div("No number in this language.", className="muted small")]
-    return html.Details([html.Summary(f"Where each number comes from ({len(rows)})"), *inside], open=False, className="fold fold-claims")
+    return html.Details([html.Summary(f"{CLAIMS_TITLE} ({len(rows)})"), *inside], open=False, className="fold fold-claims")
 
 
 def _issue(x) -> str:
@@ -339,7 +340,7 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     verified = bool(v.get("verified")) and (not teams or all(ok for ok, _ in checks))  # the check as it stands needs both clubs' names
     checks = [c for _, c in checks]
     out = [card_head(card, read_only)] if head else []
-    out += [html.Div(blocks), summary_line(card, audit, rows, verified, read_only) if v or texts else html.Div("Not checked yet.", className="muted")]
+    out += [html.Div(blocks), summary_line(card, audit, rows, verified, read_only) if v or texts else html.Div("Not checked yet.", className="muted"), claims_view(rows)]
     ruling = panels.duo_block({"id": card["id"], "duo": card.get("duo_ruling")}, lang=shown_lang) if card.get("duo_ruling") else None
     if ruling is not None:
         out += [html.H3("On the VAR ruling"), html.P("What the duo can say about the goal ruled out. Proposed text, never voiced.", className="muted small"), ruling]
@@ -348,8 +349,7 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
         out += [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo]
     notes = analysis_block(card, shown_lang or DEFAULT_LANG)
     if notes is not None:
-        out.append(notes)
-    out.append(claims_view(rows))
+        out.append(notes)  # with its own fold of the analyst's numbers
     reps = v.get("repetition_warnings") or 0
     when = html.Div(f"When written: {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s), "
                     + (f"{reps} style note(s): an opening, phrase or tic already used in this match" if reps else "no style note"), className="muted small") if v else None
