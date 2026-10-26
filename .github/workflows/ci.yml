@@ -32,7 +32,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -c src/worker/constraints.txt -e ".[azure,agents,web,dev]"
+          pip install -c src/worker/constraints.txt -e ".[azure,agents,agentic,web,dev]"
       # No Azure credentials here: the tests run on synthetic data and the template writer only.
       - name: Tests
         run: pytest -q

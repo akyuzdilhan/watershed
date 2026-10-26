@@ -1,4 +1,4 @@
-# Watershed
+﻿# Watershed
 
 Football's fine margins, measured live and explained to you.
 
@@ -68,7 +68,7 @@ git clone https://github.com/akyuzdilhan/watershed.git
 cd watershed
 python -m venv .venv
 .venv\Scripts\activate                     # Windows; on macOS or Linux: source .venv/bin/activate
-pip install -e ".[azure,agents,web,dev]"
+pip install -e ".[azure,agents,agentic,web,dev]"
 python -m league history --seed 9 --seasons 50 --out data/history
 python -m worker data/replay/demo-0007.jsonl.gz --truth data/replay/demo-0007.truth.json --writer template --auto-approve --desk-dir data/desk --history data/history/9 --league-seed 9
 python -m web.app                          # keeps running; stop it with Ctrl+C
@@ -114,17 +114,17 @@ Seed 7, story `demo`: Varleigh (home) against Yarnford, both fictional. The comm
 
 | Minute | What happens in the feed | What the desk does | Card figures |
 |---|---|---|---|
-| 14' | Yarnford #9 scores | Goal card | Yarnford 30% → 58% to win |
-| 31' | Yarnford goal credited to #10; at 33' the provider reassigns it to #7 (deflection) | Card rewritten as version 2 with the new scorer | Yarnford 60% → 84% |
+| 14' | Yarnford #9 scores | Goal card | Yarnford 30% â†’ 58% to win |
+| 31' | Yarnford goal credited to #10; at 33' the provider reassigns it to #7 (deflection) | Card rewritten as version 2 with the new scorer | Yarnford 60% â†’ 84% |
 | 41' | Yarnford #5 booked | No card (a yellow card does not move the result probabilities) | |
 | 46' | Varleigh 0-2 at half-time bring on #20 for #9 | | |
-| 52', 57' | #20 scores twice: 2-2 | Two goal cards | Varleigh 2% → 10%, then 8% → 32% |
-| **63'** | **#20 scores again. The card goes on air. A VAR check starts 15 seconds later; at 64' the goal is ruled out for a tight offside, visible in the freeze frame of the through ball** | **Card held during the check, then retracted, flagged as retracted on air** | Varleigh 29% → 78%, withdrawn |
-| 66' | #20 scores anyway: 3-2 | Goal card | Varleigh 28% → 79% |
-| 69' | Yarnford equalise; VAR rules it out for handball at 70' | Card held, then retracted | Yarnford 3% → 20%, withdrawn |
+| 52', 57' | #20 scores twice: 2-2 | Two goal cards | Varleigh 2% â†’ 10%, then 8% â†’ 32% |
+| **63'** | **#20 scores again. The card goes on air. A VAR check starts 15 seconds later; at 64' the goal is ruled out for a tight offside, visible in the freeze frame of the through ball** | **Card held during the check, then retracted, flagged as retracted on air** | Varleigh 29% â†’ 78%, withdrawn |
+| 66' | #20 scores anyway: 3-2 | Goal card | Varleigh 28% â†’ 79% |
+| 69' | Yarnford equalise; VAR rules it out for handball at 70' | Card held, then retracted | Yarnford 3% â†’ 20%, withdrawn |
 | 72' | Varleigh's keeper saves a Yarnford shot at 3-2 | Save card that credits the keeper, not the shooter | Varleigh kept at 81% instead of 24% if it had gone in |
-| 78' | Yarnford #5 gets a second yellow | Red-card card | Yarnford 2% → 1% with ten men |
-| 83' | #20's fourth goal | Goal card | Varleigh 91% → 99% |
+| 78' | Yarnford #5 gets a second yellow | Red-card card | Yarnford 2% â†’ 1% with ten men |
+| 83' | #20's fourth goal | Goal card | Varleigh 91% â†’ 99% |
 | 88' | Varleigh #10 scores; VAR check; the goal stands | Card held, then released | 99%, never 100% before the final whistle |
 
 Final score 5-2. Against the ground truth, the worker finds all 11 moments that deserve a card, produces no extra card, and takes exactly the three expected card actions (one rewrite, two retractions) (`tests/test_worker.py`). The feed also carries 13 duplicated and 32 delayed messages, which the worker absorbs.
@@ -136,10 +136,10 @@ Every number a viewer sees is anchored to something they can picture. The desk c
 | When | What airs (French texts and duo, from the template writer) |
 |---|---|
 | Before kick-off | "Varleigh - Yarnford, duel pour le maintien": Yarnford are on 34% to go down, 16% with a win, 43% with a defeat. Wren: "Varleigh 17e, Yarnford 18e. Ce soir, on joue le maintien, Joss." |
-| 66' | "Seulement le 6e triplé d'un remplaçant en 50 saisons, le premier depuis Tino Höglund en 2021/22." |
-| 83' | "Premier quadruplé d'un joueur entré en cours de match en 50 saisons de championnat." Joss: "Jamais, Wren. En 50 saisons, aucun joueur entré en cours de match n'avait marqué 4 fois." |
-| Full time | "Première défaite de Yarnford à l'extérieur après avoir mené à la pause depuis 2020/21, il y a 6 saisons." Stat of the match: the substitute's four goals, ranked first by rarity. |
-| Recap | Names both goals VAR ruled out and why ("hors-jeu d'un rien", "main"), and what the result changed: "Après la journée, Varleigh est 16e (17e avant le match), et ce résultat fait passer son risque de descente de 11 % à 4 %." |
+| 66' | "Seulement le 6e triplÃ© d'un remplaÃ§ant en 50 saisons, le premier depuis Tino HÃ¶glund en 2021/22." |
+| 83' | "Premier quadruplÃ© d'un joueur entrÃ© en cours de match en 50 saisons de championnat." Joss: "Jamais, Wren. En 50 saisons, aucun joueur entrÃ© en cours de match n'avait marquÃ© 4 fois." |
+| Full time | "PremiÃ¨re dÃ©faite de Yarnford Ã  l'extÃ©rieur aprÃ¨s avoir menÃ© Ã  la pause depuis 2020/21, il y a 6 saisons." Stat of the match: the substitute's four goals, ranked first by rarity. |
+| Recap | Names both goals VAR ruled out and why ("hors-jeu d'un rien", "main"), and what the result changed: "AprÃ¨s la journÃ©e, Varleigh est 16e (17e avant le match), et ce rÃ©sultat fait passer son risque de descente de 11 % Ã  4 %." |
 
 Offside margins stay off air: on air an offside is only called tight or clear, in words. The margin is measured and kept for the signed-in producer; the console never shows it to visitors, and the overlay never shows it.
 
