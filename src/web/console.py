@@ -325,10 +325,10 @@ def shown_texts(card: dict, lang: str | None) -> list[dict]:
 
 
 def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None, teams: dict | None = None, read_only: bool = False,
-           lang: str | None = DEFAULT_LANG, head: bool = True) -> html.Div:
+           lang: str | None = DEFAULT_LANG, head: bool = True, insights: list[dict] | None = None) -> html.Div:
     """The selected card; `feedback` (the match's feedback documents) gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no margin, no feedback.
 
-    The offside margin and the writer's settings and errors are folded under "Producer details" for a producer. `lang` picks the language shown (None: every language); `head` puts the heading (`card_head`) on top, which the console draws apart, above the decision buttons."""
+    The offside margin and the writer's settings and errors are folded under "Producer details" for a producer. `lang` picks the language shown (None: every language); `head` puts the heading (`card_head`) on top, which the console draws apart, above the decision buttons. `insights` (the match's, as they stood at the replay's minute) gives "Insights on this moment" under the text and the summary line (`panels.moment_insights`)."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
     verdicts = None  # no thumbs per line: one Feedback button per card (`feedback_lines`, `send_feedback`)
@@ -343,7 +343,9 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     verified = bool(v.get("verified")) and (not teams or all(ok for ok, _ in checks))  # the check as it stands needs both clubs' names
     checks = [c for _, c in checks]
     out = [card_head(card, read_only)] if head else []
-    out += [html.Div(blocks), summary_line(card, audit, rows, verified, read_only) if v or texts else html.Div("Not checked yet.", className="muted"), claims_view(rows)]
+    out += [html.Div(blocks), summary_line(card, audit, rows, verified, read_only) if v or texts else html.Div("Not checked yet.", className="muted")]
+    out += panels.moment_insights(insights or [], card, shown_lang or DEFAULT_LANG) if insights is not None else []
+    out.append(claims_view(rows))
     ruling = panels.duo_block({"id": card["id"], "duo": card.get("duo_ruling")}, lang=shown_lang) if card.get("duo_ruling") else None
     if ruling is not None:
         out += [html.H3("On the VAR ruling"), html.P("What the duo can say about the goal ruled out. Proposed text, never voiced.", className="muted small"), ruling]
@@ -528,6 +530,14 @@ def show_live(card_x: float | None, now: float | None, playing: bool) -> bool:
     return now is not None and (playing or card_x is None or abs(card_x - now) > LIVE_FAR_MIN)
 
 
+def insights_at(docs: list[dict], state: dict | None, t: float | None) -> list[dict]:
+    """The insights as they stood at minute `t` of a replay: those of moments up to `t`; all of them without a replay or at full time."""
+    if t is None or t >= full_time(state):
+        return docs
+    points, x_of, breaks = axis((state or {}).get("wp_timeline") or [])
+    return [d for d in docs if (x_of.get(d.get("event_id")) if d.get("event_id") in x_of else (label_x(d.get("minute_label"), points, breaks) or 0)) <= t]
+
+
 def context(match_id: str | None, card_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None, playing: bool = False):
     """(the selected card's graphic and insights under the curve, signature), `panels.card_context`; no_update for both when the card, its insights, the storyline, the language and the live minute did not change. `t` (the replay's minute) leaves out the insights written after it; while the replay plays (`playing`), or away from the card, the live pitch (`panels.live_block`) takes the place of the card's moment."""
     store = store or get_store()
@@ -542,8 +552,7 @@ def context(match_id: str | None, card_id: str | None, lang: str | None, last_si
     if card is None and not live:
         return [], None
     docs, story = (store.insights(match_id), store.storyline(match_id)) if card is not None else ([], None)
-    if t is not None and t < full_time(state):
-        docs = [d for d in docs if (x_of.get(d.get("event_id")) if d.get("event_id") in x_of else (label_x(d.get("minute_label"), points, breaks) or 0)) <= t]
+    docs = insights_at(docs, state, t)
     feed = store.feed(match_id)
     shift = breaks[0] - 45 if breaks else 0.0
     sig = _sig(match_id, card_id, (card or {}).get("status"), (card or {}).get("version"), panels.tied_insights(docs, card), (story or {}).get("texts"), lang, (feed or {}).get("last_seq"),
@@ -606,20 +615,23 @@ def refresh(match_id: str | None, selected: str | None, last_sig: dict | None, r
     lang = lang if lang in LANG_NAMES else DEFAULT_LANG
     if not match_id:
         return [], None, detail(None, []), card_head(None), figure(None, []), "No match on the desk yet", True, True, True, None
-    cards, state, audit, x_max = replay(store.cards(match_id), store.state(match_id), store.audit(match_id), t)
+    full_state = store.state(match_id)
+    cards, state, audit, x_max = replay(store.cards(match_id), full_state, store.audit(match_id), t)
     cards, fb_docs = rundown_order(cards), store.feedback_docs(match_id)
+    docs = insights_at(store.insights(match_id), full_state, t)
     ids = [c["id"] for c in cards]
     picked = selected if selected in ids and not follow else default_pick(cards)
     card = next((c for c in cards if c["id"] == picked), None)
     teams = (state or {}).get("teams")
     judged = [(d.get("id"), d.get("verdict"), d.get("reasons"), d.get("note"), d.get("at")) for d in fb_docs]
-    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang, x_max is not None)
+    tied = panels.tied_insights(docs, card)
+    detail_sig = _sig(match_id, picked, card, [e for e in audit if e.get("card_id") == picked], judged, teams, rev, read_only, lang, x_max is not None, tied)
     sig = _sig(detail_sig, cards, (state or {}).get("last_seq"), (state or {}).get("minute_label"), (state or {}).get("final"), len(audit))
     last = last_sig if isinstance(last_sig, dict) else {}
     if sig == last.get("all"):
         return (no_update,) * REFRESH_OUTPUTS
     changed = detail_sig != last.get("detail")
-    view = detail(card, audit, fb_docs, teams, read_only, lang=lang, head=False) if changed else no_update
+    view = detail(card, audit, fb_docs, teams, read_only, lang=lang, head=False, insights=tied) if changed else no_update
     head = card_head(card, read_only) if changed else no_update
     buttons = (True, True, True) if read_only or x_max is not None else button_states(card)  # a replay decides nothing
     # the selection is written back only when it changes, so a refresh never closes an edit in progress

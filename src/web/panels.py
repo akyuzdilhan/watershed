@@ -611,15 +611,6 @@ def text_in(doc: dict | None, lang: str | None) -> dict | None:
     return next((t for t in texts if t.get("lang") == lang), next((t for t in texts if t.get("lang") == "en"), texts[0] if texts else None))
 
 
-def insight_line(d: dict, lang: str | None) -> html.Div:
-    """One insight in a few words: its minute and type, its status, then its headline and why in the language picked (a candidate: its title)."""
-    t = text_in(d, lang)
-    words = [html.Div(t.get("headline", ""), className="ctx-headline"), html.Div(t.get("why", ""), className="why small")] if t else [html.Div(insight_title(d), className="ctx-headline")]
-    return html.Div([html.Div([html.Span(f"{d.get('minute_label') or ''} {insight_type(d)}", className="muted small"),
-                               html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta"),
-                     *words], className="ctx-insight")
-
-
 LIVE_NOTE = "The last actions up to this minute: thin arrows passes (dashed carries), thick the shots in their outcome's colour, a cross where the ball was lost, the ring the ball now."
 
 
@@ -652,13 +643,28 @@ def moment_block(feed: dict | None, card: dict) -> list:
     return out + [dcc.Graph(figure=fig, config={"displayModeBar": False}, className="ctx-figure"), html.P(note, className="muted small")]
 
 
+def insight_fold(d: dict, lang: str | None) -> html.Details:
+    """One insight, compact: its headline and one line (minute, type, status) always shown, its why folded."""
+    t = text_in(d, lang)
+    meta = html.Div([html.Span(f"{d.get('minute_label') or ''} {insight_type(d)}", className="muted small"),
+                     html.Span(STATUS.get(d.get("status"), d.get("status", "?")), className="badge " + STATUS_CLASS.get(d.get("status"), "st-proposed"))], className="detail-meta")
+    head = html.Summary([html.Span(t.get("headline", "") if t else insight_title(d), className="ctx-headline"), meta])
+    return html.Details([head, *([html.Div(t.get("why", ""), className="why small")] if t and t.get("why") else [])], className="ctx-insight")
+
+
+def moment_insights(docs: list[dict], card: dict | None, lang: str | None) -> list:
+    """"Insights on this moment" in the card's column, under its text and summary line: the insights tied to it (`tied_insights`), compact (`insight_fold`)."""
+    if not card:
+        return []
+    tied = tied_insights(docs, card)
+    return [html.H3("Insights on this moment"), *([insight_fold(d, lang) for d in tied] or [html.P("None for this moment; every insight is under All insights and storyline.", className="muted small")])]
+
+
 def card_context(card: dict | None, feed: dict | None, docs: list[dict], story: dict | None, lang: str | None = None, live: list | None = None) -> list:
-    """Under the desk's curve: the match graphic of the selected card (`moment_block`), or the live pitch (`live`, from `live_block`) while a replay plays or away from the card, then the insights tied to the card (`tied_insights`) and the storyline's headline. Nothing that stays with the producer: no fact table, no margin (a run is drawn without it)."""
+    """Under the desk's curve: the match graphic of the selected card (`moment_block`), or the live pitch (`live`, from `live_block`) while a replay plays or away from the card, then the storyline's headline (the insights tied to the card are in the card's column, `moment_insights`). Nothing that stays with the producer: no fact table, no margin (a run is drawn without it)."""
     if card is None:
         return list(live or [])
     out = list(live) if live else moment_block(feed, card)
-    out.append(html.H3("Insights on this moment"))
-    out += [insight_line(d, lang) for d in tied_insights(docs, card)] or [html.P("None for this moment; every insight is under All insights and storyline.", className="muted small")]
     t = text_in(story, lang)
     if t:
         out += [html.H3("Storyline"), html.Div(t.get("headline", ""), className="ctx-headline")]

@@ -1247,7 +1247,14 @@ def test_the_desk_shows_the_graphic_and_the_insights_of_the_selected_card(feed_d
     graphs = find(out, lambda c: type(c).__name__ == "Graph")
     assert len(graphs) == 1 and len(graphs[0].figure.data) >= 1
     text = texts_in(out)
-    assert "This moment on the pitch" in text and f"Detail {tied[0]['key']}" in text and "Fourth against sixth" in text
+    assert "This moment on the pitch" in text and f"Detail {tied[0]['key']}" not in text and "Fourth against sixth" in text  # the insights are in the card's column
+    view = console.refresh(MATCH, goal["id"], None)[2]
+    middle = texts_in(view)
+    assert "Insights on this moment" in middle and f"Detail {tied[0]['key']}" in middle
+    assert middle.index("Insights on this moment") < middle.index(console.CLAIMS_TITLE)  # under the text and the summary line, above the folds
+    folds = find(view, lambda c: getattr(c, "className", "") == "ctx-insight")
+    assert folds and all(type(f).__name__ == "Details" and not getattr(f, "open", False) for f in folds)  # the why folded
+    assert "Insights on this moment" not in texts_in(console.detail(goal, []))
     assert "margin" not in text.lower()  # nothing kept for the producer
     assert console.context(MATCH, goal["id"], "en", sig, feed_desk) == (no_update, no_update)  # unchanged: nothing re-sent
     out, _ = console.context(MATCH, red["id"], "en", None, feed_desk)
