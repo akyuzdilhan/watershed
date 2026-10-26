@@ -556,7 +556,7 @@ def test_the_figures_kept_for_the_producer_reach_no_writer(demo, history):
             return await super().write_async(doc, facts, languages, **kwargs)
 
     sink, model = MemorySink(), Model()
-    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True))
+    run(demo[0], history, sink=sink, desk=Desk(sink, model, auto_approve=True, max_calls_per_match=1000))  # every draft reaches the model, the stat of the match included, however many retries
     assert "top_fact" in model.given and not model.given & set(OFF_AIR_FACTS)
 
 
