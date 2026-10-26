@@ -7,9 +7,10 @@ Usage:
     python -m worker data/replay/demo-0007.jsonl.gz --history data/history/1                  # with the insight engine, against the league history
     python -m worker data/replay/demo-0007.jsonl.gz --writer foundry --facts mcp              # the Writer reads its facts through the desk's MCP server
     python -m worker data/replay/demo-0007.jsonl.gz --writer template --duo agents --duo-dry --history data/history/9 --league-seed 9   # the duo by two agents, offline
+    python -m worker data/replay/demo-0007.jsonl.gz --writer template --analyst foundry --analyst-dry                                  # the Analyst's notes, offline
 Needs SERVICE_BUS_FQDN for --live and COSMOS_ENDPOINT for --cosmos (from the environment, .env or the azd environment). With APPLICATIONINSIGHTS_CONNECTION_STRING set, the traces go to Application Insights (worker.telemetry).
 
-With a writer, the desk writes the cards and their duo with it, the insights and the storyline with the templates (unless --insights-writer writer), and at the final whistle the post-match recap (unless --no-recap): with --writer foundry, the recap agent on Foundry. Every model call of a match comes out of one budget of 40 (worker.desk); the duo by agents (--duo agents, worker.agent_desk) has its own, --duo-calls.
+With a writer, the desk writes the cards and their duo with it, the insights and the storyline with the templates (unless --insights-writer writer), and at the final whistle the post-match recap (unless --no-recap): with --writer foundry, the recap agent on Foundry. Every model call of a match comes out of one budget of 40 (worker.desk); the duo by agents (--duo agents, worker.agent_desk) has its own, --duo-calls, and so has the Analyst (--analyst foundry, worker.analysis), --analyst-calls.
 """
 
 import argparse
@@ -64,11 +65,19 @@ def main() -> None:
     parser.add_argument("--duo-calls", type=int, default=36, help="with --duo agents: agent runs per match for the duo, apart from the Writer's 40")
     parser.add_argument("--duo-min-value", type=int, default=10, help="with --duo agents: minimum card value (value_pts) for the agents' duo")
     parser.add_argument("--duo-deadline", type=float, default=30.0, help="with --duo agents: seconds for one duo from its start; beyond, the card keeps its template duo")
+    parser.add_argument("--analyst", choices=("off", "template", "foundry"), default="off",
+                        help="tactical notes on each goal or big chance, for the producer and the commentators (worker.analysis): off, the templates, or the Analyst agent on Foundry")
+    parser.add_argument("--analyst-dry", action="store_true", help="with --analyst foundry: an offline scripted model that answers with the template (no Azure, no cost)")
+    parser.add_argument("--analyst-calls", type=int, default=12, help="with --analyst foundry: model calls per match for the Analyst, apart from the Writer's 40")
     args = parser.parse_args()
     if args.duo == "agents" and args.writer == "none":
         parser.error("--duo agents needs --writer template or --writer foundry")
     if args.duo_dry and args.duo != "agents":
         parser.error("--duo-dry goes with --duo agents")
+    if args.analyst != "off" and args.writer == "none":
+        parser.error("--analyst needs --writer template or --writer foundry")
+    if args.analyst_dry and args.analyst != "foundry":
+        parser.error("--analyst-dry goes with --analyst foundry")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     for noisy in ("azure", "agent_framework", "httpx", "mcp", "agent_framework_orchestrations"):  # the SDKs log every HTTP request, AMQP link change and tool call at INFO
         logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -121,6 +130,15 @@ def main() -> None:
             desk = AgentDesk(sink, writer, runner=runner, registry=registry, min_value=args.duo_min_value, **options)
         else:
             desk = Desk(sink, writer, **options)
+        if args.analyst != "off":
+            from worker.analysis import AnalystDesk, AnalystWriter, dry_analyst, feed_actions
+
+            analyst = None
+            if args.analyst == "foundry":
+                if not args.analyst_dry:
+                    service_bus_settings()  # loads .env (Foundry endpoint and the Analyst's model)
+                analyst = dry_analyst() if args.analyst_dry else AnalystWriter()
+            desk = AnalystDesk(desk, lambda match_id: feed_actions(pipeline.matches[match_id]), analyst, max_calls_per_match=args.analyst_calls)
     telemetry.configure()  # after the .env, when one is read above; nothing without APPLICATIONINSIGHTS_CONNECTION_STRING
     storyline_for = None
     if args.league_seed is not None:
@@ -163,6 +181,9 @@ def main() -> None:
                 print(f"           {r['writer']}, verified {r['verification']['verified']}, {r['status']}")
                 if args.duo == "agents":
                     print(f"           duo {r['duo_writer']}: {duo_summary(r)}")
+                if isinstance(r.get("analysis"), dict):
+                    a = r["analysis"]
+                    print(f"           analyst {a['writer']}, verified {a['verified']}, {a['status']}: " + " ".join(l["line"] for l in a["texts"].get("en", [])))
     match = next(iter(pipeline.matches.values()))
     for doc in pipeline.insights(match.match_id):
         mark = "*" if doc.get("stat_of_the_match") else " "
@@ -179,6 +200,10 @@ def main() -> None:
     if args.duo == "agents":
         print(f"duo agents ({desk.runner.model.name}): {desk.applied} written, {dict(desk.fallbacks)} template, "
               f"{desk.runner.budget.used(match.match_id)} of {args.duo_calls} runs")
+    if args.analyst != "off":
+        done = [c["analysis"] for c in sink.cards.values() if isinstance(c.get("analysis"), dict)] if isinstance(sink, MemorySink) else []
+        print(f"analyst ({getattr(desk.analyst, 'name', 'template')}): {sum(1 for a in done if a['writer'] != 'template')} by the model, "
+              f"{sum(1 for a in done if a['writer'] == 'template')} template, {desk.analyst_calls.get(match.match_id, 0)} of {args.analyst_calls} calls")
     if args.truth and isinstance(sink, MemorySink):
         spotter = next(iter(pipeline.spotters.values()))
         report = score_against_truth(spotter.cards, sink.audit, json.loads(args.truth.read_text(encoding="utf-8")))
