@@ -341,7 +341,7 @@ def test_a_note_being_typed_survives_the_ticks(desk):
     key = f"{goal['id']}|why|en|0"
     assert console.give_feedback(MATCH, key, "verdict", "down", "producer-1")[1]  # a thumbs down opens the note field
     first = dash_post(REFRESH, *refresh_body(goal["id"])).get_json()["response"]
-    assert {"type": "fb-n", "p": "d", "k": key} in json_ids(first["c-detail"])
+    assert "c-detail" in first
     path = desk.root / MATCH / "state.json"  # the match goes on: the clock moves, another card goes on air
     state = json.loads(path.read_text(encoding="utf-8"))
     path.write_text(json.dumps(dict(state, last_seq=state["last_seq"] + 1, minute_label="90+12'", final=False)), encoding="utf-8")
@@ -719,7 +719,7 @@ def test_visitors_read_the_desk_without_producer_controls_or_data(desk, monkeypa
     with app.server.test_request_context("/"):
         detail = console._refresh_cb(1, 0, MATCH, goal["id"], "en", None)[2]
     history = texts_in(find(detail, lambda c: getattr(c, "className", "") == "history"))
-    assert feedback_ids(detail) and feedback_ids(detail, "fb-n") and "by Producer" in history and "ana@example.com" not in texts_in(detail)
+    assert not feedback_ids(detail) and "by Producer" in history and "ana@example.com" not in texts_in(detail)  # feedback: one popover per card, not per line
     assert audit_of(desk, goal["id"])[-2:] == [("approved", "ana@example.com"), ("feedback", "ana@example.com")]  # the audit keeps the identity
 
 
@@ -1088,8 +1088,8 @@ def test_a_card_ruled_out_shows_the_var_reason_and_what_the_duo_says(desk):
         assert "On the VAR ruling" in view
         assert all(d["line"] in view for d in ruled["duo_ruling"] if d["lang"] == lang)
         assert not any(d["line"] in view for d in ruled["duo_ruling"] if d["lang"] != lang)
-    ruling_keys = [i for i in feedback_ids(console.detail(ruled, [], [], teams)) if i["k"].split("|")[1] == "duo"]
-    assert len(ruling_keys) == 2 * len([d for d in ruled.get("duo") or [] if d["lang"] == "en"])  # thumbs on the suggested lines only, not on the ruling
+    ruling_keys = [o["value"] for o in console.feedback_lines(ruled, "en") if o["value"].split("|")[1] == "duo"]
+    assert len(ruling_keys) == len([d for d in ruled.get("duo") or [] if d["lang"] == "en"])  # feedback on the suggested lines only, not on the ruling
     assert "The lower-third said" not in texts_in(producer)  # it was never on air
     on_air = texts_in(console.detail(dict(ruled, retracted_on_air=True), [], [], teams))
     assert "The lower-third said: Goal ruled out (VAR, offside)" in on_air
@@ -1150,26 +1150,28 @@ def component_ids_all(component) -> list:
     return out
 
 
-def test_card_detail_has_thumbs_next_to_every_sentence_and_reasons_after_a_thumbs_down(desk):
+def test_one_feedback_button_per_card_lists_its_lines_and_sends_through_the_desk(desk, monkeypatch):
     card = card_at(desk, "57'")
-    view = console.detail(card, [], lang=None)
-    thumbs = feedback_ids(view)
-    n_sentences = 2 * len(card["texts"]) + len(card.get("duo") or [])
-    assert len(thumbs) == 2 * n_sentences and {i["v"] for i in thumbs} == {"up", "down"} and {i["p"] for i in thumbs} == {"d"}
-    assert {i["k"].split("|")[2] for i in thumbs} == {"en", "fr", "es"}  # every language shown
-    assert not feedback_ids(view, "fb-r") and "No producer feedback" in texts_in(view)
-    for lang in ("en", "fr", "es"):  # the console shows one language at a time, its thumbs with it
-        one = feedback_ids(console.detail(card, [], lang=lang))
-        assert one and {i["k"].split("|")[2] for i in one} == {lang} and len(one) == 2 * (2 + len([d for d in card.get("duo") or [] if d["lang"] == lang]))
+    assert not feedback_ids(console.detail(card, [], lang=None)) and not feedback_ids(console.detail(card, [], lang="fr"), "fb-n")  # no thumbs per line
+    for lang in ("en", "fr", "es"):
+        lines = console.feedback_lines(card, lang)
+        assert len(lines) == 2 + len([d for d in card.get("duo") or [] if d["lang"] == lang]) and {o["value"].split("|")[2] for o in lines} == {lang}
+        assert lines[0]["label"].startswith("Headline: ") and lines[1]["label"].startswith("Text: ")
     key = f"{card['id']}|why|fr|0"
-    message, done = console.give_feedback(MATCH, key, "verdict", "down", "producer-1")
+    assert console.send_feedback(MATCH, key, "down", ["too_long"], "Trop long", None) == ("Sign in to give feedback.", False)
+    assert not console.send_feedback(MATCH, None, "down", [], None, "producer-1")[1] and not console.send_feedback(MATCH, key, None, [], None, "producer-1")[1]
+    message, done = console.send_feedback(MATCH, key, "down", ["too_long", "nonsense"], "  Trop long  ", "producer-1")
     assert done and "not relevant" in message
-    message, done = console.give_feedback(MATCH, key, "reason", "too_long", "producer-1")
-    assert done and "too long" in message
-    view = console.detail(card, [], desk.feedback_docs(MATCH), lang="fr")
-    reasons = feedback_ids(view, "fb-r")
-    assert {i["r"] for i in reasons} == set(console.FB.REASONS) and {i["k"] for i in reasons} == {key}
-    assert feedback_ids(view, "fb-n") and "Approval so far: 0% of 1" in texts_in(view)
+    mine = console.FB.by_target(desk.feedback_docs(MATCH))[key]
+    assert mine["verdict"] == "down" and mine["reasons"] == ["too_long"] and mine["note"] == "Trop long"
+    assert console.send_feedback(MATCH, key, "up", ["too_long"], "ignored", "producer-1")[1]
+    mine = console.FB.by_target(desk.feedback_docs(MATCH))[key]
+    assert mine["verdict"] == "up" and not mine.get("reasons") and not mine.get("note")
+    assert "Approval so far: 100% of 1" in texts_in(console.detail(card, [], desk.feedback_docs(MATCH), lang="fr"))
+    assert find(console.layout("producer-1"), lambda c: getattr(c, "id", None) == "c-fb") and not find(console.layout(None), lambda c: getattr(c, "id", None) == "c-fb")
+    monkeypatch.setenv("PUBLIC_MODE", "1")
+    with app.server.test_request_context("/"):
+        assert console._fb_lines_cb(1, MATCH, card["id"], "en") == []  # a visitor gets no line to judge
 
 
 def test_feedback_is_stored_audited_and_keeps_the_card_as_it_was(desk):

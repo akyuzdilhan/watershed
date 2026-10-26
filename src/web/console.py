@@ -326,12 +326,12 @@ def shown_texts(card: dict, lang: str | None) -> list[dict]:
 
 def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = None, teams: dict | None = None, read_only: bool = False,
            lang: str | None = DEFAULT_LANG, head: bool = True) -> html.Div:
-    """The selected card; `feedback` (the match's feedback documents) marks the current thumbs and gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no margin, no feedback.
+    """The selected card; `feedback` (the match's feedback documents) gives the approval rate so far; `teams` (the match state's) name both clubs for the claims and the checks. `read_only` (a visitor in public mode): no thumbs, no producer identity, no margin, no feedback.
 
     The offside margin and the writer's settings and errors are folded under "Producer details" for a producer. `lang` picks the language shown (None: every language); `head` puts the heading (`card_head`) on top, which the console draws apart, above the decision buttons."""
     if card is None:
         return html.Div("Select a card in the rundown.", className="muted")
-    verdicts = None if read_only else FB.by_target(feedback or [])
+    verdicts = None  # no thumbs per line: one Feedback button per card (`feedback_lines`, `send_feedback`)
     facts, meanings = facts_of(card, teams)
     texts = shown_texts(card, lang)
     shown_lang = None if lang is None else (texts[0].get("lang") if texts else lang)
@@ -762,6 +762,76 @@ def give_feedback(match_id: str | None, key: str | None, kind: str, value, by: s
     return f"Noted: {what} ({target['lang']}) not relevant" + (f" ({detail_})" if detail_ else "") + (", with a note" if note else "") + f", by {security.display_name()}.", True
 
 
+PARTS = {"headline": "Headline", "why": "Text", "duo": "Suggested line"}
+
+
+def feedback_lines(card: dict | None, lang: str | None) -> list[dict]:
+    """The lines of the card a producer can judge in the language shown, as the Feedback popover lists them: headline, text, then each suggested line ("Joss: ..."), keyed by `worker.feedback.target_key`."""
+    if not card:
+        return []
+    texts = shown_texts(card, lang)
+    out = []
+    for t in texts:
+        code = t.get("lang", "")
+        out += [{"value": FB.target_key(card["id"], part, code, 0), "label": f"{PARTS[part]}: {t[part]}"} for part in ("headline", "why") if t.get(part)]
+        out += [{"value": FB.target_key(card["id"], "duo", code, i), "label": f"{speaker_name(d.get('speaker'))}: {d.get('line', '')}"} for i, d in enumerate(duo_of(card, code)) if d.get("line")]
+    return out
+
+
+def send_feedback(match_id: str | None, key: str | None, verdict: str | None, reasons: list[str] | None, note: str | None, by: str | None, store=None) -> tuple[str, bool]:
+    """A producer's feedback from the card's Feedback popover: one line, relevant or not, and on a thumbs down the reasons and an optional note, through `Store.feedback` (`Desk.feedback`, audited). Returns (message, done)."""
+    if by is None:
+        return "Sign in to give feedback.", False
+    if not match_id or not key:
+        return "Pick a line first.", False
+    if verdict not in ("up", "down"):
+        return "Pick relevant or not relevant.", False
+    store = store or get_store()
+    try:
+        doc_id, target = parse_key(key)
+    except ValueError:
+        return "Unknown line.", False
+    doc = store.doc(match_id, doc_id)
+    if doc is None:
+        return "This card is no longer on the desk.", False
+    down = verdict == "down"
+    note = (note or "").strip()[:FB.NOTE_MAX] or None
+    try:
+        FB.sentence(doc, target)
+        store.feedback(match_id, doc_id, target, verdict, [r for r in reasons or [] if r in FB.REASONS] if down else [], note if down else None, by)
+    except KeyError:
+        return "This card is no longer on the desk.", False
+    except ValueError as error:
+        return f"Refused: {error}.", False
+    what = {"headline": "headline", "why": "text", "duo": "suggested line"}[target["part"]]
+    return f"Noted: {what} ({target['lang']}) " + ("relevant" if not down else "not relevant") + f", by {security.display_name()}.", True
+
+
+def feedback_popover() -> html.Details:
+    """One Feedback button per card, for the producer only (the bar it sits in is hidden from visitors, and `send_feedback` refuses without a producer): which line, relevant or not, the reasons and a note."""
+    return html.Details([html.Summary("Feedback", className="btn"),
+                         html.Div([html.Label("Line", className="lang"), dcc.Dropdown(id="c-fb-line", options=[], clearable=False, className="match-picker fb-line", placeholder="Pick a line"),
+                                   dcc.RadioItems(id="c-fb-verdict", options=[{"value": "up", "label": "Relevant"}, {"value": "down", "label": "Not relevant"}], className="view-switch",
+                                                  inputClassName="view-radio", labelClassName="view-label"),
+                                   dcc.Checklist(id="c-fb-reasons", options=[{"value": r, "label": name} for r, name in FB.REASONS.items()], value=[], className="fb-reason-list",
+                                                 labelClassName="fb-reason-label"),
+                                   dcc.Input(id="c-fb-note", type="text", maxLength=FB.NOTE_MAX, placeholder="Note (optional, with not relevant)", className="fb-note edit-headline"),
+                                   html.Button("Send", id="c-fb-send", className="btn btn-approve btn-small", n_clicks=0)], className="fb-pop-body")],
+                        id="c-fb", className="fb-pop")
+
+
+def _fb_lines_cb(_sig, match_id, card_id, lang):
+    if security.producer() is None:
+        return []
+    card = get_store().card(match_id, card_id) if match_id and card_id else None
+    return feedback_lines(card, lang)
+
+
+def _fb_send_cb(_n, match_id, key, verdict, reasons, note):
+    message, done = send_feedback(match_id, key, verdict, reasons, note, security.producer())
+    return html.Span(message, className="ok" if done else "error"), (None if done else no_update)
+
+
 # --- layout and wiring ----------------------------------------------------------------------------
 
 def viewer(user: str | None) -> html.Div:
@@ -827,7 +897,8 @@ def layout(user: str | None) -> html.Div:
                                     html.Button("Approve during VAR check", id="c-approve-var", className="btn btn-approve btn-var", style={"display": "none"},
                                                 title="The goal may still be ruled out: it goes on air now, the confirmation is audited"),
                                     html.Button("Edit", id="c-edit", className="btn", disabled=True),
-                                    html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden)], className="detail-bar"),
+                                    html.Button("Reject", id="c-reject", className="btn btn-reject", disabled=True)], className="actions", **hidden),
+                          *([] if read_only else [feedback_popover()])], className="detail-bar"),
                 html.Div(id="c-message", className="message", role="status"),
                 html.Div(id="c-edit-panel", className="edit-panel"),
                 html.Div([html.Button("Approve edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
@@ -1012,6 +1083,9 @@ def register(app) -> None:
     app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-i-message", "children", allow_duplicate=True), Output("c-i-rev", "data", allow_duplicate=True),
                  Input({"type": "fb", "p": ALL, "k": ALL, "v": ALL}, "n_clicks"), Input({"type": "fb-r", "p": ALL, "k": ALL, "r": ALL}, "n_clicks"),
                  Input({"type": "fb-n", "p": ALL, "k": ALL}, "value"), State("c-match", "value"), State("c-i-rev", "data"), prevent_initial_call=True)(_feedback_cb)
+    app.callback(Output("c-fb-line", "options"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"), State("c-lang", "value"))(_fb_lines_cb)
+    app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-fb-note", "value"), Input("c-fb-send", "n_clicks"), State("c-match", "value"), State("c-fb-line", "value"),
+                 State("c-fb-verdict", "value"), State("c-fb-reasons", "value"), State("c-fb-note", "value"), prevent_initial_call=True)(_fb_send_cb)
     app.callback(Output("c-approve", "style"), Output("c-approve-var", "style"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"))(_approve_styles_cb)
     app.callback(Output("c-context", "children"), Output("c-ctx-sig", "data"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"),
                  State("c-lang", "value"), State("c-ctx-sig", "data"), State("c-replay", "data"), State("c-replay-tick", "disabled"))(_context_cb)
