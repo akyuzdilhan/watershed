@@ -78,7 +78,7 @@ def test_the_report_gives_the_cap_the_cost_and_the_configuration(desk):
     assert "| Model calls | 6 | 0 | 1 | 1 | 8 |" in text  # card calls: a 1, b 1 + 2, c 2
     assert "| HTTP 429 answers | 1 | 0 | n/a | 0 | 1 |" in text  # the storyline has no trace: n/a, never 0
     assert "| Cost (USD) | 0.0004 | n/a (no usage) | n/a (no usage) | 0.0002 | 0.0006 |" in text
-    assert "against the cap of 40 per match: 7/40. Recap, outside the cap: 1." in text
+    assert "against the cap of 40 per match: 8/40; cards, insights and storyline 7, recap 1." in text
     assert "Trace fields on 5 of 7 writes" in text
     assert "| rejected twice | 1 |" in text and "| call cap | 1 |" in text
     assert "| completed | 5 |" in text
@@ -148,3 +148,23 @@ def test_cli_writes_the_markdown_and_checks_its_arguments(desk, tmp_path, capsys
 
 def test_the_call_cap_is_the_desk_default():
     assert measure.CALL_CAP == inspect.signature(Desk.__init__).parameters["max_calls_per_match"].default
+
+
+def test_audit_entries_without_an_id_and_documents_without_a_type_are_counted(desk):
+    run = measure.load_local(desk)
+    for entry in run["audit"]:
+        entry.pop("id")
+    run["audit"].append(dict(run["audit"][-1], at=2.0))  # another write of the same version, at another time
+    for doc in run["docs"]:
+        doc.pop("type")
+    records = measure.writes(run)
+    assert len(records) == 8  # the 7 writes and the second one; the line sent twice (same document, version, writer and time) counts once
+    assert {r["type"] for r in records} == {"card", "insight", "storyline", "recap"}
+    assert measure.report(run).startswith("# Live run measures: m-1")
+
+
+def test_cosmos_documents_without_a_type_are_typed_from_their_id(desk):
+    local = measure.load_local(desk)
+    docs = [{k: v for k, v in d.items() if k != "type"} for d in local["docs"]]
+    run = measure.load_cosmos("m-1", {"cards": FakeContainer(docs), "audit": FakeContainer(local["audit"])})
+    assert sorted(d["type"] for d in run["docs"]) == ["card", "card", "card", "insight", "recap", "storyline"]
