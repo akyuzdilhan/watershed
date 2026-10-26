@@ -113,7 +113,7 @@ def main() -> None:
             print(f"  {r['minute_label']:>7}  {r['action']:<8} {r['card_id']}  ({r['cause']})")
         else:
             facts = r["facts"]
-            print(f"  {r['minute_label']:>7}  card     {r['moment']:<9} {r['team_name']:<7} {r['player']['name']:<22} priority {r['value_pts']:>3}  win {facts['team_wp_before_pct']}%")
+            print(f"  {r['minute_label']:>7}  card     {r['moment']:<9} {r['team_name']:<7} {r['player']['name']:<22} rank value {r['value_pts']:>3}  win {facts['team_wp_before_pct']}%")
             for t in r.get("texts", []):
                 print(f"           [{t['lang']}] {t['headline']}: {t['why']}")
             if "texts" in r:
@@ -121,7 +121,7 @@ def main() -> None:
     match = next(iter(pipeline.matches.values()))
     for doc in pipeline.insights(match.match_id):
         mark = "*" if doc.get("stat_of_the_match") else " "
-        print(f" {mark}{doc['minute_label'] or '':>7}  insight  {doc['key']:<34} {doc['status']:<10} priority {doc['value']:>3}  {doc['rarity']['basis']}")
+        print(f" {mark}{doc['minute_label'] or '':>7}  insight  {doc['key']:<34} {doc['status']:<10} rank value {doc['value']:>3}  {doc['rarity']['basis']}")
     recap = pipeline.recaps.get(match.match_id)
     if recap:
         print(f"  {'':>7}  recap    {recap['writer']}, verified {recap['verification']['verified']}")
