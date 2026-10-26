@@ -31,6 +31,16 @@ def demo():
     return cards, state, truth, build_recap(cards, state)
 
 
+def player(truth: dict, player_id: str) -> str:
+    """A player's name as the replay draws it, so that the tests follow a new draw of names."""
+    return next(p["name"] for team in truth["teams"].values() for p in team["squad"] if p["id"] == player_id)
+
+
+def scorer(truth: dict, minute_label: str) -> str:
+    """Who scored (or had ruled out) the goal at that minute in the replay."""
+    return player(truth, next(g["player_id"] for g in truth["goals"] if g["minute_label"] == minute_label))
+
+
 def test_demo_recap_is_verified_in_three_languages(demo):
     _, _, _, recap = demo
     assert recap["final"] and recap["writer"] == "template" and recap["verification"]["verified"]
@@ -45,8 +55,8 @@ def test_turning_point_is_a_second_half_varleigh_goal(demo):
     cards, _, truth, recap = demo
     tp = recap["analysis"]["turning_point"]
     varleigh_second_half = {f"card-{g['event_id']}" for g in truth["goals"] if g["counts"] and g["team"] == "home" and g["period"] == 2}
-    assert tp["card_id"] in varleigh_second_half and tp["player"] == "Marijn Scarpetta" and tp["swing_pts"] > 30
-    assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": "Marijn Scarpetta", "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
+    assert tp["card_id"] in varleigh_second_half and tp["player"] == scorer(truth, "66'") and tp["swing_pts"] > 30
+    assert recap["analysis"]["team_summary"]["home"]["scorers"][0] == {"name": scorer(truth, "52'"), "goals": 4, "minutes": ["52'", "57'", "66'", "83'"]}
 
 
 def test_no_retracted_card_is_cited(demo):
@@ -83,10 +93,10 @@ def test_recap_tells_the_goals_ruled_out_and_why(demo):
 
 
 def test_disallowed_goals_can_be_passed_explicitly(demo):
-    cards, state, _, _ = demo
+    cards, state, truth, _ = demo
     plain = [{k: v for k, v in c.items() if k not in ("ruled_out", "var_decision")} for c in cards]  # a desk written before the cards recorded VAR decisions
     assert build_recap(plain, state)["analysis"]["disallowed_goals"] == []
-    given = [{"minute_label": "63'", "team": "home", "player": "Marijn Scarpetta", "reason": "offside", "margin_cm": 25}]
+    given = [{"minute_label": "63'", "team": "home", "player": scorer(truth, "63'"), "reason": "offside", "margin_cm": 25}]
     recap = build_recap(plain, state, disallowed=given)
     en = next(t for t in recap["texts"] if t["lang"] == "en")
     assert "offside by a whisker" in en["recap"] and recap["verification"]["verified"]
@@ -121,15 +131,18 @@ def test_fan_text_for_the_losing_side(demo):
 
 
 def test_verifier_rejects_invented_numbers_names_and_retracted_moments(demo):
-    cards, state, _, recap = demo
+    cards, state, truth, recap = demo
     facts = recap["facts"]
     good = [dict(t) for t in recap["texts"]]
+    ruled_out, four_goals = scorer(truth, "63'"), scorer(truth, "52'")
+    unnamed = player(truth, "home-1")  # the home goalkeeper: a player of the match the facts do not name
+    assert unnamed not in json.dumps(facts, ensure_ascii=False)
     assert verify_recap(json.dumps(good), ["en", "fr", "es"], facts, cards)[1]["verified"]
     cases = {
         "invented number": "Varleigh won with 61% possession.",
-        "retracted goal": "Marijn Scarpetta scored at 63' too.",
-        "unknown player": "Varleigh won, Valdemar McGrory starred.",
-        "spelled number": "Marijn Scarpetta scored four goals.",
+        "retracted goal": f"{ruled_out} scored at 63' too.",
+        "unknown player": f"Varleigh won, {unnamed} starred.",
+        "spelled number": f"{four_goals} scored four goals.",
         "too long": " ".join(["Varleigh"] * (MAX_WORDS["recap"] + 1)),
     }
     for case, text in cases.items():
@@ -186,7 +199,7 @@ SEASON_FACTS = {"season_varleigh_rank_before": 17, "season_varleigh_relegation_c
     ("es", "Tras la jornada, el Varleigh queda 16.º (17.º antes del partido)", "Con este resultado, el Varleigh es provisionalmente 14.º (17.º antes del partido)"),
 ])
 def test_the_season_sentence_gives_the_rank_after_the_matchday_or_says_it_is_provisional(lang, matchday, provisional):
-    writer = RecapTemplateWriter({"season_slug": "rovers", "season_club": "Varleigh"})
+    writer = RecapTemplateWriter({"season_slug": "varleigh", "season_club": "Varleigh"})
     for facts, expected in ((SEASON_FACTS | {"season_varleigh_rank_after_matchday": 16}, matchday), (SEASON_FACTS | {"season_varleigh_rank_after": 14}, provisional)):
         text, claims = writer.fill(writer.season_sentence(lang, facts), facts)
         assert text.replace("\xa0", " ").startswith(expected) and {c["source_field"] for c in claims} <= set(facts), text
@@ -196,7 +209,7 @@ def test_season_facts_keep_the_rank_after_the_matchday_and_no_league_points(monk
     import worker.storyline as storyline
 
     extra = {"final_score": "Varleigh 5-2 Yarnford"}
-    for club, ranks, chances in (("rovers", (17, 14, 16), (11, 4)), ("united", (18, 18, 19), (34, 52))):
+    for club, ranks, chances in (("varleigh", (17, 14, 16), (11, 4)), ("yarnford", (18, 18, 19), (34, 52))):
         extra |= {f"{club}_rank_before": ranks[0], f"{club}_rank_after": ranks[1], f"{club}_rank_after_matchday": ranks[2], f"{club}_points_before": 28, f"{club}_points_after": 31,
                   f"{club}_in_drop_zone_before": ranks[0] >= 18, f"{club}_in_drop_zone_after": ranks[1] >= 18, f"{club}_relegation_chance_before_pct": chances[0],
                   f"{club}_relegation_chance_after_pct": chances[1], f"{club}_relegation_change_pts": abs(chances[1] - chances[0]), f"{club}_relegation_change_direction": "down"}
@@ -207,7 +220,7 @@ def test_season_facts_keep_the_rank_after_the_matchday_and_no_league_points(monk
     assert facts["season_varleigh_rank_after_matchday"] == 16 and "season_varleigh_rank_after" not in facts and set(meanings) == set(facts)
     assert facts["season_varleigh_in_drop_zone_after_matchday"] is False and facts["season_yarnford_in_drop_zone_after_matchday"] is True
     assert not [k for k in facts if k.endswith("_in_drop_zone_after")] and not [k for k in facts if "points" in k.split("_")]
-    assert roles == {"season_club": "Varleigh", "season_slug": "rovers"}  # the winner's season: its chance of going down moved by 7 points
+    assert roles == {"season_club": "Varleigh", "season_slug": "varleigh"}  # the winner's season: its chance of going down moved by 7 points
 
 
 # --- texts and typography -----------------------------------------------------------------------------
