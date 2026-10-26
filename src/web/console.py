@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 
 from web import panels, security
+from web.analysis_view import analysis_block
 from web.labels import action_label, fact_label, field_label, readable  # noqa: F401 (fact_label: console.fact_label)
 from web.overlay import AI_WRITTEN_LABEL, previous_scorer, retraction_message, text_for, var_reason
 from web.store import get_store
@@ -339,6 +340,9 @@ def detail(card: dict | None, audit: list[dict], feedback: list[dict] | None = N
     duo = panels.duo_block(card, lang=shown_lang, verdicts=verdicts, pane="d")
     if duo is not None:
         out += [html.H3("Suggested lines"), html.P("Proposed text for the commentary team, never voiced.", className="muted small"), duo]
+    notes = analysis_block(card, shown_lang or DEFAULT_LANG)
+    if notes is not None:
+        out.append(notes)
     out.append(claims_view(rows))
     reps = v.get("repetition_warnings") or 0
     when = html.Div(f"When written: {card.get('writer', '?')}, {v.get('attempts', 0)} model attempt(s), "

@@ -426,3 +426,13 @@ def test_the_analysis_block_renders(demo):
     ruled_out = next(c for c in sink.cards.values() if c["minute_label"] == "63'")
     assert WITHDRAWN in texts_of(analysis_block(ruled_out, "en"))
     assert analysis_block({"id": "x"}, "en") is None and analysis_block(None) is None
+
+
+def test_the_console_detail_shows_the_analyst_notes(demo):
+    from web import console
+    from web.analysis_view import TITLE
+
+    sink, _ = demo
+    card = next(c for c in sink.cards.values() if c["minute_label"] == "52'")
+    assert TITLE in texts_of(console.detail(card, [], read_only=True, lang="en"))
+    assert TITLE not in texts_of(console.detail({k: v for k, v in card.items() if k != "analysis"}, [], read_only=True, lang="en"))
