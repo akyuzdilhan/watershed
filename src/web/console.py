@@ -779,7 +779,7 @@ def layout(user: str | None) -> html.Div:
                 html.Div([html.Button("Approve edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
                          id="c-edit-actions", className="actions", style={"display": "none"}),
                 html.Div(id="c-detail")], className="col col-middle"),
-            html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", config={"displayModeBar": False}),
+            html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", figure=panels.empty_figure("Loading."), config={"displayModeBar": False}),
                           html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small"),
                           html.Div(id="c-context", className="context"), dcc.Store(id="c-ctx-sig")], className="col col-right"),
         ], id="c-pane-desk", className="desk"),

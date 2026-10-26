@@ -170,3 +170,6 @@ body:has(.ov-page) { background: #0b0b0b; }
 .ov-second { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
 .ov-second-text { font-size: 16px; color: var(--ink-2); }
 @media (max-width: 600px) { .ov-headline { font-size: 18px; } .ov-why { font-size: 14px; } .ov-second-text { font-size: 13px; } .ov-lower { left: 16px; right: 16px; } .ov-bug { left: 16px; } }
+
+/* every graph sits on the dark surface before and while Plotly draws it: never a white flash */
+.dash-graph, .js-plotly-plot, .js-plotly-plot .plot-container { background: var(--surface-1); }

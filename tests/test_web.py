@@ -837,6 +837,15 @@ def test_console_layout_has_the_view_switch_and_the_new_panels():
     assert panels.view_styles(None)[3:] == (True, True)  # a hidden panel sends no request
 
 
+def test_every_graph_starts_on_a_dark_empty_figure():
+    graphs = find(console.layout(None), lambda c: type(c).__name__ == "Graph")
+    assert {g.id for g in graphs} >= {"c-wp", "c-g-figure", "c-i-figure"}
+    for g in graphs:
+        layout = g.figure.layout
+        assert layout.paper_bgcolor == layout.plot_bgcolor == "#1a1a19" and layout.xaxis.visible is False and layout.yaxis.visible is False, g.id
+        assert "Loading" in layout.annotations[0].text
+
+
 def test_graphics_tab_draws_every_kind_from_the_feed(feed_desk):
     for kind in [k["value"] for k in panels.KINDS]:
         options, value, fig, note, sig = panels.graphics(MATCH, kind, None, "graphics", None, feed_desk)
