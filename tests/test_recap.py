@@ -264,7 +264,7 @@ def test_the_margin_in_var_decision_is_never_copied_into_the_recap(demo):
             c["var_decision"] = {"reason": c["ruled_out"]["cause"], "call": "tight" if offside else None, "margin_m": 0.17 if offside else None}
             c["ruled_out"]["margin_cm"] = None
         given.append(c)
-    assert any(c.get("var_decision", {}).get("margin_m") for c in given)
+    assert any(c.get("var_decision", {}).get("margin_m") for c in given)  # whatever margin the desk kept, the worker's is there
     recap = build_recap(given, state)
     assert [g["margin_cm"] for g in recap["analysis"]["disallowed_goals"]] == [None, None] and recap["verification"]["verified"]
     assert "margin_m" not in json.dumps(recap) and not any("margin" in k for k in recap["facts"])

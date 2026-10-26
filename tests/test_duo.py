@@ -1,6 +1,7 @@
 """The commentary duo, anti-repetition across a match, the product decisions on points and goals with no stake, and the insight path. No model call: crafted replies and templates only."""
 
 import asyncio
+import copy
 import functools
 import json
 import re
@@ -10,14 +11,15 @@ import pytest
 from generator import generate_match
 from worker import insight_texts
 from worker.desk import Desk
-from worker.duo import CONDITIONS, EYE, HEART, LINES, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, fill, persona_brief
+from worker.duo import ALLOWED_NAMES, CONDITIONS, EYE, HEART, LINES, PERSONAS, SMALL_MARGIN_PTS, TILT_PTS, PhraseMemory, fill, persona_brief
 from worker.pipeline import MemorySink, Pipeline
-from worker.writer import (CARD_KIND_WORDS, EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, OFF_AIR_FIELDS, TEMPLATES, WRITER_INSTRUCTIONS,
+from worker.writer import (CARD_KIND_WORDS, EM_DASH, EXAMPLE_DUO, EXAMPLE_FACTS, INSIGHT_TEMPLATES, LOW_STAKE_TEMPLATES, OFF_AIR_FIELDS, TEMPLATES, WRITER_INSTRUCTIONS,
                            TemplateWriter, card_facts, draft, insight_facts, low_stake, ruling_facts, style_issues, template_values, verify, verify_duo, verify_reply,
                            writer_request)
 
 LANGS = ["en", "fr", "es"]
 TEAMS = {"home": "Varleigh", "away": "Yarnford"}
+H, A = TEAMS["home"], TEAMS["away"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -559,20 +561,94 @@ def test_comeback_lines_are_their_own_at_each_stage():
             assert all(not a & b for i, a in enumerate(stages) for b in stages[i + 1:]), (lang, part)
 
 
+HISTORY = {"history_since": "1976/77", "history_seasons": 50, "history_opportunities": 19000}
+
+
+def seen(count: int, last: dict | None = None) -> dict:
+    """The history facts the engine gives a fact seen `count` times before (rank, rate per season once it is seen every season, the last time)."""
+    out = HISTORY | {"history_count": count, "history_rank": count + 1, "one_in": 19000 // (count + 1), "surprisal_bits": 5.0}
+    if count >= 50:
+        out["history_per_season"] = round(count / 50, 1)
+    return out | (last or {})
+
+
+def family_facts() -> list[tuple[str, dict]]:
+    """Headline facts as the insight engine gives them, for the families and cases match_insights() does not reach: a starter's goals, late goals, ten men, the head-to-head,
+    the shots, the passes, the goals of the match and of a club, the fastest hat-trick, the runs, goals against expected goals at half-time, the stat of the match of a family
+    with no question of its own; and comebacks and lost leads of a club the history does not know, or that did it last season (the plain lines)."""
+    home, away = replay_names()["home"], replay_names()["away"]
+    starter = {"player": home[8], "team": H, "substitute": False}
+    last = {"last_season": "2024/25", "last_player": away[0], "last_match": f"{H} 1-5 {A}"}
+    late = {"player": away[9], "team": A, "minute": "88'", "goal_type": "equaliser", "score_after": "2-2"} | seen(3000, last)
+    out = [
+        ("scorer-home-9-2", starter | {"goals": 2, "goal_minutes": "12', 70'"} | seen(9000, last)),
+        ("scorer-home-9-4", starter | {"goals": 4, "goal_minutes": "12', 30', 70', 81'"} | seen(20, last)),
+        ("scorer-home-9-4", starter | {"goals": 4, "goal_minutes": "12', 30', 70', 81'"} | seen(20)),  # the last time has no player the history can name
+        ("scorer-home-9-5", starter | {"goals": 5, "goal_minutes": "12', 30', 70', 81', 88'"} | seen(0)),
+        ("late-e1-equaliser", late),
+        ("late-e2-go-ahead", late | {"goal_type": "go-ahead goal", "score_after": "2-3", "minute": "90+3'"}),
+        ("ten-men-away-scored", {"team": A, "goals_after_red": 1, "score": "1-1", "stage": "scored"} | seen(900)),
+        ("ten-men-away-won", {"team": A, "goals_after_red": 2, "score": "1-2", "stage": "won"} | seen(400)),
+        ("h2h-margin-home-4", {"team": H, "opponent": A, "margin": 4, "score": "5-1", "meetings": 98, "record": "new"} | seen(800, last)),
+        ("h2h-margin-away-3", {"team": A, "opponent": H, "margin": 3, "score": "0-3", "meetings": 98, "record": "equalled", "equalled_season": "2018/19"} | seen(1500, last)),
+        ("h2h-drought-away-5", {"team": A, "opponent": H, "venue": "away", "seasons_without_win": 5, "meetings_here": 49, "first_win_here": False, "last_win_season": "2021/22"}
+         | seen(300)),
+        ("h2h-drought-home-7", {"team": H, "opponent": A, "venue": "home", "seasons_without_win": 7, "meetings_here": 7, "first_win_here": True} | seen(120)),
+        ("h2h-drought-home-6", {"team": H, "opponent": A, "venue": "home", "seasons_without_win": 6, "meetings_here": 49, "first_win_here": False, "last_win_season": "2020/21"}
+         | seen(300)),
+        ("h2h-drought-away-9", {"team": A, "opponent": H, "venue": "away", "seasons_without_win": 9, "meetings_here": 9, "first_win_here": True} | seen(120)),
+        ("shots-p1-home-12-3", {"team": H, "shots": 12, "opponent_shots": 3, "expected_share_pct": 55, "window": "first half", "one_in": 300, "surprisal_bits": 8.2}),
+        ("shots-ft-away-20-4", {"team": A, "shots": 20, "opponent_shots": 4, "expected_share_pct": 45, "window": "match", "one_in": 900, "surprisal_bits": 9.8}),
+        ("possession-swing-away-61", {"team": A, "first_half_pass_share_pct": 43, "second_half_pass_share_pct": 61, "one_in": 150, "surprisal_bits": 7.2}),
+        ("goals-total-6", {"goals": 6, "score": "4-2", "minute": "77'"} | seen(400, last)),
+        ("goals-total-9", {"goals": 9, "score": "6-3", "minute": "85'"} | seen(12, last)),
+        ("goals-total-12", {"goals": 12, "score": "7-5", "minute": "89'"} | seen(0)),
+        ("club-goals-home-6", {"team": H, "goals": 6, "club_record": 5, "record": "new"} | seen(300)),
+        ("club-goals-away-5", {"team": A, "goals": 5, "club_record": 5, "record": "equalled"} | seen(700)),
+        ("hat-trick-speed-home-9-4", {"player": home[8], "team": H, "hat_trick_minutes": 4, "first_goal": "10'", "third_goal": "14'"} | seen(0)),
+        ("hat-trick-speed-home-9-9", {"player": home[8], "team": H, "hat_trick_minutes": 9, "first_goal": "10'", "third_goal": "19'"} | seen(30, last)),
+        ("hat-trick-speed-home-9-40", {"player": home[8], "team": H, "hat_trick_minutes": 40, "first_goal": "10'", "third_goal": "50'"} | seen(700, last)),
+        ("run-unbeaten-home-extended-12", {"team": H, "run": "unbeaten", "run_matches": 12, "stage": "extended", "result": "D"} | seen(200)),
+        ("run-unbeaten-away-ended-9", {"team": A, "run": "unbeaten", "run_matches": 9, "stage": "ended", "result": "L"} | seen(300)),
+        ("run-winless-home-ended-8", {"team": H, "run": "winless", "run_matches": 8, "stage": "ended", "result": "W"} | seen(250)),
+        ("run-winless-away-extended-10", {"team": A, "run": "winless", "run_matches": 10, "stage": "extended", "result": "L"} | seen(150)),
+        ("xg-p1-home-3", {"team": H, "goals": 3, "xg": 0.9, "window": "first half", "one_in": 60, "surprisal_bits": 5.9}),
+        ("comeback-away-2-1", {"team": A, "opponent": H, "deficit_goals": 2, "trailing_score": "2-0", "stage": "level", "score": "2-2"} | seen(500)),  # a club the history does not know
+        ("comeback-away-2-3", {"team": A, "opponent": H, "deficit_goals": 2, "trailing_score": "2-0", "stage": "won", "score": "2-3", "club_last_season": "2025/26",
+                               "club_seasons_since": 1} | seen(114)),  # done last season: "1 seasons ago" is left out
+        ("ht-lead-lost-home-1", {"team": H, "opponent": A, "half_time_score": "1-0", "score": "1-2", "venue": "home", "stage": "behind"} | seen(40)),
+        ("ht-lead-lost-home-2", {"team": H, "opponent": A, "half_time_score": "1-0", "score": "1-2", "venue": "home", "stage": "lost"} | seen(42)),
+    ]
+    out.append(("stat-of-the-match", late | {"top_fact": "late-e1-equaliser", "top_value": 70, "runner_up": "shots-p1-home-12-3", "runner_up_value": 50,
+                                             "runner_up_surprisal_bits": 8.2, "times_rarer_than_runner_up": 2}))
+    return out
+
+
 def every_stage() -> list[tuple[str, dict]]:
-    """The facts of match_insights(), and its comebacks and lost leads again as a first for the club: between them, every template of every family is usable."""
+    """The facts of match_insights() and family_facts(), and the comebacks and lost leads of match_insights() again as a first for the club: between them, every template of every family is usable."""
     out = [(d["key"], d["headline_facts"]) for d in match_insights()]
     for key, facts in list(out):
         if "club_last_season" in facts:
             out.append((key, {k: v for k, v in facts.items() if k not in ("club_last_season", "club_seasons_since")} | {"club_first_time": True}))
+    return out + family_facts()
+
+
+def family_templates(fam: str, lang: str) -> list[tuple[str, str]]:
+    """(part, template) of every template of a family, the "any" pools aside (no fact of the engine falls outside the stages it names)."""
+    out = []
+    for name, p in insight_texts.T[fam][lang].items():
+        pools = [p] if isinstance(p, list) else [v for k, v in p.items() if k != "any"]
+        out += [(name, x) for pool in pools for x in pool]
     return out
 
 
 def test_every_family_line_passes_the_verifier_at_every_stage():
-    from worker.writer import check_numbers, on_air
+    from worker.writer import check_numbers, names_ok, on_air
 
+    told = set()
     for key, facts in every_stage():
         fam = insight_texts.family({"key": key, "headline_facts": facts})
+        assert fam, key
         full, _ = insight_facts({"headline_facts": facts}, TEAMS)
         air, _ = on_air(full, {})
         for lang in LANGS:
@@ -583,9 +659,139 @@ def test_every_family_line_passes_the_verifier_at_every_stage():
                     done = fill(insight_texts.clean(template), values, fields)
                     if done is None:  # a placeholder these facts lack: the picker skips it too
                         continue
+                    told.add((fam, lang, template))
                     nums = check_numbers(done[0], done[1], air)
                     errors, _ = style_issues(done[0], "", lang, nums["good"], air) if part == "headlines" else style_issues("", done[0], lang, nums["good"], air)
-                    assert not errors and not nums["bad_claims"] and not nums["unclaimed_numbers"], (key, lang, part, done[0], errors, nums)
+                    unknown = names_ok(done[0], air) if part in ("headlines", "whys") else names_ok(done[0], air, ALLOWED_NAMES)
+                    assert not errors and not nums["bad_claims"] and not nums["unclaimed_numbers"] and not unknown, (key, lang, part, done[0], errors, nums, unknown)
+    for fam in insight_texts.T:
+        if fam == "storyline":  # its facts are the storyline's own (tests/test_storyline.py)
+            continue
+        for lang in LANGS:
+            never = [x for _, x in family_templates(fam, lang) if (fam, lang, x) not in told]
+            assert not never, (fam, lang, never)  # a template no case can tell would reach the air unchecked
+
+
+def insight_doc(key: str, facts: dict, kind: str = "rarity", **extra) -> dict:
+    return {"id": f"insight-m-{key}", "type": "insight", "match_id": "m", "key": key, "kind": kind, "minute_label": "80'", "headline_facts": facts,
+            "field_meanings": {k: k for k in facts}, "value": 60, "status": "proposed", **extra}
+
+
+def test_a_starter_and_a_club_the_history_cannot_place_get_their_familys_texts():
+    """A starter's four goals and a comeback by a club with no landmark in seasons (unknown to the history, or done last season): the feat and who did it, with its numbers, never the generic line of the kind."""
+    starter = next(f for k, f in family_facts() if k == "scorer-home-9-4")
+    plain = {"team": A, "opponent": H, "deficit_goals": 2, "trailing_score": "2-0", "stage": "level", "score": "2-2"} | seen(500)
+    recent = plain | {"stage": "won", "score": "2-3", "club_last_season": "2025/26", "club_seasons_since": 1}
+    for key, facts, who in (("scorer-home-9-4", starter, starter["player"]), ("comeback-away-2-1", plain, A), ("comeback-away-2-3", recent, A)):
+        out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(insight_doc(key, facts), TEAMS)
+        assert out["verification"]["verified"], key
+        for t in out["texts"]:
+            assert who in t["headline"] + " " + t["why"] and t["claims"], (key, t)  # the family's text: the numbers of the fact, claimed
+            assert not any(w in (t["headline"] + t["why"]).lower() for w in ("bench", "banc", "banquillo", "substitut", "remplaçant", "suplente")), t
+
+
+def test_a_late_goal_credited_to_another_player_is_told_with_the_new_name():
+    """The feed gives a late goal to a team-mate: version 2 of its insight, same minute and score, carries the texts of version 1, which name the old scorer. They are written again."""
+    away = replay_names()["away"]
+    old = away[9]
+    new = next(n for n in away if n.split()[-1] != old.split()[-1])
+    facts = {"player": old, "team": A, "minute": "90+4'", "goal_type": "go-ahead goal", "score_after": "0-1"} | seen(3000)
+    desk = Desk(MemorySink(), TemplateWriter(), languages=LANGS)
+    first = json.loads(json.dumps(desk.write_insight(insight_doc("late-e1-go-ahead", facts, version=1), TEAMS)))
+    out = desk.write_insight(dict(first, version=2, headline_facts=dict(facts, player=new)), TEAMS)
+    assert out["verification"]["verified"]
+    for t in out["texts"]:
+        body = t["headline"] + " " + t["why"]
+        assert new in body and old not in body, t
+    assert not [l["line"] for l in out["duo"] if old in l["line"]]
+
+
+def test_the_generic_insight_lines_name_who_did_it():
+    """The lines left for a fact no family can tell name the player or the club ({subject}), or both clubs; with nobody named in the facts, the two clubs are."""
+    for lang, kinds in INSIGHT_TEMPLATES.items():
+        for kind, pairs in kinds.items():
+            for headline, why in pairs:
+                both = "{home_team}" in headline + why and "{away_team}" in headline + why
+                assert both if kind == "storyline" else "{subject}" in headline and "{subject}" in why, (lang, kind, headline, why)
+    out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(insight_doc("landmark-1", {"goals": 3}, kind="record"), TEAMS)
+    assert out["verification"]["verified"]
+    for t in out["texts"]:
+        body = t["headline"] + " " + t["why"]
+        assert H in body and A in body and "{" not in body, t
+
+
+def test_the_stat_of_the_match_keeps_the_club_name_and_one_colon():
+    shots = next(f for k, f in family_facts() if k == "shots-p1-home-12-3")
+    doc = insight_doc("stat-of-the-match", dict(shots, top_fact="shots-p1-home-12-3", top_value=70), kind="tactical", stat_of_the_match=True)
+    out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(doc, TEAMS)
+    assert out["verification"]["verified"]
+    for t in out["texts"]:
+        prefix = insight_texts.STAT_PREFIX[t["lang"]]
+        rest = t["headline"][len(prefix):]
+        assert t["headline"].startswith(prefix) and ":" not in rest and H in rest, t  # never "Stat of the match: rovers: 12 shots"
+
+
+class EveryDocVersion(MemorySink):
+    """Keeps every version of the cards and insights the desk wrote."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.versions: dict[tuple[str, int], dict] = {}
+
+    def card(self, card: dict) -> None:
+        super().card(card)
+        if card.get("texts"):
+            self.versions[(card["id"], card.get("version", 1))] = copy.deepcopy(card)
+
+    def insight(self, doc: dict) -> None:
+        super().insight(doc)
+        if doc.get("texts"):
+            self.versions[(doc["id"], doc.get("version", 1))] = copy.deepcopy(doc)
+
+
+@pytest.fixture(scope="module")
+def league_matches():
+    """The demo and four unscripted matches against a five-season league history, through the desk with the templates, every version kept: between them, a substitute's
+    and a starter's goals, comebacks, lost leads, late goals, shots, the passes, record wins and goals against expected goals."""
+    from league.history import generate
+
+    history = generate(9, 5)
+    out = []
+    for seed, story in ((7, "demo"), (3, "random"), (5, "random"), (13, "random"), (15, "random")):
+        stream, _ = generate_match(seed, story, frames=False)
+        sink = EveryDocVersion()
+        pipeline = Pipeline(sink=sink, desk=Desk(sink, TemplateWriter(), auto_approve=True), history=history)
+        for m in stream:
+            pipeline.handle(m)
+        pipeline.flush()
+        out.append((pipeline, sink))
+    return out
+
+
+def test_every_insight_of_a_match_names_its_feat_and_who_did_it(league_matches):
+    generic = [re.compile("^" + ".+".join(map(re.escape, re.split(r"\{\w+\}", h))) + "$") for kinds in INSIGHT_TEMPLATES.values() for pairs in kinds.values() for h, _ in pairs]
+    families, starters = set(), 0
+    for pipeline, sink in league_matches:
+        teams = {side: t["name"] for side, t in next(iter(pipeline.matches.values())).info["teams"].items()}
+        for (doc_id, version), doc in sink.versions.items():
+            if doc.get("type") != "insight":
+                continue
+            facts = doc["headline_facts"]
+            fam = insight_texts.family(doc)
+            assert fam and doc["verification"]["verified"], (doc_id, version)
+            families.add(fam)
+            starters += fam == "scorer" and facts.get("substitute") is False
+            names = [facts[k] for k in ("player", "team") if isinstance(facts.get(k), str)] or list(teams.values())
+            for t in doc["texts"]:
+                body = t["headline"] + " " + t["why"]
+                assert any(n in body for n in names), (doc_id, version, t)  # who did it
+                assert not any(g.match(t["headline"]) for g in generic), (doc_id, version, t)  # the feat, from its family
+                assert "{" not in body and EM_DASH not in body, t
+            assert not [l["line"] for l in doc["duo"] if "{" in l["line"]]
+        for lang in LANGS:  # every version of every document of the match: no line proposed twice
+            lines = [PhraseMemory.key(l["line"]) for d in sink.versions.values() for l in d.get("duo", []) + d.get("duo_ruling", []) if l["lang"] == lang]
+            assert len(lines) == len(set(lines)), (lang, [l for l in lines if lines.count(l) > 1])
+    assert {"scorer", "comeback", "ht-lead-lost", "late", "shots", "h2h-margin", "possession-swing", "xg"} <= families and starters, (families, starters)
 
 
 class FactsSpy(FakeWriter):

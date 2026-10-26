@@ -31,10 +31,10 @@ Rules are data: `LANGUAGE_RULES` (per language: code, severity, pattern; `{team}
 | `anglicism` (goal, save, clean sheet...) | fr, es | warning | "Quel goal" |
 | `percent_without_space` | fr | warning | "54%" |
 | `clumsy_phrase` ("en puntos de diferencia") | es | warning | |
-| `league_points_verb` (take, gain, prendre, gagner, ganar, sumar + N points) | all | error | "En silence, Varleigh vient de prendre 8 points" |
+| `league_points_verb` (take, gain, win, earn, pick up, collect, bank; prendre, gagner, empocher, décrocher, récolter, ramener; ganar, sumar, conseguir, lograr, sacar, rascar + N points; a draw as "a point", "un point", "un punto") | all | error | "En silence, Varleigh vient de prendre 8 points", "Varleigh pick up 24 points", "Varleigh take a point" |
 | `league_rate` (one match in N, N a season, N times rarer, bits, a count of 100 matches or more; "not once in 50 seasons" passes) | all | error | "about one match in 101 goes that way", "228 fois plus rare" |
 | `em_dash` | all | error | the reply is normalised first (`no_em_dash`: a comma, or nothing after a punctuation mark), so the rule only catches a text checked directly |
-| `if_goal_as_start` (a value from an `_if_goal` field after from, de, del, d'; "au lieu de", "en lugar del", "en vez del" pass) | all | error | "lifted Yarnford from 18% to 34%" when 18% is the chance had the shot gone in |
+| `if_goal_as_start` (a value from an `_if_goal` field after from, de, del, d'; "au lieu de", "en lugar del", "en vez del" pass, and so do été, plus, moins, près, loin, autour, sido, paso, lejos, cerca, más, menos, alrededor, away, far before them, where the value is the value itself: "auraient été de 70 %", "a un paso del 70%", "a goal away from 70%") | all | error | "lifted Yarnford from 18% to 34%" when 18% is the chance had the shot gone in |
 | `card_kind_unbacked` (second yellow or straight red when the `card_kind` fact does not say so) | all | error | "Second yellow for X" on a card without `card_kind` |
 | `player_not_named` (a red card whose headline and why do not name the player) | all, card texts | error | "Yarnford down to ten" |
 
@@ -43,8 +43,9 @@ Also fixed: `unknown_names` now checks headline and why separately, so the first
 ## On-air rules (decisions of 25/10)
 
 - **One meaning for "points".** A gap between two chances, from a `_pts` field; never with a verb of league points. League table points are never sent to the model: `card_facts` drops them from the season context (`varleigh_points_if_score_holds`), `on_air` from an insight or the storyline.
-- **Rarity in seasons, for the team or the player.** The model gets an insight's facts without `one_in`, `surprisal_bits`, `history_opportunities`, `history_per_season`, `times_rarer_than_runner_up` and the runner-up's values (`OFF_AIR_FIELDS`, `on_air`); the producer still sees them in the console (`rarity.basis`, `why_first`). The templates read every fact to know which lines are true, but write none of those, and a document's own text is kept only if it passes the Verifier on the on-air facts. The instructions no longer ask for numbers "without thousands separators: 18620".
-- **Offside.** Tight ("by a whisker") or clear, never a margin. `var_ruling` reads the worker's `var_decision` (reason, call, margin) and falls back on the desk's `ruled_out`.
+- **Rarity in seasons, for the team or the player.** The model gets an insight's facts without `one_in`, `surprisal_bits`, `history_opportunities`, `history_per_season`, `times_rarer_than_runner_up` and the runner-up's values (`OFF_AIR_FIELDS`, `on_air`); the producer still sees them in the console (`rarity.basis`, `why_first`). The templates read every fact to know which lines are true, but write none of those, and a document's own text is kept only if it passes the Verifier on the on-air facts, names nobody the facts do not and names who did it. For a feat the league sees at least once a season, the count and the rank in the history are left out too ("the 151st brace by a substitute" is a league-wide count; "only the 6th hat-trick by a substitute in 50 seasons" tells a rare feat). The instructions no longer ask for numbers "without thousands separators: 18620".
+- **Offside.** Tight ("by a whisker") or clear, never a margin. `var_ruling` takes the reason and the call from the worker's `var_decision`, else from the desk's `ruled_out`; the margin only from `ruled_out.margin_cm`: `var_decision.margin_m` is never read, so it never reaches the duo or the recap document.
+- **The feat and who did it.** Every detector of the insight engine has its family of texts (`worker.insight_texts`, see `docs/notes/duo.md`), so an insight's headline and why name the feat and the player or club; the generic lines of `INSIGHT_TEMPLATES`, left for a fact no family can tell, name the player or the club, or both clubs.
 - **A value if goal is never a starting point**, a meaning error the model benchmark showed on saves and chances: a line in the instructions, the `if_goal_as_start` rule, and the chance templates rephrased ("One finish more, and Varleigh would be on 70% to win; they stay on 40%" instead of "one finish away from 70%").
 - **No em dash**, in the instructions and in the replies (normalised in `parse_reply`, refused by `em_dash`).
 - **Red cards.** `card_facts` passes `card_kind` (`second_yellow`, or `straight_red` for the worker's `red`) with its meaning; templates per kind ("Second yellow for X: Yarnford are down to ten and go from 2% to 1% to win."), the generic ones when the feed does not say; every headline names the player.
@@ -74,7 +75,7 @@ French templates use a no-break space before % and :. Every template passes ever
 - The probability-word lists (`PROBABILITY_WORDS`) are short; French "chance" in the sense of luck would also require a club in the sentence.
 - Whether the stricter checks raise the template fallback rate on a live run: measure it at the next Foundry run (the tests made no model call).
 - `league_rate` is a pattern list: a rate written in words ("twice a season" is caught, "every other season" is not) or a new turn of phrase can slip through; the number checks still refuse any number the facts do not hold.
-- `if_goal_as_start` looks at the word just before the number: "plus de 70 %" with 70 a value if goal would be refused, though it is not a starting point.
+- `if_goal_as_start` looks at the words just before the number: a turn of phrase where the value is the value itself and whose word is not in `NOT_A_START` would be refused, sending a right answer to the retry. Measure it at the next Foundry run.
 
 ## One output contract, quoted preferences, time limits and the trace (26/10)
 
