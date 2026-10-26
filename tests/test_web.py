@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import plotly
 import pytest
 from dash import html, no_update
 from flask import Flask
@@ -1396,6 +1397,29 @@ def test_the_replay_shows_the_desk_as_it_stood_at_a_minute_and_writes_nothing(au
     end, marks, value, minute = console.replay_range(MATCH, s)
     assert value == end >= points[-1]["x"] and marks[end] == "FT" and "HT" in marks.values() and minute is None
     assert {p.name: p.read_bytes() for p in folder.iterdir()} == before  # nothing written
+
+
+def test_on_air_now_shows_the_overlay_s_lower_third_at_the_replay_s_minute(auto_desk):
+    s = auto_desk
+    s.cache_s = 0.0
+    full = overlay.render(f"?match={MATCH}&lang=fr", s)
+    lower = next(c for c in full if "ov-lower" in (getattr(c, "className", "") or ""))
+    out, sig = console.onair_preview(MATCH, "fr", None, s)
+    preview = find(out, lambda c: getattr(c, "className", "") == "ov-preview")[0]
+    same = lambda c: json.dumps(c.to_plotly_json(), cls=plotly.utils.PlotlyJSONEncoder, sort_keys=True)  # noqa: E731
+    assert same(preview.children) == same(lower)  # exactly what /overlay shows, in the console's language
+    assert "On air now" in texts_in(out) and find(out, lambda c: getattr(c, "href", "") == f"/overlay?match={MATCH}&lang=fr")
+    assert console.onair_preview(MATCH, "fr", sig, s) == (no_update, no_update)
+    points, _, breaks = console.axis(s.state(MATCH)["wp_timeline"])
+    at = lambda label: console.label_x(label, points, breaks) + 1  # noqa: E731
+    item, _ = console.on_air_now(MATCH, "en", s, at("63'"))
+    goal = card_at(s, "63'")
+    assert item["kind"] == "card" and item["card"]["id"] == goal["id"]  # the 63' goal on air before VAR ruled it out
+    item, _ = console.on_air_now(MATCH, "en", s, console.label_x("64'", points, breaks) + 0.2)  # the feed retracted it in the 64th minute: the retraction holds 20 s
+    assert item is not None and item["card"]["id"] == goal["id"] and item["kind"] == "retraction"
+    assert console.on_air_now(MATCH, "en", s, 1.0)[0] is None and "Nothing on air" in texts_in(console.onair_preview(MATCH, "en", None, s, t=1.0)[0])
+    right = find(console.layout(None), lambda c: "col-right" in (getattr(c, "className", "") or "") and "c-wp" in component_ids(c.children))[0]
+    assert right.children[0].id == "c-onair"  # at the top of the right column
 
 
 def test_the_replay_control_is_in_the_header_for_everyone():

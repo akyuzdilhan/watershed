@@ -247,3 +247,16 @@ body:has(.ov-page) { background: #0b0b0b; }
 .story-text { color: var(--ink); font-weight: 600; }
 .story-chip { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; text-align: left; }
 .story-chip:hover { border-color: var(--ink-2); }
+
+/* On air now: the overlay's lower-third, compact, at the top of the right column */
+.onair { margin-bottom: 12px; }
+.onair .col-head h3 { margin: 0; }
+.onair-link { margin-left: auto; color: var(--ink-2); font-size: 12px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+.onair-link:hover { color: var(--ink); border-color: var(--ink-2); }
+.ov-preview { background: #0b0b0b; border-radius: 6px; padding: 10px; }
+.ov-preview .ov-lower { position: static; max-width: none; padding: 8px 12px; }
+.ov-preview .ov-minute { font-size: 14px; }
+.ov-preview .ov-headline { font-size: 15px; }
+.ov-preview .ov-why { font-size: 12px; }
+.ov-preview .ov-second-text { font-size: 12px; }
+.ov-preview .ov-line { gap: 8px; }

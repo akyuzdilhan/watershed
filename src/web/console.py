@@ -12,6 +12,7 @@ In public mode a visitor who is not signed in gets the same views read only, und
 import hashlib
 import json
 import re
+from urllib.parse import urlencode
 
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
@@ -19,7 +20,7 @@ from dash import ALL, Input, Output, State, ctx, dcc, html, no_update
 from web import panels, security
 from web.analysis_view import analysis_block
 from web.labels import action_label, fact_label, field_label, readable  # noqa: F401 (fact_label: console.fact_label)
-from web.overlay import AI_WRITTEN_LABEL, previous_scorer, retraction_message, text_for, var_reason
+from web.overlay import AI_WRITTEN_LABEL, aireable_insights, lower_third, on_air, previous_scorer, retraction_message, text_for, var_reason
 from web.store import get_store
 from worker import feedback as FB
 from worker.duo import PERSONAS
@@ -922,6 +923,52 @@ STORY_OPEN = """function(clicks) {
 }"""
 
 
+# --- On air now: the overlay's lower-third, at the top of the right column ------------------------------
+
+ONAIR_TITLE = "On air now"
+
+
+def clock_at(state: dict | None, t: float) -> tuple[float, int]:
+    """(match clock in seconds, period) at minute `t` of the continuous axis (`axis`): the period from the breaks before `t`, the clock from where that period starts."""
+    _, _, breaks = axis((state or {}).get("wp_timeline") or [])
+    k = sum(1 for b in breaks if b <= t)
+    return ((t - breaks[k - 1]) * 60 + PERIOD_STARTS[k - 1] if k else t * 60), k + 1
+
+
+def on_air_now(match_id: str | None, lang: str | None, store=None, t: float | None = None) -> tuple[dict | None, dict | None]:
+    """(the overlay's `on_air` item, the match state) as the overlay would show them, at minute `t` of a replay (None: as it stands): the cards, insights and audit as they stood then, the clock of that minute."""
+    store = store or get_store()
+    if not match_id:
+        return None, None
+    full = store.state(match_id) or {}
+    # the overlay dates a feed action (hold, retraction) from the start of the minute it names (`overlay.minute_end`), the replay half a minute later: the
+    # cards are taken half a minute on, so that a retraction holds the lower-third from its minute, as on /overlay
+    cards, state, audit, x_max = replay(store.cards(match_id), full, store.audit(match_id), None if t is None else t + 0.5)
+    insights = insights_at(store.insights(match_id), full, t)
+    x_max = None if t is None or t >= full_time(full) else x_max
+    clock, period = (full.get("clock_s"), full.get("period")) if t is None or x_max is None else clock_at(full, t)
+    if x_max is not None:
+        state = dict(state, clock_s=clock, period=period)
+    return on_air(cards + aireable_insights(insights), audit, clock, period), state
+
+
+def onair_preview(match_id: str | None, lang: str | None, last_sig: str | None, store=None, t: float | None = None):
+    """(children, signature) of "On air now": the lower-third exactly as /overlay draws it (`overlay.lower_third`, same language as the console), compact, with a link to the full overlay; no_update for both when it did not change."""
+    lang = lang if lang in LANG_NAMES else DEFAULT_LANG
+    item, state = on_air_now(match_id, lang, store, t)
+    lower = lower_third(item, lang, state)
+    sig = _sig(match_id, lang, lower.to_plotly_json())
+    if sig == last_sig:
+        return no_update, no_update
+    link = html.A("open full overlay", href="/overlay?" + urlencode({"match": match_id or "", "lang": lang}), target="_blank", rel="noopener", className="onair-link")
+    body = lower if item is not None else html.Div("Nothing on air at this minute.", className="muted small")
+    return [html.Div([html.H3(ONAIR_TITLE), link], className="col-head"), html.Div(body, className="ov-preview")], sig
+
+
+def _onair_cb(_sig, lang, match_id, last_sig, t=None):
+    return onair_preview(match_id, lang, last_sig, t=t)
+
+
 # --- layout and wiring ----------------------------------------------------------------------------
 
 def viewer(user: str | None) -> html.Div:
@@ -994,7 +1041,7 @@ def layout(user: str | None) -> html.Div:
                 html.Div([html.Button("Publish edited", id="c-approve-edit", className="btn btn-approve"), html.Button("Cancel", id="c-cancel-edit", className="btn")],
                          id="c-edit-actions", className="actions", style={"display": "none"}),
                 html.Div(id="c-detail")], className="col col-middle"),
-            html.Section([html.H3("Win probability"), dcc.Graph(id="c-wp", figure=panels.empty_figure("Loading."), config={"displayModeBar": False}),
+            html.Section([html.Div(id="c-onair", className="onair"), dcc.Store(id="c-onair-sig"), html.H3("Win probability"), dcc.Graph(id="c-wp", figure=panels.empty_figure("Loading."), config={"displayModeBar": False}),
                           html.P("Filled marker: on air. Faded: waiting or rejected. Cross: retracted.", className="muted small"),
                           html.Div(id="c-context", className="context"), dcc.Store(id="c-ctx-sig")], className="col col-right"),
         ], id="c-pane-desk", className="desk"),
@@ -1178,6 +1225,8 @@ def register(app) -> None:
                  State("c-story-sig", "data"), State("c-replay", "data"))(_story_cb)
     app.clientside_callback(STORY_OPEN, Output("c-view", "value", allow_duplicate=True), Output("c-i-list", "value", allow_duplicate=True),
                             Input({"type": "c-story-chip", "id": ALL}, "n_clicks"), prevent_initial_call=True)
+    app.callback(Output("c-onair", "children"), Output("c-onair-sig", "data"), Input("c-sig", "data"), Input("c-lang", "value"), State("c-match", "value"),
+                 State("c-onair-sig", "data"), State("c-replay", "data"))(_onair_cb)
     app.callback(Output("c-fb-line", "options"), Input("c-sig", "data"), State("c-match", "value"), State("c-rundown", "value"), State("c-lang", "value"))(_fb_lines_cb)
     app.callback(Output("c-message", "children", allow_duplicate=True), Output("c-fb-note", "value"), Input("c-fb-send", "n_clicks"), State("c-match", "value"), State("c-fb-line", "value"),
                  State("c-fb-verdict", "value"), State("c-fb-reasons", "value"), State("c-fb-note", "value"), prevent_initial_call=True)(_fb_send_cb)
