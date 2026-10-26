@@ -17,7 +17,7 @@ In scope:
 
 Out of scope: denial of service by volume, social engineering, and vulnerabilities of Azure, GitHub or third-party packages themselves (report those to their owners).
 
-Please do not run automated scanners or load tests against the demo: it runs on a small personal budget, and a kill switch stops the match pipeline and the models when the budget alert fires (the read-only page stays up).
+Please do not run automated scanners or load tests against the demo: it runs on a small personal budget with budget alerts and rate limits.
 
 ## What the project relies on
 
@@ -25,4 +25,4 @@ Please do not run automated scanners or load tests against the demo: it runs on 
 - **No secrets in the repository.** Configuration comes from environment variables (`.env` is ignored; `.env.example` only holds placeholders). CI scans the whole history with gitleaks, and GitHub secret scanning with push protection is enabled.
 - **Read-only for visitors.** The public console shows the match, the cards, the insights and the storyline to everyone; approving, editing, rejecting and feedback need a producer signed in through Easy Auth, and the server refuses them otherwise.
 - **Keyless Azure.** Service Bus and Cosmos DB have local (key) authentication disabled; the apps use managed identities and Azure roles, and the Foundry models are called with Microsoft Entra ID tokens. There is no connection string or API key to leak.
-- **Cost guards.** Rate limits on the model deployments, a cap on model calls per match in the worker, a per-IP request limit on the web app (which makes no model call), budget alerts, and a kill switch (`infra/killswitch/`) that stops the worker, the replay and the model deployments while the read-only page stays up.
+- **Cost guards.** Rate limits on the model deployments, a cap on model calls per match in the worker, a per-IP request limit on the web app (which makes no model call), budget alerts, and a kill switch (`infra/killswitch/`, built and tested against fakes of the Azure API, not deployed) that would stop the worker, the replay and the model deployments while the read-only page stays up.
