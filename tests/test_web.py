@@ -1014,6 +1014,16 @@ def test_the_headline_story_is_the_first_card_pulled_off_air_else_the_highest_va
     assert console.default_pick([{"id": "w", "status": "pending"}, *pulled], final=True) == "w"  # a card waiting for a producer comes first
 
 
+def test_a_rundown_entry_holds_two_lines_with_its_badges_and_the_impact_explained(desk):
+    for option, card in zip(console.rundown_options(console.rundown_order(desk.cards(MATCH))), console.rundown_order(desk.cards(MATCH))):
+        lines = option["label"].children
+        assert [line.className for line in lines] == ["ru-top", "ru-badges"]
+        assert card["player"]["name"] in texts_in(lines[0]) and "priority" not in texts_in(option["label"])
+        impact = find(lines[1], lambda c: getattr(c, "className", "") == "ru-value")[0]
+        assert impact.children == f"impact {card.get('value_pts', 0)}" and impact.title == console.IMPACT_TIP
+        assert console.STATUS[card["status"]][0] in texts_in(lines[1]) or "Retracted" in texts_in(lines[1])
+
+
 def test_the_card_heading_says_team_score_before_and_version_without_priority():
     card = {"id": "x", "minute_label": "88'", "moment": "goal", "team_name": "Varleigh", "score_before": {"home": 4, "away": 2}, "value_pts": 0, "version": 1,
             "player": {"name": "Joaquim Kosznik"}, "status": "approved"}

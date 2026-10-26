@@ -59,13 +59,16 @@ def rundown_order(cards: list[dict]) -> list[dict]:
     return sorted(cards, key=lambda c: (c.get("status") != "pending", c.get("clock_s") or 0, c.get("version") or 1, c.get("id", "")))
 
 
+IMPACT_TIP = "How much this moment moved the result, 0 to 100"
+
+
 def rundown_options(cards: list[dict]) -> list[dict]:
-    """The rundown entries, in the order given (`rundown_order`)."""
+    """The rundown entries, in the order given (`rundown_order`), two lines each: minute, moment, team and player, then the status badges and the impact (`value_pts`, explained on hover)."""
     return [{"value": c["id"], "label": html.Div([
         html.Div([html.Span(c.get("minute_label", ""), className="ru-minute"), html.Span(MOMENTS.get(c.get("moment"), c.get("moment")), className="ru-moment"),
-                  html.Span(f"priority {c.get('value_pts', 0)}", className="ru-value")], className="ru-top"),
-        html.Div(f"{c.get('team_name', '')}: {c.get('player', {}).get('name', '')}" + (f" (v{c['version']})" if c.get("version", 1) > 1 else ""), className="ru-who"),
-        html.Div(badges(c), className="ru-badges")],
+                  html.Span(f"{c.get('team_name', '')}: {c.get('player', {}).get('name', '')}" + (f" (v{c['version']})" if c.get("version", 1) > 1 else ""), className="ru-who")],
+                 className="ru-top"),
+        html.Div([*badges(c), html.Span(f"impact {c.get('value_pts', 0)}", className="ru-value", title=IMPACT_TIP)], className="ru-badges")],
         className="ru-item " + {"retracted": "ru-retracted", "pending": "ru-waiting"}.get(c.get("status"), ""))} for c in cards]
 
 
