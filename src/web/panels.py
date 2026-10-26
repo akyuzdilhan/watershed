@@ -203,16 +203,88 @@ def graphic_items(feed: dict, kind: str) -> list[dict]:
                  + (f", xG {a['shot']['xg']:.2f}, {G._lower(G.OUTCOMES[G._outcome(a)][0])}" if a.get("shot") else "")}
                 for a in feed["actions"] if a["action_type"] in DIRECT_KINDS[kind]]
     if kind == "tactics":
-        out = [{"value": "lines", "label": "Defensive line height over time"}, {"value": "press", "label": "Opponents near the ball over time"}]
-        breaks = sorted(T.line_breaks(feed["actions"], 4), key=lambda r: (-r["bypassed"], r["seq"]))[:8]
-        out += [{"value": f"lb:{r['event_id']}", "label": f"Line break {r['minute_label']}: {who(r['passer_id'])}, {r['bypassed']} defenders bypassed"} for r in breaks]
-        runs = sorted(T.runs_behind(feed["actions"]), key=lambda r: abs(r["margin_m"]))[:8]
-        out += [{"value": f"run:{r['event_id']}:{r['runner_id']}", "label": f"Run {r['minute_label']}: {who(r['runner_id'])} {'beyond' if r['margin_m'] > 0 else 'inside'} the line"}
-                for r in runs]
-        spaces = sorted(T.space_at_reception(feed["actions"]), key=lambda r: -r["space_m"])[:6]
-        out += [{"value": f"space:{r['event_id']}", "label": f"Space {r['minute_label']}: {who(r['receiver_id'])} {r['space_m']:.1f} m free"} for r in spaces]
-        return out
+        moments = G.moments(feed)
+        best: dict[tuple[str, str], tuple[dict, dict]] = {}  # (moment, kind) -> (row, item): one line break, one run and one space per goal or chance
+        rest = []
+        for r in T.line_breaks(feed["actions"], 4):
+            m = lead_to(moments, r)
+            item = {"value": f"lb:{r['event_id']}", "label": (f"Line break before the {moment_name(m)}" if m else f"Line break {r['minute_label']}")
+                    + f": {who(r['passer_id'])}, {r['bypassed']} defenders bypassed"}
+            if m is None:
+                rest.append((r, item))
+            elif (m["event_id"], "lb") not in best or r["bypassed"] > best[(m["event_id"], "lb")][0]["bypassed"]:
+                best[(m["event_id"], "lb")] = (r, item)
+        for r in T.runs_behind(feed["actions"]):
+            m = lead_to(moments, r)
+            if m is None and not r["official"]:
+                continue  # a run that led nowhere and that VAR did not check tells nothing
+            key = (m["event_id"] if m else r["event_id"], "run")
+            if key not in best or r["official"] or (r["seq"] > best[key][0]["seq"] and not best[key][0]["official"]):  # the run VAR checked, else the last one before the shot
+                best[key] = (r, {"value": f"run:{r['event_id']}:{r['runner_id']}", "label": (f"Run before the {moment_name(m)}" if m else f"Run {r['minute_label']}")
+                                 + f": {who(r['runner_id'])} {'beyond' if r['margin_m'] > 0 else 'inside'} the line"})
+        shooters = {m["event_id"]: m for m in moments}
+        for r in T.space_at_reception(feed["actions"]):
+            m = shooters.get(r["event_id"])  # the shooter's room as the ball reached him; space anywhere else is the generator's open midfield, not a story
+            if m is not None:
+                best[(m["event_id"], "space")] = (r, {"value": f"space:{r['event_id']}", "label": f"Space before the {moment_name(m)}: {who(r['receiver_id'])} {r['space_m']:.1f} m from the nearest opponent"})
+        tied = sorted(best.values(), key=lambda p: p[0]["seq"])
+        rest = sorted(rest, key=lambda p: (-p[0]["bypassed"], p[0]["seq"]))[:3]
+        return ([i for _, i in tied] + [{"value": "lines", "label": "Defensive line height: how high each team defends"},
+                                         {"value": "press", "label": f"Closing down: players within {T.PRESS_RADIUS_M:g} m of the ball"}] + [i for _, i in rest])
     return []
+
+
+LEAD_S = 60.0  # a tactical detail is tied to a goal or chance that its team reached within this many seconds
+
+
+def lead_to(moments: list[dict], row: dict) -> dict | None:
+    """The goal or chance (`graphics.moments`) of the same team that followed `row` within `LEAD_S` seconds in the same period, if any."""
+    return next((m for m in moments if m["team"] == row["team"] and m.get("period") == row.get("period") and 0 <= m["clock_s"] - row["clock_s"] <= LEAD_S), None)
+
+
+def moment_name(m: dict) -> str:
+    """The goal or chance in words: "52' goal", "63' goal ruled out", "72' chance"."""
+    return f"{m.get('minute_label', '')} " + ("goal ruled out" if m.get("voided") else "goal" if T.any_goal(m) else "chance")
+
+
+def graphic_note(feed: dict, kind: str, item: str | None) -> str:
+    """One plain line under a graphic: what it measures and why it matters, for the item picked when the kind has several (tactical details); never the offside margin."""
+    if kind != "tactics" or not item:
+        return NOTES.get(kind, "")
+    tag = item.partition(":")[0]
+    if tag == "lines":
+        return ("How high each team defends: the distance from its own goal to its deepest outfield player while the opponent has the ball. A high line squeezes the space; "
+                "shaded: the ten minutes after a goal when the team that conceded dropped deeper.")
+    if tag == "press":
+        return (f"How many players a team gets within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, in open play. More players close means harder pressing "
+                "and less time on the ball.")
+    if tag == "lb":
+        return "A pass that went past the ringed defenders: each one bypassed is one fewer between the ball and the goal. Shaded: the stretch of pitch the pass crossed."
+    if tag == "run":
+        return ("A pass played behind the defensive line (dashed: the second-last defender, keeper included). Where the runner stood against that line when the ball was played "
+                "decides offside.")
+    if tag == "space":
+        return ("How much room the receiver had when the ball arrived: the circle reaches the nearest opponent. With a few metres a player can turn and choose; "
+                "under two he has to play first time.")
+    return NOTES["tactics"]
+
+
+def _tactic_figure(feed: dict, tag: str, rest: str) -> go.Figure:
+    if tag == "lb":
+        return _sized(G.line_break_figure(feed, rest, THEME, None))
+    if tag == "run":
+        event_id, _, runner = rest.partition(":")
+        return _sized(G.run_figure(feed, event_id, runner or None, THEME, width=None, show_margin=False))
+    return _sized(G.space_figure(feed, rest, THEME, None))
+
+
+def _tied(feed: dict, fig: go.Figure, event_id: str) -> go.Figure:
+    """The title of a tactical detail says which goal or chance it led to, when it led to one within `LEAD_S`."""
+    a = next((x for x in feed["actions"] if x["event_id"] == event_id), None)
+    m = lead_to(G.moments(feed), a) if a else None
+    if m is not None and fig.layout.title.text:
+        fig.layout.title.text = fig.layout.title.text.replace("</b>", f", before the {moment_name(m)}</b>", 1)
+    return fig
 
 
 def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict] | None = None) -> go.Figure:
@@ -237,17 +309,12 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
         return _sized(G.shot_on_goal_figure(feed, item, THEME, None), 360)
     if kind == "tactics":
         tag, _, rest = item.partition(":")
+        if tag in ("lb", "run", "space"):
+            return _tied(feed, _tactic_figure(feed, tag, rest), rest.partition(":")[0])
         if tag == "lines":
-            return _sized(G.line_height_figure(feed, THEME, width=None), 400)
+            return _sized(G.line_height_figure(feed, THEME, width=None), 440)
         if tag == "press":
-            return _sized(G.pressing_figure(feed, THEME, width=None), 400)
-        if tag == "lb":
-            return _sized(G.line_break_figure(feed, rest, THEME, None))
-        if tag == "run":
-            event_id, _, runner = rest.partition(":")
-            return _sized(G.run_figure(feed, event_id, runner or None, THEME, width=None, show_margin=False))
-        if tag == "space":
-            return _sized(G.space_figure(feed, rest, THEME, None))
+            return _sized(G.pressing_figure(feed, THEME, width=None), 420)
     return empty_figure("Pick a graphic.")
 
 
@@ -259,7 +326,7 @@ NOTES = {
     "penalties": "Seen from behind the taker: where the ball crossed the line, and the box where the keeper stood in the frame.",
     "freekicks": "From above: the kick spot and its distance to goal, the wall (defenders within 11 m on the line to goal, from the freeze frame), the keeper and the shot. On the right the goal seen from behind the taker.",
     "direct": "Seen from behind the taker. The box shows where the keeper stood in the frame.",
-    "tactics": "Measured on the 360 freeze frames (synthetic positions, rounded to 0.1 m).",
+    "tactics": "Measured on the 360 freeze frames (synthetic positions, rounded to 0.1 m). Details that led to a goal or a chance within a minute come first.",
 }
 
 
@@ -300,7 +367,8 @@ def graphics(match_id: str | None, kind: str | None, item: str | None, view: str
     except (StopIteration, KeyError, ValueError, IndexError) as error:
         fig = empty_figure(f"Cannot draw this graphic: {error}")
     folded = None if read_only or kind != "tactics" else run_margin_details(feed, picked)
-    note = NOTES.get(kind, "") if folded is None else [html.P(NOTES.get(kind, "")), folded]
+    line = graphic_note(feed, kind, picked)
+    note = line if folded is None else [html.P(line), folded]
     return options, picked if picked != item else no_update, fig, note, sig
 
 

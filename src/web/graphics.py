@@ -736,38 +736,91 @@ def space_figure(feed: dict, event_id: str, theme="dark", width: int | None = 90
     return fig
 
 
+def _time_marks(fig: go.Figure, marks: list[dict], t: dict, extra: float) -> None:
+    """Goals and red cards as full-height vertical lines (solid goal, dashed ruled out by VAR, dotted red card) labelled above the plot, rows staggered so that labels do not overlap."""
+    xs = [_x(m["period"], m["clock_s"], extra) for m in marks]
+    for m, x, row in zip(marks, xs, label_rows(xs, 7.5)):
+        color = t["text"] if m["kind"] == "red" else t[m["team"]]
+        fig.add_shape(type="line", x0=x, x1=x, y0=0, y1=1, yref="paper", name=m["kind"],
+                      line={"color": color, "width": 1.6 if m["kind"] == "goal" else 1.2, "dash": {"goal": "solid", "voided": "dash", "red": "dot"}[m["kind"]]})
+        fig.add_annotation(x=x, y=1, yref="paper", yanchor="bottom", yshift=2 + 15 * row, text=m["label"], showarrow=False, font={"size": 11, "color": color}, name=m["kind"])
+
+
 def _team_lines(feed: dict, rows: list[dict], value, title: str, sub: str, ytitle: str, theme, minutes: int, width: int | None) -> go.Figure:
+    """Per team, `value(row, side)` averaged per `minutes` (home solid with circles, away dashed with squares), the team's match average as a dotted line, goals and red cards marked."""
     t = _t(theme)
     teams = team_names(feed.get("info"))
     extra = _first_half_extra(feed)
     fig = go.Figure()
-    for side in ("home", "away"):
+    marks = match_marks(feed)
+    rows_used = max(label_rows([_x(m["period"], m["clock_s"], extra) for m in marks], 7.5), default=-1) + 1
+    for side, dash, symbol in (("home", "solid", "circle"), ("away", "dash", "square")):
         pts = T.per_bucket(rows, lambda r, s=side: value(r, s), minutes)
         xs = [_x(p["period"], p["start_min"] * 60, extra) + minutes / 2 for p in pts]
-        fig.add_trace(go.Scatter(x=xs, y=[round(p["value"], 2) for p in pts], mode="lines+markers", name=teams[side], line={"color": t[side], "width": 2},
-                                 marker={"size": 8, "color": t[side], "line": {"color": t["paper"], "width": 2}}, customdata=[p["n"] for p in pts],
+        fig.add_trace(go.Scatter(x=xs, y=[round(p["value"], 2) for p in pts], mode="lines+markers", name=teams[side], line={"color": t[side], "width": 2, "dash": dash},
+                                 marker={"size": 8, "color": t[side], "symbol": symbol, "line": {"color": t["paper"], "width": 2}}, customdata=[p["n"] for p in pts],
                                  hovertemplate=f"{teams[side]} %{{y:.1f}} (%{{customdata}} frames)<extra></extra>"))
+        vals = [v for v in (value(r, side) for r in rows) if v is not None]
+        if vals:
+            mean = sum(vals) / len(vals)
+            fig.add_shape(type="line", x0=0, x1=1, xref="paper", y0=mean, y1=mean, line={"color": t[side], "width": 1, "dash": "dot"}, name=f"average-{side}")
+            fig.add_annotation(x=1, xref="paper", y=mean, xanchor="right", yanchor="bottom" if side == "home" else "top", showarrow=False, text=f"{teams[side]} average {mean:.1f}",
+                               font={"size": 11, "color": t[side]}, bgcolor=t["paper"], name=f"average-{side}")
+    _time_marks(fig, marks, t, extra)
     fig.add_vline(x=45 + extra, line={"color": t["muted"], "width": 1, "dash": "dot"})
     fig.update_layout(title={"text": _title(title, sub), "x": 0.02, "xanchor": "left"}, paper_bgcolor=t["paper"], plot_bgcolor=t["paper"],
-                      font={"family": t["font"], "color": t["text"], "size": 12}, legend={"orientation": "h", "y": -0.15, "x": 0}, height=380, margin={"l": 50, "r": 16, "t": 80, "b": 50},
-                      xaxis={"tickvals": [0, 15, 30, 45] + [m + extra for m in (60, 75, 90)], "ticktext": ["0'", "15'", "30'", "45'", "60'", "75'", "90'"], "gridcolor": "rgba(148,163,184,0.15)"},
-                      yaxis={"title": ytitle, "gridcolor": "rgba(148,163,184,0.15)", "rangemode": "tozero"})
+                      font={"family": t["font"], "color": t["text"], "size": 12}, legend={"orientation": "h", "y": -0.15, "x": 0}, height=420 + 15 * rows_used,
+                      margin={"l": 50, "r": 16, "t": 96 + 15 * rows_used, "b": 50}, xaxis=_minute_axis(extra), yaxis={"title": ytitle, "gridcolor": "rgba(148,163,184,0.15)", "rangemode": "tozero"})
     if width:
         fig.update_layout(width=width)
     return fig
 
 
-def line_height_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
+def line_drops(feed: dict, window_min: float = 10.0, min_drop_m: float = 2.0) -> list[dict]:
+    """After each counted goal, whether the team that conceded defended deeper: its mean line height over `window_min` minutes after the goal against the same span before (same period, while the opponent had the ball), kept when it fell by `min_drop_m` or more."""
     rows = T.line_heights(feed["actions"])
-    return _team_lines(feed, rows, lambda r, s: r[s] if r["in_possession"] != s else None, "Defensive line height",
-                       f"mean distance from a team's own goal line to its deepest outfield player when the opponent has the ball, per {minutes} minutes", "metres", theme, minutes, width)
+    extra = _first_half_extra(feed)
+    out = []
+    for a in feed["actions"]:
+        if not T.counted_goal(a):
+            continue
+        side = "away" if a["team"] == "home" else "home"
+        mine = [(r["clock_s"], r[side]) for r in rows if r.get("period") == a.get("period") and r["in_possession"] != side]
+        before = [h for c, h in mine if a["clock_s"] - 60 * window_min <= c < a["clock_s"]]
+        after = [h for c, h in mine if a["clock_s"] < c <= a["clock_s"] + 60 * window_min]
+        if len(before) < 5 or len(after) < 5:
+            continue
+        b, f = sum(before) / len(before), sum(after) / len(after)
+        if b - f >= min_drop_m:
+            x0 = _x(a.get("period", 1), a["clock_s"], extra)
+            out.append({"team": side, "goal_event_id": a["event_id"], "minute_label": a.get("minute_label", ""), "before_m": round(b, 1), "after_m": round(f, 1),
+                        "drop_m": round(b - f, 1), "x0": x0, "x1": x0 + window_min})
+    return out
+
+
+def line_height_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
+    """Each team's defensive line per `minutes`, its match average, goals and red cards, and the ten minutes after a goal shaded when the team that conceded dropped deeper (`line_drops`)."""
+    t = _t(theme)
+    teams = team_names(feed.get("info"))
+    rows = T.line_heights(feed["actions"])
+    fig = _team_lines(feed, rows, lambda r, s: r[s] if r["in_possession"] != s else None, "Defensive line height",
+                      f"mean distance from a team's own goal line to its deepest outfield player when the opponent has the ball, per {minutes} minutes; higher: defending further up", "metres",
+                      theme, minutes, width)
+    drops = line_drops(feed)
+    for d in drops:
+        fig.add_vrect(x0=d["x0"], x1=d["x1"], fillcolor=t[d["team"]], opacity=0.13, line={"width": 0}, layer="below", name="drop")
+        fig.add_annotation(x=(d["x0"] + d["x1"]) / 2, y=0, yref="paper", yanchor="bottom", yshift=4, showarrow=False, font={"size": 11, "color": t[d["team"]]},
+                           text=f"{teams[d['team']]} {d['drop_m']:.0f} m deeper<br>after conceding", bgcolor=t["paper"], name="drop")
+    fig.update_layout(meta={"drops": drops})
+    return fig
 
 
 def pressing_figure(feed: dict, theme="dark", minutes: int = 5, width: int | None = 900) -> go.Figure:
-    """Per team, the mean number of its players within `PRESS_RADIUS_M` (5 m) of the opponent on the ball in open play (`worker.tactics.pressure`), titled "Opponents near the ball" for what it counts."""
+    """Per team, the mean number of its players within `PRESS_RADIUS_M` (5 m) of the opponent on the ball in open play (`worker.tactics.pressure`), titled "Closing down" for what it shows."""
     rows = T.pressure(feed["actions"])
-    return _team_lines(feed, rows, lambda r, s: r["pressers"] if r["pressing_team"] == s else None, "Opponents near the ball",
-                       f"mean number of a team's players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, open play, per {minutes} minutes", "players", theme, minutes, width)
+    return _team_lines(feed, rows, lambda r, s: r["pressers"] if r["pressing_team"] == s else None, "Closing down",
+                       f"mean number of a team's players within {T.PRESS_RADIUS_M:g} m of the opponent on the ball, open play, per {minutes} minutes; higher: pressing harder",
+                       "players", theme, minutes, width)
 
 
 def insight_figure(insight: dict, feed: dict, theme="dark", width: int | None = 900, show_margin: bool = True) -> go.Figure | None:

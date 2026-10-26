@@ -304,14 +304,37 @@ def test_the_momentum_picker_sets_the_slice(demo_feed):
 
 def test_the_former_pressing_figure_is_named_for_what_it_counts(demo_feed):
     fig = graphics.pressing_figure(demo_feed)
-    assert fig.layout.title.text.startswith("<b>Opponents near the ball</b>") and f"within {tactics.PRESS_RADIUS_M:g} m of the opponent on the ball" in fig.layout.title.text
+    assert fig.layout.title.text.startswith("<b>Closing down</b>") and f"within {tactics.PRESS_RADIUS_M:g} m of the opponent on the ball" in fig.layout.title.text
     assert "Pressing" not in fig.layout.title.text
     labels = {o["value"]: o["label"] for o in panels.graphic_items(demo_feed, "tactics")}
-    assert labels["press"] == "Opponents near the ball over time"
+    assert labels["press"] == "Closing down: players within 5 m of the ball"
     assert panels.graphic_figure(demo_feed, "tactics", "press").layout.title.text == fig.layout.title.text
     team = matchfeed.team_names(demo_feed["info"])["home"]
     titles = {way: panels.insight_title({"figure": {"kind": "pressing", "team": "home"}, "headline_facts": {"team_name": team, "pressed": way}}) for way in ("harder", "less")}
     assert titles == {"harder": f"{team}: more players near the opponent on the ball after the break", "less": f"{team}: fewer players near the opponent on the ball after the break"}
+
+
+def test_tactical_details_come_tied_to_the_goal_or_chance_they_led_to(demo_feed):
+    items = panels.graphic_items(demo_feed, "tactics")
+    values = [o["value"] for o in items]
+    first_chart = values.index("lines")
+    tied, rest = items[:first_chart], items[first_chart + 2:]
+    assert values[first_chart + 1] == "press" and tied and len(rest) <= 3
+    assert all(" before the " in o["label"] for o in tied) and not any(" before the " in o["label"] for o in rest)
+    assert all(o["value"].startswith("lb:") for o in rest)  # untied runs and receptions carry no information and are left out
+    shots = {m["event_id"] for m in graphics.moments(demo_feed)}
+    assert all(o["value"].split(":")[1] in shots for o in tied if o["value"].startswith("space:"))  # the shooter's room only
+    for m in graphics.moments(demo_feed):  # at most one of each kind per goal or chance
+        mine = [o["value"].split(":")[0] for o in tied if f"before the {panels.moment_name(m)}" in o["label"]]
+        assert len(mine) == len(set(mine)) <= 3, m["minute_label"]
+    assert "lb:demo-0007-v2-a01060" in values and "Line break before the 57' goal: " in dict(zip(values, [o["label"] for o in items]))["lb:demo-0007-v2-a01060"]
+    assert "run:demo-0007-v2-a01178:home-20" in values  # the run VAR checked
+    fig = panels.graphic_figure(demo_feed, "tactics", "lb:demo-0007-v2-a01060")
+    assert fig.layout.title.text.startswith("<b>57'  Line-breaking pass, before the 57' goal</b>")
+    for v in values:
+        note = panels.graphic_note(demo_feed, "tactics", v)
+        assert note and note != panels.NOTES["tactics"] and " m beyond" not in note and " m inside" not in note, v
+    assert panels.graphic_note(demo_feed, "shots", "home") == panels.NOTES["shots"]
 
 
 def test_the_line_height_figure_plots_means_and_says_so(demo_feed):
@@ -323,6 +346,22 @@ def test_the_line_height_figure_plots_means_and_says_so(demo_feed):
             by_slice.setdefault(tactics.bucket(r), []).append(r["home"])
     home = next(t for t in fig.data if t.name == matchfeed.team_names(demo_feed["info"])["home"])
     assert list(home.y) == [round(statistics.fmean(v), 2) for _, v in sorted(by_slice.items())]
+
+
+def test_the_line_height_figure_marks_averages_goals_and_drops(demo_feed):
+    fig = graphics.line_height_figure(demo_feed)
+    teams = matchfeed.team_names(demo_feed["info"])
+    averages = [a.text for a in fig.layout.annotations if (a.name or "").startswith("average-")]
+    assert len(averages) == 2 and all(" average " in a for a in averages)
+    kinds = [s.name for s in fig.layout.shapes]
+    assert kinds.count("goal") == 7 and kinds.count("voided") == 2 and kinds.count("red") == 1
+    drops = fig.layout.meta["drops"]
+    assert drops and all(d["drop_m"] >= 2 and d["before_m"] - d["after_m"] == pytest.approx(d["drop_m"], abs=0.11) for d in drops)
+    scorers = {a["event_id"]: a["team"] for a in demo_feed["actions"] if tactics.counted_goal(a)}
+    assert all(scorers[d["goal_event_id"]] != d["team"] for d in drops)  # the team that conceded
+    assert [a.text for a in fig.layout.annotations if a.name == "drop"] == [f"{teams[d['team']]} {d['drop_m']:.0f} m deeper<br>after conceding" for d in drops]
+    away = next(t for t in fig.data if t.name == teams["away"])
+    assert away.line.dash == "dash" and away.marker.symbol == "square"  # told apart by more than the colour
 
 
 # --- read-only view (public mode) -------------------------------------------------------------------
