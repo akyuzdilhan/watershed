@@ -9,20 +9,24 @@ How a message from the match feed becomes a card on air, and what happens when t
 | Match engine | `src/generator/engine.py` and the classes it steps (`Laws`, `ActionModel`, `Shape`, `Director`) | Seed, story | Ordered message log | Offline |
 | Feed builder | `src/generator/feed.py` (`build_stream`, `TruthRecorder`) | Message log | Feed in arrival order (latency, late messages, duplicates) and hidden ground truth | Offline |
 | CDF export | `src/generator/cdf.py` | Feed | Match at rest in the Common Data Format 0.3.2, corrections applied | Offline |
-| Publisher | `src/generator/publish.py` | Replay file | Service Bus messages, paced for a live demo | Developer machine; Container Apps Job (not deployed yet) |
+| Publisher | `src/generator/publish.py` | Replay file | Service Bus messages, paced for a live demo | Container Apps Job; developer machine |
 | Match | `src/worker/match.py` | Raw messages | Deduplicated messages in provider order; derived state (score, red cards, added time, final whistle) | Worker |
 | Win probability | `src/winprob/` | `MatchState` | `WinProb(home, draw, away)` | Worker |
 | Spotter | `src/worker/spotter.py` | Ordered messages, match state, model | New cards; card actions (`hold`, `release`, `retract`, `rewrite`) | Worker |
-| Writer | `src/worker/writer.py` (`FoundryWriter`, `TemplateWriter`) | Card facts and their meanings | Draft texts with claims, per language | Worker, calls Microsoft Foundry |
+| Writer | `src/worker/writer.py` (`FoundryWriter`, an Agent Framework agent that calls gpt-5.4-nano on Microsoft Foundry; `TemplateWriter`) | Card facts and their meanings | Draft texts and suggested lines with claims, per language | Worker, calls Microsoft Foundry |
 | Verifier | `src/worker/writer.py` (`verify`) | Draft, facts | Verification report | Worker |
 | Desk | `src/worker/desk.py` | Cards and card actions | Card statuses, audit entries | Worker; producer decisions from the console |
+| Insight engine | `src/worker/insights.py`, `insight_rarity.py`, `insight_texts.py` | Match as it stands, league history (`src/league/history.py`) | Insight documents, written from templates | Worker |
+| Storyline | `src/worker/storyline.py` | League season (`src/league/season.py`), history | Pre-match storyline, live and post-match season facts | Worker |
+| Recap | `src/worker/recap.py` (`RecapWriter`, `RecapTemplateWriter`) | Approved cards, match state, storyline | Recap, supporters' and analyst's texts, verified; the template when the model's drafts fail | Worker, at the final whistle |
+| Traces | `src/worker/telemetry.py` | Desk drafts and actions, Agent Framework spans | OpenTelemetry spans in Application Insights, without texts | Worker, when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set |
 | Pipeline | `src/worker/pipeline.py` | Messages | Calls the above in order, keeps the win-probability curve, writes to a sink | Worker |
 | Match state | `match_state` in `src/worker/pipeline.py` | Match, curve | Score, red cards, clock, final whistle, last sequence number, `wp_timeline` | Worker |
 | Sinks | `MemorySink` and `JsonFileSink` in `pipeline.py`, `CosmosSink` in `azure_io.py` | Events, cards, actions, audit, match state | Lists in memory, JSON files in `<desk-dir>/<match_id>/`, or Cosmos DB documents | Worker |
-| Web app | `src/web/` | Cards, match state, audit | Producer console (`/`) and read-only overlay (`/overlay`); the deployed app is still a placeholder | Azure Container Apps |
-| Pitch figures | `src/web/pitch.py` | Freeze frames | Pitch figures of the 360 frames, including the 63' offside frame with the offside line and the margin | Console, video |
+| Web app | `src/web/` | Cards, match state, audit | Producer console (`/`, read only for visitors) and read-only overlay (`/overlay`) | Azure Container Apps |
+| Pitch figures | `src/web/pitch.py` | Freeze frames | Pitch figures of the 360 frames, including the 63' offside frame with the offside line; the margin only for the producer | Console, video |
 
-The same `Pipeline` runs on a replay file and on the Service Bus subscription, so every behaviour tested offline is the one that runs live. In Azure, the worker runs as a Container App scaled by a KEDA rule on the Service Bus subscription, and the publisher as a Container Apps Job (both in the templates, not deployed yet).
+The same `Pipeline` runs on a replay file and on the Service Bus subscription, so every behaviour tested offline is the one that runs live. In Azure, the worker runs as a Container App scaled from zero by a KEDA rule on the Service Bus subscription, and the publisher as a Container Apps Job.
 
 ## Data flow
 
@@ -81,7 +85,7 @@ On Service Bus, each message body is the JSON message; the publisher also sets `
 
 ## What the worker stores
 
-Cosmos DB database `watershed`, containers `events`, `cards` and `audit`, all partitioned by `/match_id` (`infra/resources.bicep`). Writes are upserts keyed by id, so replaying a message or a card is idempotent (`src/worker/azure_io.py`).
+Cosmos DB database `watershed`, containers `events`, `cards` and `audit`, all partitioned by `/match_id` (`infra/resources.bicep`). Besides the cards and the match state, the `cards` container holds the insights, the storyline, the recap and the producer feedback, told apart by `type`. Writes are upserts keyed by id, so replaying a message or a card is idempotent (`src/worker/azure_io.py`).
 
 | Container | Document | Id |
 |---|---|---|
@@ -90,7 +94,7 @@ Cosmos DB database `watershed`, containers `events`, `cards` and `audit`, all pa
 | `cards` | The match state (`type: "match_state"`): teams, score, red cards, final whistle, period, clock, last sequence number, and `wp_timeline`, one point per action with the home, draw and away probabilities after it. Rewritten whenever a card or card action is produced, at the end of a period, at full time, on a correction, and every 25 actions | `state-<match_id>` |
 | `audit` | Spotter actions (`hold`, `release`, `retract`, `rewrite`, with the cause and the message that triggered them) and desk entries (`written`, `approved`, `edited`, `rejected`, `retracted`, `rewrite_requested`, with who and which version) | Built from the card id, the message id or the step |
 
-Without Cosmos DB, `--desk-dir <dir>` writes the same documents as `<dir>/<match_id>/cards.json`, `state.json` and `audit.jsonl` (`JsonFileSink`). The console and overlay read these documents; their exact contract is kept in [`contracts.md`](contracts.md).
+Without Cosmos DB, `--desk-dir <dir>` writes the same documents as `<dir>/<match_id>/cards.json`, `state.json`, `insights.json`, `storyline.json`, `recap.json` and `audit.jsonl` (`JsonFileSink`). The console and overlay read these documents; their exact contract is kept in [`contracts.md`](contracts.md).
 
 ## When a moment gets a card
 
@@ -108,9 +112,9 @@ The win probability before an action uses the state just before its sequence num
 ## Writer and Verifier
 
 1. `card_facts` turns a card into facts with explicit names (`varleigh_wp_before_pct`, `save_value_pts`, `shot_xg_pct`) and a meaning for each field. Win probabilities are clamped to 1 to 99% before the final whistle.
-2. The Writer agent (Agent Framework, `FoundryWriter`) is asked for one JSON object per language. It fetches the facts with the `get_moment` function tool and must list, in `claims`, every number it writes with the field it comes from. Output is capped at 3,000 tokens.
-3. The Verifier rejects the draft if any number in the text is not claimed, a claim does not match its field, a percentage comes from a field that is not a percentage, a decimal probability appears, a language is missing, or the JSON is invalid. Unknown capitalised names and over-long texts are reported but do not block.
-4. A rejected draft gets one retry. After that, or once the match has used its 40 model calls, the fixed `TemplateWriter` writes the card from the same facts; its output always verifies.
+2. The Writer agent (Agent Framework, `FoundryWriter`) is asked for one JSON object with the texts and the suggested lines in each language. It fetches the facts with the `get_moment` function tool and must list, in `claims`, every number it writes with the field it comes from. Output is capped at `FOUNDRY_MAX_TOKENS` (5,000 in the templates, reasoning included; 3,000 when unset), and each call at 45 seconds (`MODEL_TIMEOUT_S`).
+3. The Verifier rejects the draft if any number in the text is not claimed, a claim does not match its field, a percentage comes from a field that is not a percentage, a decimal probability appears, a language is missing, a name is not in the facts, a style or on-air rule fails (`LANGUAGE_RULES`, `STRUCTURAL_RULES`), or the JSON is invalid. Over-long texts and reused phrases are reported but do not block.
+4. A rejected draft gets one retry, told what was rejected; a reply cut by the token limit is asked once more with twice the room. A timeout, a 429, a network error or a 5xx goes to the template at once. After that, or once the match has used its 40 model calls, the fixed `TemplateWriter` writes the card from the same facts; its output always verifies. Each attempt is traced on the card (`verification.attempts_log`, `fallback_reason`, `writer_config`).
 
 ## Card lifecycle
 
@@ -162,28 +166,29 @@ The 63' goal of the demo, in feed time:
 |---|---|---|
 | goal | `action`, shot, outcome `goal` | Card written and verified; in auto-approve mode it airs at once |
 | goal + 15 s | `var_check` started, possible offside | `hold`: under review, still on air |
-| goal + 85 s | `var_check` completed, overturned; `correction` update on the through ball (offside, 0.25 m); `correction` void on the goal | `retract`, `retracted_on_air` = true |
+| goal + 85 s | `var_check` completed, overturned; `correction` update on the through ball (offside, with the measured margin); `correction` void on the goal | `retract`, `retracted_on_air` = true |
 
 ## Identities and roles
 
 | Identity | Type | Role | Scope | Why | Source |
 |---|---|---|---|---|---|
 | Web app | User-assigned managed identity (`id-web-<suffix>`) | AcrPull | Container Registry | Pull the image without a registry password | `infra/resources.bicep` |
-| Web app | Same | Cosmos DB Built-in Data Contributor | Cosmos DB account | Read cards and match state for the console, record producer decisions; more than a read-only overlay needs | `infra/resources.bicep` |
-| Web app | Same | Azure Service Bus Data Sender | Topic `match-events` | Send on the topic | Not deployed yet |
-| Worker | User-assigned managed identity | AcrPull | Container Registry | Pull the image | Not deployed yet |
-| Worker | Same | Azure Service Bus Data Receiver | Subscription `worker` | Read the feed; also used by the KEDA scale rule | Not deployed yet |
-| Worker | Same | Cosmos DB Built-in Data Contributor | Database `watershed` | Write events, cards, match state and audit | Not deployed yet |
-| Worker | Same | Foundry User | Foundry account | Call the Writer model | Not deployed yet |
-| Replay job | User-assigned managed identity | AcrPull | Container Registry | Pull the image | Not deployed yet |
-| Replay job | Same | Azure Service Bus Data Sender | Topic `match-events` | Publish the demo replay | Not deployed yet |
-| Developer (`principalId` from azd) | User | Cosmos DB Built-in Data Contributor | Cosmos DB account | Run the worker locally with `--cosmos` | `infra/resources.bicep` |
+| Web app | Same | Cosmos DB Built-in Data Contributor | Cosmos DB account | Read cards, match state and feed for the console, record producer decisions and feedback; more than a read-only overlay needs | `infra/resources.bicep` |
+| Worker | User-assigned managed identity (`id-worker-<suffix>`) | AcrPull | Container Registry | Pull the image | `infra/resources.bicep` |
+| Worker | Same | Azure Service Bus Data Receiver | Subscription `worker` | Read the feed; also used by the KEDA scale rule | `infra/resources.bicep` |
+| Worker | Same | Cosmos DB Built-in Data Contributor | Database `watershed` | Write events, cards, match state, insights, storyline, recap and audit | `infra/resources.bicep` |
+| Worker | Same | Foundry User | Foundry account | Call the model for the Writer and the recap writer | `infra/modules/foundry-role.bicep` |
+| Replay job | User-assigned managed identity (`id-replay-<suffix>`) | AcrPull | Container Registry | Pull the image | `infra/resources.bicep` |
+| Replay job | Same | Azure Service Bus Data Sender | Topic `match-events` | Publish the demo replay | `infra/resources.bicep` |
+| Developer (`principalId` from azd) | User | Cosmos DB Built-in Data Contributor | Cosmos DB account | Run the worker locally with `--cosmos`, reset a match | `infra/resources.bicep` |
 | Developer | User | Azure Service Bus Data Sender, Azure Service Bus Data Receiver | Service Bus namespace | Publish the replay, run the worker with `--live` | `infra/resources.bicep` |
 | Developer | User | Access to the Foundry project | Foundry resource | Run the Writer with `--writer foundry` | Assigned by hand, not in the templates |
 
-Console sign-in: Easy Auth hooks are in the templates, disabled until an app registration exists. Until then producer actions are refused in public mode.
+The web app has no Service Bus role: the console has no replay button and reads the feed from Cosmos DB.
 
-Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth: true`), so these roles are the only way in. The code never reads a key: `DefaultAzureCredential` in the Service Bus and Cosmos DB clients, `ManagedIdentityCredential` then `AzureCliCredential` for Foundry. Two values that are not data-plane credentials still pass through the templates: the Container Apps environment reads the Log Analytics shared key at deployment (required by the `log-analytics` destination), and the web app gets the Application Insights connection string as an environment variable.
+Console sign-in: Easy Auth (Microsoft Entra provider) on the web app, with an app registration whose client id is `WEB_AUTH_CLIENT_ID`; unauthenticated visitors are allowed and get the console read only, and the app trusts the signed-in user header only when `EASY_AUTH_ENABLED` is true. Without the registration, Easy Auth is off and producer actions are refused in public mode (`src/web/security.py`).
+
+Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth: true`), so these roles are the only way in. The code never reads a key: `DefaultAzureCredential` in the Service Bus and Cosmos DB clients, `ManagedIdentityCredential` then `AzureCliCredential` for Foundry. Two values that are not data-plane credentials still pass through the templates: the Container Apps environment reads the Log Analytics shared key at deployment (required by the `log-analytics` destination), and the web app and the worker get the Application Insights connection string as an environment variable.
 
 ## Failure modes
 
@@ -196,19 +201,21 @@ Service Bus and Cosmos DB have local authentication disabled (`disableLocalAuth:
 | Unreadable JSON or missing field | Dead-lettered, session continues | `listen` |
 | Worker stops before completing a message | Service Bus redelivers it; after 10 deliveries it is dead-lettered | `maxDeliveryCount` in `infra/resources.bicep` |
 | A match takes longer than the session lock | The lock (1 minute) is renewed automatically for up to 4 hours | `AutoLockRenewer` in `listen` |
-| No session with messages for 30 seconds | The live listener stops | `listen` |
+| No session with messages for 30 seconds (`--idle`) | The session is released; with `--forever`, as in the container, the worker keeps waiting for the next one, otherwise it stops | `consume`, `listen` |
 | Worker restarts mid-match | The match state is in memory and is not reloaded from Cosmos DB; the remaining messages arrive without `match_info`, so no card is produced for that match. Known limitation | `Pipeline._process` |
 | Service Bus unavailable | Run the same pipeline on the replay file | `python -m worker <replay>` |
-| Model call raises (network, quota, authentication) or returns invalid JSON | Counted as a failed attempt: one retry, then the template | `draft` |
-| Draft fails the Verifier twice | Template; in auto-approve mode the template card airs, since it only uses checked fields | `draft`, `Desk.write` |
-| 40 model calls used for the match | Every further card uses the template | `Desk.write` |
+| Model call times out (45 s), gets a 429, a network error or a 5xx | No second call: the template writes at once, and the cause is the card's `fallback_reason` | `model_attempts` |
+| Model call raises another error (authentication, a blocked prompt) or returns invalid JSON | Counted as a failed attempt: one retry, then the template | `model_attempts` |
+| Reply cut by the token limit (`finish_reason` `length`) | Asked once more with twice the budget; cut again, the template | `model_attempts` |
+| Draft fails the Verifier twice | Template; in auto-approve mode the template card airs, since it only uses checked fields. The recap behaves the same way | `model_attempts`, `Desk.write`, `worker.recap` |
+| 40 model calls used for the match | Every further card, and the recap, use the template | `Desk.write` |
 | Producer tries to approve a retracted card | Refused (`ValueError`) | `Desk.approve` |
 | Producer approves during a VAR check | Allowed; the card is flagged `under_review`. Known limitation | `Desk.approve` |
 | Correction for a moment without a card | Applied to the match state; no card action | `Spotter.process` |
 | Final whistle | The win probability becomes certain only on `full_time`; before it, never 0% or 100% on air | `SkellamWinProb.minutes_left`, `shown` |
-| Cosmos DB throttled (1,000 RU/s shared) | Relies on the SDK's default retries; not load-tested | `CosmosSink` |
+| Cosmos DB throttled (1,000 RU/s shared) or briefly unavailable | Retried on 408, 429, 449 and 5xx with exponential backoff, jitter and the service's retry-after hint; not load-tested | `with_retry` in `azure_io.py` |
 | Logging loop | Log Analytics stops ingesting for the day beyond 0.2 GB | `infra/resources.bicep` |
 
 ## Deployment
 
-`azd up` (`azure.yaml`, `infra/main.bicep`, `infra/resources.bicep`) creates, in one resource group: Log Analytics (30-day retention, 0.2 GB daily cap) and Application Insights; a Basic Container Registry with the admin user disabled; the web identity; a Standard Service Bus namespace with the topic `match-events` (messages live one day) and the session-enabled subscription `worker` (lock 1 minute, 10 deliveries, dead-lettering on expiry); a Cosmos DB account on the free tier with the database `watershed` (1,000 RU/s shared) and its three containers, the 360 frames excluded from indexing; a Container Apps environment and the web app (0.25 vCPU, 0.5 GiB, 0 to 2 replicas, external ingress). The Foundry project and its model deployment are created outside the templates. Not deployed yet: the worker Container App (scaled from zero by a KEDA rule on the `worker` subscription, authenticated with its managed identity), the replay Container Apps Job, one identity per app with the roles above, and the Easy Auth hooks. Until they are deployed, the worker runs from a developer machine.
+`azd provision` and `azd deploy` (`azure.yaml`, `infra/main.bicep`, `infra/resources.bicep`) create, in one resource group: Log Analytics (30-day retention, 0.2 GB daily cap) and a workspace-based Application Insights; a Basic Container Registry with the admin user disabled; one identity per app with the roles above; a Standard Service Bus namespace with the topic `match-events` (messages live one day) and the session-enabled subscription `worker` (lock 1 minute, 10 deliveries, dead-lettering on expiry); a Cosmos DB account on the free tier with the database `watershed` (1,000 RU/s shared) and its three containers, the 360 frames excluded from indexing; a Container Apps environment with the web app (0.25 vCPU, 0.5 GiB, 0 to 2 replicas, external ingress, Easy Auth when `WEB_AUTH_CLIENT_ID` is set), the worker (0.5 vCPU, 1 GiB, 0 to 1 replica, no ingress, scaled from zero by a KEDA rule on the `worker` subscription with its managed identity, 15-minute cool-down) and the replay Container Apps Job. The Foundry project and its model deployment are created outside the templates; azd passes their ids to the worker and grants it Foundry User. The order (provision, deploy, provision again for the job) and the reset between two replays are in `docs/notes/infra.md`.
