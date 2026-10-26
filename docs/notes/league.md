@@ -1,4 +1,4 @@
-# Synthetic League (option A, steps A1 to A3)
+# Synthetic League
 
 A light league simulated at score level (N1): 20 fictional clubs, one score per fixture, no event feed. It gives the demo match a season around it (positions, points, what is at stake) and, later, the pre-match expected goals of the demo fixture. Code in `src/league/`, tests in `tests/test_league.py`.
 
@@ -35,7 +35,7 @@ A light league simulated at score level (N1): 20 fictional clubs, one score per 
 
 The normal setting reproduces the earlier local simulation (88.3, 30.3, 18.5, 24.3 %, 43.7 %, 0.56). The elite tier reproduces its elite figures (92.4 points, 39.1 % and 4.3 %) only with the reading "the two strongest clubs gain 0.13": two clubs picked at random and shifted by 0.30 give 89.0 points and 25 % of seasons with a club on 95, because a +0.30 shift is about one standard deviation, below where the best club of 20 already sits. The tier is off by default.
 
-## Observer and context (A2)
+## Observer and context
 
 - **Prior.** The public pre-season prior is the truth plus a normal noise of 0.15 on each attack and defence.
 - **Update.** After each matchday, each club's scoring and conceding rates are updated by a gamma-Poisson step, with the opponents held at their prior: rate times (alpha + goals) / (alpha + expected goals), alpha = 1 / 0.15^2. The mean error on the log rates falls from about 0.21 before the season to about 0.15 after 30 matchdays (seeds 1 to 5), with no bias on the mean rate.
@@ -44,7 +44,7 @@ The normal setting reproduces the earlier local simulation (88.3, 30.3, 18.5, 24
 
 `python -m league table --seed 1 --matchday 30` prints the table with the three chances.
 
-## Coupling with the demo match (A3)
+## Coupling with the demo match
 
 `league.demo_fixture(seed, matchday)` pins Varleigh (home) v Yarnford on `matchday`, by swapping two rounds of the calendar (strengths and every result stay the same), and returns:
 
@@ -52,7 +52,7 @@ The normal setting reproduces the earlier local simulation (88.3, 30.3, 18.5, 24
 - `prior_expected_goals`: from the observer after the previous matchday, for the win-probability model (`match_info`). The model never reads the generator's truth, so a match does not confirm its own prior;
 - `context`: ranks, points, played, points gaps, and for each club and each event (title, top4, relegation) `*_chance_pct`, `*_chance_if_win_pct`, `*_chance_if_loss_pct` and `*_stake_pct_points`, as integers, with `field_meanings`.
 
-Nothing is wired yet: the generator and the demo match are unchanged (1.5 and 1.2). `python -m league demo --seed 1 --matchday 30` shows what the league would give. On seed 1, Varleigh are 16th (28 points), Yarnford 3rd (57), true expected goals 0.98 and 1.79, which does not fit a 5-2 home win. Seeds that would fit the demo better on matchday 30 (1,000 simulations):
+The worker reads the season of seed 9 at matchday 30 for the storyline, the season facts of the cards and the recap (`--league-seed 9 --matchday 30`, the container default); the generator keeps its own expected goals for the demo match (1.5 and 1.2). `python -m league demo --seed 1 --matchday 30` shows what the league gives for another seed. On seed 1, Varleigh are 16th (28 points), Yarnford 3rd (57), true expected goals 0.98 and 1.79, which does not fit a 5-2 home win. Seeds that would fit the demo better on matchday 30 (1,000 simulations):
 
 | Seed | Varleigh | Yarnford | Expected goals (truth) | Prior (observer) | Largest stakes |
 |---|---|---|---|---|---|
@@ -72,11 +72,11 @@ python -m league table --seed 1 --matchday 30 [--sims 4000]
 python -m league demo --seed 1 --matchday 30
 ```
 
-`league*` must be added to `[tool.setuptools.packages.find] include` in `pyproject.toml` (then `pip install -e .` again) for `python -m league` to work from an installed checkout; until then, set `PYTHONPATH=src`. The tests do not need it (`pythonpath = ["src"]`).
+`league*` is in `[tool.setuptools.packages.find] include` of `pyproject.toml`, so `python -m league` works from an installed checkout. The tests do not need it (`pythonpath = ["src"]`).
 
 ## What is imperfect
 
-- The reference values are recalled, not sourced; the bands are wide enough to pass on any of them.
+- The reference values are recalled, not sourced; the bands are wide enough to pass on any of them. They are not quoted in public.
 - mu and h are fixed, not drawn per season (season environment), and there are no promoted clubs or strengths carried from one season to the next.
 - Strengths are constant through the season: no injuries, form or managers (all below the noise of about 7 points per club and season, or channelled elsewhere in the design).
 - Tie-breakers stop at goals scored, then club index; the Premier League goes on to head-to-head points, away goals in head-to-head and a play-off.

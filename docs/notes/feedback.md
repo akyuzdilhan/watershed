@@ -53,4 +53,4 @@ A later step could use the pairs for preference tuning (DPO or a reward model: p
 - A note being typed is lost if the desk redraws the card at that moment (a new card or a feed change); the edit panel does not have this problem because it is drawn apart.
 - A rewritten sentence starts with fresh thumbs: a verdict is shown only on the exact text it judged.
 - The skeleton matches template variants by text: two variants that differ only by a name or a number share it.
-- The profile is opt-in (`FEEDBACK_PROFILE`): without it, the worker writes exactly as before, which keeps the other tests and the evaluation deterministic. Forgetting to set it for the demo worker means the feedback is stored and measured but not used.
+- The profile is opt-in (`FEEDBACK_PROFILE`): without it, the worker writes exactly as before, which keeps the other tests and the evaluation deterministic. The worker in Azure runs without it (the variable is not in the worker settings of `infra/resources.bicep`): online, feedback is stored and measured, not used.

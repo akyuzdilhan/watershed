@@ -1,6 +1,6 @@
 # Storyline: what is at stake, before, during and after the match
 
-Every match has its story; the desk's job is to find it. `src/worker/storyline.py` builds the storyline document of the contract (`type: "storyline"`, id `storyline-<match_id>`, see `docs/contracts.md`, Lot 2) from the league season (`league.season`) and, when given, the fictional history (`league.history.History`, read API only). Tests in `tests/test_storyline.py` (12 tests, under a second) use a small fake history with the contract's methods.
+Every match has its story; the desk's job is to find it. `src/worker/storyline.py` builds the storyline document of the contract (`type: "storyline"`, id `storyline-<match_id>`, see `docs/contracts.md`, "History, insights, storyline and the duo") from the league season (`league.season`) and, when given, the fictional history (`league.history.History`, read API only). Tests in `tests/test_storyline.py` (16 tests, under a second) use a small fake history with the contract's methods.
 
 ```
 python -m worker.storyline --league-seed 9 --matchday 30 [--history data/history/<seed>] [--sims 4000] --out data/desk/demo-0007/storyline.json
@@ -36,13 +36,13 @@ Method: the rest of the season is played `n_sims` times once per score, with the
 
 `final_score`, and per club rank, points, zone and focus chance before and after (`{s}_{e}_chance_before_pct`, `_after_pct`, `_change_pts`, `_change_direction`), plus `{s}_rank_after_matchday` (the whole matchday, other results as played, via `League.with_result`). The chance after equals the live value at full time. Seed 9, 5-2: Varleigh 17th to 14th (16th after the matchday), relegation 11% to 4%; Yarnford stay 18th, 34% to 45%.
 
-## Integration (other owners)
+## Integration
 
-- **Pipeline**: build the storyline once before kick-off (or load `storyline.json`), write it to the desk next to `state.json` (and to the `cards` container in Azure, `type: "storyline"`). Keep the document in memory and pass it with the match state to the Writer.
-- **Writer**: in `card_facts`, merge `live_context(storyline, state)` for goal and red-card cards with the score after the moment (`score_before` plus the goal), and for save and chance cards also with the score had it gone in (prefix those fields, for instance `if_goal_`). The meanings come with the facts. Two Verifier points: league points such as "29 points" trip `points_not_from_pts_field` (the rule reads every "N points" as percentage points), so either the rule learns league-points fields (`_points`, `_points_if_score_holds`) or the Writer instructions say "on 29" without the word; booleans (`_in_drop_zone_*`) are not numbers and pass.
-- **Recap**: merge `post_match(storyline, final score)` into the recap facts.
-- **Console**: show `threads` (angle and facts) and the pre-match card before kick-off; the card goes through the desk like any other.
-- **Insights**: the `milestone` and `streak` threads are natural pre-match insights (`kind` matches the insight kinds).
+- **Pipeline**: builds the storyline once at kick-off from `--league-seed` and `--matchday` (`Pipeline._storyline`) and writes it through the desk like an insight: `storyline.json` locally, `type: "storyline"` in the `cards` container in Azure.
+- **Writer**: for goal and red-card cards, the pipeline merges `live_context(storyline, state)` at the score after the moment into the card (`Pipeline._season`, `season_context`), and `card_facts` passes it to the Writer prefixed `season_`, without league table points (`league_points_field`). A table that would read the same as after the last goal that counts is not passed again.
+- **Recap**: `post_match(storyline, final score)` is merged into the recap facts (`recap.season_facts`).
+- **Console**: the Insights and storyline view shows the pre-match card, its suggested lines and its facts, with Approve and Reject; `threads` are stored and not shown.
+- **Insights**: the `milestone` and `streak` threads are not turned into insights.
 
 ## What is imperfect
 

@@ -1,6 +1,6 @@
 # Infra: worker and replay in Azure, web app settings, Easy Auth, reset
 
-Checked on 25/10/2026, locally and without any Azure call: `az bicep build` passes with no warning on `infra/main.bicep` and `infra/killswitch/main.bicep` (Bicep 0.48.1); the worker command of the image, run on the demo replay with Service Bus, Cosmos DB and Foundry replaced by fakes, listens with `--forever`, loads the history and writes the storyline, the insights and the cards; `python -m league history --seed 9 --seasons 50` takes about 6 s and writes 2.5 MB. Not checked: no Docker daemon was running, so the images were not built (the build step that loads the history as the runtime user only runs in a real build); `azd provision --preview` (what-if) was last run before these changes, when it planned to create `ca-worker-*` and `caj-replay-*` and modify `ca-web-*`: run it again before the next provision.
+Checked on 25/10/2026, locally and without any Azure call: `az bicep build` passes with no warning on `infra/main.bicep` and `infra/killswitch/main.bicep` (Bicep 0.48.1); the worker command of the image, run on the demo replay with Service Bus, Cosmos DB and Foundry replaced by fakes, listens with `--forever`, loads the history and writes the storyline, the insights and the cards; `python -m league history --seed 9 --seasons 50` takes about 6 s and writes 2.5 MB. Deployed on 26/10/2026 in the order below, images built remotely in ACR by `azd deploy` (no local Docker daemon); the reference replay of that day ran on it (`docs/evaluation.md`, "Live run, production prompt").
 
 ## Files
 
@@ -10,8 +10,8 @@ Checked on 25/10/2026, locally and without any Azure call: `az bicep build` pass
 | `.dockerignore` | Repository root: excludes `.git`, `.claude`, `.azure`, `.env*`, `.venv`, `docs`, `spikes`, `tests`, `infra`, `prep-*`, and `data/*` except `data/replay` |
 | `src/worker/Dockerfile` | python:3.12-slim, `pip install ".[azure,agents]"`, `data/replay`, the league history generated at build in `data/history/9`, a build step that loads it as the runtime user (uid 10001), and `python -m worker --live --cosmos --writer foundry --forever --history data/history/9 --league-seed 9 --matchday 30 $WORKER_EXTRA_ARGS` in a restart loop |
 | `infra/resources.bicep` | One identity per app; worker Container App with a KEDA Service Bus rule (cool-down 900 s); `replay` Container Apps Job; web app settings (below); `APPLICATIONINSIGHTS_CONNECTION_STRING` for the web app and the worker (traces, below); optional Easy Auth; Foundry role through a module. Container Apps API 2025-01-01, needed for the scale rule identity and `cooldownPeriod` |
-| `infra/modules/foundry-role.bicep` | Role assignment on the Foundry account, deployed in `rg-watershed-foundry` |
-| `infra/main.bicep`, `main.parameters.json` | Parameters from azd variables: `SERVICE_WEB_IMAGE_NAME`, `SERVICE_WORKER_IMAGE_NAME`, `FOUNDRY_ACCOUNT_ID`, `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL`, `FOUNDRY_MODEL_FALLBACK`, `FOUNDRY_REASONING_EFFORT`, `WORKER_EXTRA_ARGS`, `WORKER_MIN_REPLICAS` (0), `WEB_AUTH_CLIENT_ID`, `PRODUCERS`, `WEB_MIN_REPLICAS` (0), `RATE_LIMIT_PER_MIN` (600); outputs `AZURE_RESOURCE_GROUP`, `AZURE_WORKER_APP_NAME`, `AZURE_REPLAY_JOB_NAME` |
+| `infra/modules/foundry-role.bicep` | Role assignment on the Foundry account, deployed in its resource group (read from `FOUNDRY_ACCOUNT_ID`) |
+| `infra/main.bicep`, `main.parameters.json` | Parameters from azd variables: `SERVICE_WEB_IMAGE_NAME`, `SERVICE_WORKER_IMAGE_NAME`, `FOUNDRY_ACCOUNT_ID`, `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL` (gpt-5.4-nano), `FOUNDRY_REASONING_EFFORT` (medium), `FOUNDRY_MAX_TOKENS` (5000), `FOUNDRY_RECAP_REASONING_EFFORT` (low), `FOUNDRY_RECAP_MAX_TOKENS` (6000), `WORKER_EXTRA_ARGS`, `WORKER_MIN_REPLICAS` (0), `WEB_AUTH_CLIENT_ID`, `PRODUCERS`, `WEB_MIN_REPLICAS` (0), `RATE_LIMIT_PER_MIN` (600); outputs `AZURE_RESOURCE_GROUP`, `AZURE_CONTAINER_REGISTRY_ENDPOINT`, `AZURE_CONTAINER_REGISTRY_NAME`, `SERVICE_WEB_URI`, `SERVICE_BUS_FQDN`, `SERVICE_BUS_TOPIC`, `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `AZURE_WORKER_APP_NAME`, `AZURE_REPLAY_JOB_NAME` |
 | `src/generator/publish.py` | The replay publisher the job runs; `--min-var-delay` (below) |
 | `src/worker/reset.py` | Deletes every document of one match before a new replay (below) |
 
@@ -58,7 +58,7 @@ All assignments are Azure RBAC or Cosmos DB data-plane RBAC, no key and no conne
 | `id-worker-*` | AcrPull | registry | pull the worker image |
 | `id-worker-*` | Azure Service Bus Data Receiver | subscription `match-events/worker` | read and settle its own subscription; also lets the KEDA scaler read the subscription properties (`topics/subscriptions/read` is in the role) |
 | `id-worker-*` | Cosmos DB Built-in Data Contributor | database `watershed` only (`<account>/dbs/watershed`) | upsert events, cards, insights, match state, recap and audit entries |
-| `id-worker-*` | Foundry User (`53ca6127-db72-4b80-b1b0-d745d6d5456d`, formerly Azure AI User) | Foundry account `watershed-foundry-da` (other resource group) | call the model deployments through the project endpoint |
+| `id-worker-*` | Foundry User (`53ca6127-db72-4b80-b1b0-d745d6d5456d`, formerly Azure AI User) | Foundry account (other resource group) | call the model deployments through the project endpoint |
 | `id-replay-*` | AcrPull | registry | pull the worker image |
 | `id-replay-*` | Azure Service Bus Data Sender | topic `match-events` | publish the demo replay |
 | developer (`principalId`) | Data Sender + Data Receiver, Cosmos Data Contributor | namespace, account | local runs, the replay from a laptop, `worker.reset` |
@@ -87,11 +87,11 @@ KEDA role: the KEDA page talks about Manage rights for connection strings and sa
 
 ## Deployment, in order
 
-From the main checkout (`code/`), signed in with `az login` and `azd auth login`:
+From the repository root, signed in with `az login` and `azd auth login`:
 
 1. Point azd at Foundry (one time):
-   `azd env set FOUNDRY_ACCOUNT_ID /subscriptions/<subscription-id>/resourceGroups/rg-watershed-foundry/providers/Microsoft.CognitiveServices/accounts/watershed-foundry-da`
-   `azd env set FOUNDRY_PROJECT_ENDPOINT <value from .env>` (the models and effort default to gpt-5.4-nano, gpt-5-mini, medium; set `FOUNDRY_MODEL` and so on only to change them). In Git Bash prefix the first command with `MSYS_NO_PATHCONV=1`, or the leading slash is rewritten.
+   `azd env set FOUNDRY_ACCOUNT_ID /subscriptions/<subscription-id>/resourceGroups/<foundry-resource-group>/providers/Microsoft.CognitiveServices/accounts/<foundry-account>`
+   `azd env set FOUNDRY_PROJECT_ENDPOINT <value from .env>` (the model, the efforts and the output budgets default to gpt-5.4-nano, medium and 5,000 tokens for the cards, low and 6,000 for the recap; set `FOUNDRY_MODEL` and so on only to change them). In Git Bash prefix the first command with `MSYS_NO_PATHCONV=1`, or the leading slash is rewritten.
 2. `azd provision`: identities, roles, worker app and job (placeholder image).
 3. `azd deploy`: builds both images in ACR from the repository root (the worker build also generates the history) and updates `ca-web-*` and `ca-worker-*`. It writes `SERVICE_WORKER_IMAGE_NAME` to the azd environment.
 4. `azd provision` again: the replay job picks up the worker image (azd does not deploy jobs). Later provisions keep the deployed images instead of the placeholder.
@@ -103,7 +103,7 @@ New role assignments take 5 to 10 minutes to apply: a first run right after step
 
 | | Judging | Video with a producer |
 |---|---|---|
-| Cards on air | `azd env set "WORKER_EXTRA_ARGS=--auto-approve"`, then `azd provision` | Approved by the producer, signed in through Easy Auth (`WEB_AUTH_CLIENT_ID` set, below); `WORKER_EXTRA_ARGS` empty: `azd env set WORKER_EXTRA_ARGS ""` or remove the line from `.azure/<env>/.env`, then `azd provision` |
+| Cards on air | `azd env set "WORKER_EXTRA_ARGS=--auto-approve"`, then `azd provision` | Approved by the producer, signed in through Easy Auth (`WEB_AUTH_CLIENT_ID` set, below); `WORKER_EXTRA_ARGS` empty: `azd env set "WORKER_EXTRA_ARGS="` (Windows PowerShell 5.1 drops an empty `""` argument) or remove the line from `.azure/<env>/.env`, then `azd provision` |
 | Replicas | `azd env set WEB_MIN_REPLICAS 1` and `azd env set WORKER_MIN_REPLICAS 1` for the judging period, back to 0 after | 0 |
 | Replay | The job (`--speed 10`) | From the laptop, with time to approve a goal card before its VAR check: `python -m generator.publish data/replay/demo-0007.jsonl.gz --speed 10 --min-var-delay 45` (it reads `SERVICE_BUS_FQDN` from the azd environment; the developer account has Data Sender on the namespace) |
 
@@ -121,11 +121,11 @@ A replay reuses the same ids. A second replay of a match would mix with what the
    ```
 3. Start the replay. The web app caches the feed it has read; the ids are the same on a replay, so its graphics stay consistent, and restarting its revision clears the cache if needed.
 
-## Easy Auth (off by default)
+## Easy Auth
 
-`WEB_AUTH_CLIENT_ID` empty: no auth config, and in public mode nobody can approve online. Set: a Microsoft provider with `unauthenticatedClientAction: AllowAnonymous`, so visitors keep the read-only console and the overlay, and a signed-in producer gets `X-MS-CLIENT-PRINCIPAL-NAME`. No client secret: without one, Easy Auth signs users in with the ID token only, which is all the console needs. The template sets `EASY_AUTH_ENABLED` to `True` only when the auth config exists. Producers sign in at `/.auth/login/aad?post_login_redirect_uri=/` (replace `/` with the producer route).
+The deployed web app has it, so that a producer can sign in. `WEB_AUTH_CLIENT_ID` empty: no auth config, and in public mode nobody can approve online. Set: a Microsoft provider with `unauthenticatedClientAction: AllowAnonymous`, so visitors keep the read-only console and the overlay, and a signed-in producer gets `X-MS-CLIENT-PRINCIPAL-NAME`. No client secret: without one, Easy Auth signs users in with the ID token only, which is all the console needs. The template sets `EASY_AUTH_ENABLED` to `True` only when the auth config exists. Producers sign in at `/.auth/login/aad?post_login_redirect_uri=/` (replace `/` with the producer route).
 
-One-time app registration (not run):
+One-time app registration, in bash (Git Bash on Windows):
 
 ```
 WEB_URI=$(azd env get-value SERVICE_WEB_URI)
@@ -151,13 +151,12 @@ To limit sign-in to named producers: `az ad sp update --id $APP_ID --set appRole
 | Quiet stretch of more than 30 s mid-match (seven in the demo at speed 10) | Without `--forever` the listener stops and the next process starts without the match | `--forever`: the same process keeps waiting, with its state |
 | Second replay of a match the worker has seen | Dropped as duplicates: the desk does not change | Reset and restart the worker (above) |
 | Image and template out of step | An image that reads `WORKER_EXTRA_ARGS` on an app still provisioned with `WORKER_ARGS` loses `--auto-approve` | Provision and deploy together |
-| Easy Auth not configured | In public mode nobody is a producer online | Configure it before the video; judging runs in auto-approve |
+| Easy Auth not configured (a new environment) | In public mode nobody is a producer online | Register the app (above); judging runs in auto-approve |
 | KEDA scaler auth with Data Receiver at subscription scope not documented | Worker never starts | Check system logs; widen as described above |
 | Foundry User is broader than strictly needed | Worker identity could use any data action on the Foundry account | Try Foundry Project Runtime User later |
 | azd parameter defaults (`${VAR=}`) | If azd prompts or fails on empty values, set them explicitly with `azd env set` | The last preview ran without prompting |
-| `WORKER_MIN_REPLICAS`, `WEB_MIN_REPLICAS` and `RATE_LIMIT_PER_MIN` are int parameters fed with azd strings | azd turns numeric strings into numbers for int parameters (azd templates such as azure-search-openai-demo pass capacities this way; inference, not run here); if a provision fails on their type, declare them as strings in `main.bicep` and convert with `int()` | Check at the next preview |
+| `WORKER_MIN_REPLICAS`, `WEB_MIN_REPLICAS` and `RATE_LIMIT_PER_MIN` are int parameters fed with azd strings | azd turns numeric strings into numbers for int parameters; if a provision fails on their type, declare them as strings in `main.bicep` and convert with `int()` | The provisions of 26/10 passed with them |
 | Placeholder image in the replay job until step 4 | Starting the job before the second provision fails (no python in the placeholder) | Follow the order above |
-| Names drawn by a new dependency (Faker) declared in an optional extra | `pip install ".[azure,agents]"` does not install it and the history build fails | Install that extra in `src/worker/Dockerfile` too |
 | Existing non-Entra pieces | The environment still reads the Log Analytics shared key (`listKeys`, platform log shipping) and the web app and the worker have the App Insights connection string (an ingestion id, not a credential) | Acceptable for the hackathon; full keyless would mean disabling local auth on App Insights and granting Monitoring Metrics Publisher |
 | The trace export packages are not pinned in `src/worker/constraints.txt` | The image installs the latest `opentelemetry-sdk` and `azure-monitor-opentelemetry-exporter` that accept the pinned `opentelemetry-api==1.45.1` (the exporter 1.0.0b58 asks `opentelemetry-api~=1.45.0` and `opentelemetry-sdk~=1.45.0`), and the latest `msrest`, `oauthlib`, `requests-oauthlib` and `psutil`: two builds can differ | Add to `src/worker/constraints.txt` the 7 versions of the development environment where the suite passes: `azure-monitor-opentelemetry-exporter==1.0.0b58`, `msrest==0.7.1`, `oauthlib==4.0.0`, `opentelemetry-sdk==1.45.1`, `opentelemetry-semantic-conventions==0.66b1`, `psutil==7.2.2`, `requests-oauthlib==2.0.0` |
 | Image size and build time | The `agents` extra pulls the whole Agent Framework; the history adds about 10 s and 2.5 MB | Once per build |

@@ -27,6 +27,6 @@ It writes `goal-63-offside.html`, `goal-63-offside-zoom.html` and `goal-63-build
 
 ## Notes for the console
 
-- `src/web/__init__.py` did not exist; an empty one was added so that `web.pitch` imports with pytest's `pythonpath = ["src"]`. `web` is not in the `packages.find` list of `pyproject.toml`, so the export needs `PYTHONPATH=src`.
+- `src/web/__init__.py` makes `web.pitch` importable with pytest's `pythonpath = ["src"]`; `web*` is in the `packages.find` list of `pyproject.toml`, so the export runs from an installed checkout.
 - In the container the working directory is `src/web`: import with `from pitch import ...` there, or fall back as `pitch_export.py` does.
-- `dash==4.4.1` (from `src/web/requirements.txt`) was installed in the shared `.venv` to get plotly; `tests/test_pitch.py` skips if plotly is missing.
+- plotly comes with the `web` extra (`dash`, `plotly`) and with `src/web/requirements.txt`; `tests/test_pitch.py` skips if plotly is missing.

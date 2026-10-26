@@ -1,6 +1,6 @@
-# League history (Lot 2)
+# League history
 
-A fictional history of the Synthetic League: 50 seasons, 1976/77 to 2025/26, 32 fictional clubs over two tiers, about 4,000 fictional players with careers, and the 19,000 top-tier matches with scorers, assists, substitutions, cards and half-time score. It is what the desk counts against to say "the first time since 1983/84 that a substitute scores four". Code in `src/league/history*.py`, tests in `tests/test_history.py`, read API as in `docs/contracts.md` ("Lot 2 additions").
+A fictional history of the Synthetic League: 50 seasons, 1976/77 to 2025/26, 32 fictional clubs over two tiers, about 4,000 fictional players with careers, and the 19,000 top-tier matches with scorers, assists, substitutions, cards and half-time score. It is what the desk counts against to say "the first time since 1983/84 that a substitute scores four". Code in `src/league/history*.py`, tests in `tests/test_history.py`, read API as in `docs/contracts.md` ("History, insights, storyline and the duo").
 
 ## Model
 
@@ -27,21 +27,21 @@ Three layers, each with its own random stream, all derived from the seed.
 
 ## Rare events over 50 seasons (seed 9)
 
-`python -m league history --seed 9` prints these; `league.history.frequencies` computes them. The Premier League references are rough recalled orders of magnitude, not sourced.
+`python -m league history --seed 9` prints these; `league.history.frequencies` computes them. The test bands are those of `tests/test_history.py`.
 
-| Event | Per season | Total, 50 seasons | Premier League, rough | Test band (50 seasons) |
-|---|---|---|---|---|
-| Goals | 1,028 (2.70 a match) | 51,390 | 2.5 to 2.9 a match by era | |
-| Hat-tricks | 12.6 | 632 | about 8 to 15 | 8 to 18 |
-| Four goals or more by one player | 1.7 | 85 | about 1 | 0.5 to 4 |
-| Substitute scoring twice | 3.0 (1.2 before 1987, 5.3 since 2020) | 151 | a few | 1 to 6 |
-| Substitute hat-trick | 0.1 | 5 | rare, a handful in 30 seasons | 20 at most |
-| Substitute scoring four | 0 | 0 | very rare | |
-| Win after being two goals down | 2.3 | 114 | about 3 to 6 | 1 to 6 |
-| Winner in added time at 90' (by one goal) | 12.2 | 609 | | 5 to 25 |
-| Red cards | 49 (38 before 1987, 60 since 2020) | 2,470 | 40 to 60 | 30 to 70 |
-| Own goals | 29 | 1,474 | 30 to 40 | |
-| Penalties scored | 75 | 3,771 | 70 to 90 | |
+| Event | Per season | Total, 50 seasons | Test band (50 seasons) |
+|---|---|---|---|
+| Goals | 1,028 (2.70 a match) | 51,390 | |
+| Hat-tricks | 12.6 | 632 | 8 to 18 |
+| Four goals or more by one player | 1.7 | 85 | 0.5 to 4 |
+| Substitute scoring twice | 3.0 (1.2 before 1987, 5.3 since 2020) | 151 | 1 to 6 |
+| Substitute hat-trick | 0.1 | 5 | 20 at most |
+| Substitute scoring four | 0 | 0 | |
+| Win after being two goals down | 2.3 | 114 | 1 to 6 |
+| Winner in added time at 90' (by one goal) | 12.2 | 609 | 5 to 25 |
+| Red cards | 49 (38 before 1987, 60 since 2020) | 2,470 | 30 to 70 |
+| Own goals | 29 | 1,474 | |
+| Penalties scored | 75 | 3,771 | |
 
 By era: substitutes score 2 % of the goals before 1987, 5 % in 1987 to 1994, 8 % in 1995 to 2019 and 11 % since 2020. Top scorer of a season: 27 goals on average (19 to 42). Best career total: 266 league goals. Ratings peak at 27 to 29 (68.9 on average), players are 17 to 37, half of the careers that end inside the window end at 33 or later (the others are released earlier). Home wins fall from 47.6 % (1976 to 1986) to 44.7 % (since 2020), draws 24 to 25 %.
 
@@ -74,5 +74,5 @@ PYTHONPATH=src python -m league history --seed 9 --seasons 50 --out data/history
 - 3 points for a win throughout (England moved from 2 points in 1981/82), 20 clubs throughout, 3 promoted directly (no play-off). Tie-breakers as `league.table`.
 - No cups, no Europe, no dates: "for 8 years" has to be read as seasons. No managers, no transfer fees, no loans, no nationality.
 - Every player plays in one role all his career; out-of-position starts happen only when a role is short.
-- The era shapes (goals, home advantage, bookings, substitution rules) and the Premier League figures above are recalled, not sourced: check them before any public claim that compares with real football.
+- The era shapes (goals, home advantage, bookings, substitution rules) are recalled orders of magnitude, not sourced: check them before any public claim that compares with real football.
 - The 2026/27 season of `League.create(seed)` is consistent with the history in its clubs and their strength order, not in the strengths themselves.
