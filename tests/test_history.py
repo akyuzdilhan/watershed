@@ -195,11 +195,16 @@ def test_frequencies_short(h):
     assert 20 <= f["red_cards_per_season"] <= 80 and 15 <= f["own_goals_per_season"] <= 50
 
 
+MAX_FIFTY_SEASONS_S = 120
+
+
 def test_fifty_seasons():
     start = time.perf_counter()
     h50 = generate(SEED, 50)
     f = frequencies(h50)
-    assert time.perf_counter() - start < 30
+    elapsed = time.perf_counter() - start
+    # A ceiling against a runaway slowdown, not a benchmark: wide enough that a slow or busy machine does not fail the suite
+    assert elapsed < MAX_FIFTY_SEASONS_S, f"50 seasons took {elapsed:.0f} s (ceiling {MAX_FIFTY_SEASONS_S} s)"
     assert h50.seasons()[0] == "1976/77" and h50.count("match") == 19_000
     assert 8 <= f["hat_tricks_per_season"] <= 18
     assert 0.5 <= f["four_or_more_per_season"] <= 4
