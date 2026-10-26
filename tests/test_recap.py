@@ -65,11 +65,12 @@ def test_no_retracted_card_is_cited(demo):
 
 
 def test_recap_tells_the_goals_ruled_out_and_why(demo):
-    _, _, _, recap = demo
+    cards, _, _, recap = demo
+    offside, handball = (next(c["player"]["name"] for c in cards if c.get("ruled_out") and c["minute_label"] == minute) for minute in ("63'", "69'"))
     assert [(g["minute_label"], g["player"], g["reason"], g["margin_cm"]) for g in recap["analysis"]["disallowed_goals"]] == [
-        ("63'", "Dorian Lightfoot", "offside", None), ("69'", "Vito Valtonen", "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
+        ("63'", offside, "offside", None), ("69'", handball, "handball", None)]  # the desk keeps the margin off ruled_out: it is for the producer
     texts = {t["lang"]: t for t in recap["texts"]}
-    assert "VAR ruled out Dorian Lightfoot's goal at 63' (offside) and Vito Valtonen's goal at 69' (handball)." in texts["en"]["recap"]
+    assert f"VAR ruled out {offside}'s goal at 63' (offside) and {handball}'s goal at 69' (handball)." in texts["en"]["recap"]
     assert "(hors-jeu)" in texts["fr"]["recap"] and "(main)" in texts["fr"]["recap"]
     assert "(fuera de juego)" in texts["es"]["recap"] and "(mano)" in texts["es"]["recap"]
     assert recap["verification"]["verified"]
