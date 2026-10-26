@@ -770,25 +770,30 @@ LOW_STAKE_TEMPLATES = {  # a goal with no stake: a milestone, never a probabilit
                     "El resultado estaba decidido; el {team} solo hace más grande un día para recordar.", "Ya no hay nada que decidir, pero el {team} sigue: un {team_nth_adj} gol."]},
 }
 
-INSIGHT_TEMPLATES = {  # the fallback of an insight: no number (the history facts are free-form), a line true for its kind
-    "en": {"record": [("{subject} sets a record", "{subject} goes where nobody had gone in this league's history."), ("A record for the books", "This match has just set a record in the league's history.")],
-           "rarity": [("A rare feat for {subject}", "{subject} does something this league has almost never seen."), ("Something almost never seen", "This league has almost never seen what this match has just produced.")],
-           "streak": [("{subject}'s run goes on", "Another match, and the run of {subject} carries on."), ("The run goes on", "The streak carries on, one more match in the league's history.")],
-           "milestone": [("A milestone for {subject}", "{subject} reaches a landmark in the league's history."), ("A milestone reached", "A landmark in the league's history is reached in this match.")],
-           "storyline": [("The story of {home_team} v {away_team}", "{home_team} and {away_team} add a new chapter to a long story."), ("The story behind the match", "A long story in the league's history is behind this match.")],
-           "tactical": [("A pattern from {subject}", "{subject} keep coming back to the same idea in this match."), ("A pattern worth watching", "The same idea keeps coming back in this match.")]},
-    "fr": {"record": [("{subject} établit un record", "{subject} va là où personne n'était allé dans l'histoire du championnat."), ("Un record pour l'histoire", "Ce match vient d'établir un record dans l'histoire du championnat.")],
-           "rarity": [("Un exploit rare pour {subject}", "{subject} réussit ce que le championnat n'a presque jamais vu."), ("Du jamais ou presque", "Le championnat n'a presque jamais vu ce que ce match vient de produire.")],
-           "streak": [("{subject} continue sa série", "Un match de plus, et la série de {subject} continue."), ("La série continue", "La série continue, un match de plus dans l'histoire du championnat.")],
-           "milestone": [("Un cap pour {subject}", "{subject} atteint un cap dans l'histoire du championnat."), ("Un cap franchi", "Un cap de l'histoire du championnat est franchi dans ce match.")],
-           "storyline": [("{home_team} contre {away_team}, une histoire", "{home_team} et {away_team} ajoutent un chapitre à une longue histoire."), ("L'histoire derrière le match", "Une longue histoire du championnat se cache derrière ce match.")],
-           "tactical": [("Une idée signée {subject}", "{subject} revient sans cesse à la même idée dans ce match."), ("Une idée à surveiller", "La même idée revient sans cesse dans ce match.")]},
-    "es": {"record": [("{subject} establece un récord", "{subject} llega adonde nadie había llegado en la historia de la liga."), ("Un récord para la historia", "Este partido acaba de establecer un récord en la historia de la liga.")],
-           "rarity": [("Una rareza para {subject}", "{subject} logra algo que la liga casi nunca ha visto."), ("Algo casi nunca visto", "La liga casi nunca ha visto lo que este partido acaba de dar.")],
-           "streak": [("{subject} sigue con su racha", "Un partido más, y la racha de {subject} continúa."), ("La racha sigue", "La racha continúa, un partido más en la historia de la liga.")],
-           "milestone": [("Una marca para {subject}", "{subject} alcanza una marca en la historia de la liga."), ("Una marca alcanzada", "En este partido se alcanza una marca de la historia de la liga.")],
-           "storyline": [("{home_team} contra {away_team}, una historia", "{home_team} y {away_team} suman un capítulo a una larga historia."), ("La historia detrás del partido", "Detrás de este partido hay una larga historia de la liga.")],
-           "tactical": [("Una idea de {subject}", "{subject} vuelve una y otra vez a la misma idea en este partido."), ("Una idea a vigilar", "La misma idea vuelve una y otra vez en este partido.")]},
+INSIGHT_TEMPLATES = {  # the fallback of an insight its family cannot tell: no number (the history facts are free-form), a line true for its kind, naming who did it (the storyline's, naming both clubs, when the facts name nobody)
+    "en": {"record": [("{subject} sets a record", "{subject} goes where nobody had gone in this league's history."), ("A record for {subject}", "A record in the league's history, and it belongs to {subject}.")],
+           "rarity": [("A rare feat for {subject}", "{subject} does something this league has almost never seen."), ("{subject}, a rare sight", "This league has almost never seen anything like this from {subject}.")],
+           "streak": [("{subject}'s run goes on", "Another match, and the run of {subject} carries on."), ("{subject} in the history books", "A new line in the league's history for {subject}.")],
+           "milestone": [("A milestone for {subject}", "{subject} reaches a landmark in the league's history."), ("A landmark day for {subject}", "A landmark in the league's history for {subject}.")],
+           "storyline": [("The story of {home_team} v {away_team}", "{home_team} and {away_team} add a new chapter to a long story."), ("{home_team} v {away_team}, the story", "A long story in the league's history is behind {home_team} v {away_team}.")],
+           "tactical": [("A pattern from {subject}", "{subject} keep coming back to the same idea in this match."), ("{subject}, the same idea again", "One idea keeps coming back from {subject} in this match.")]},
+    "fr": {"record": [("{subject} établit un record", "{subject} va là où personne n'était allé dans l'histoire du championnat."), ("Un record pour {subject}", "Un record dans l'histoire du championnat, et il est signé {subject}.")],
+           "rarity": [("Un exploit rare pour {subject}", "{subject} réussit ce que le championnat n'a presque jamais vu."), ("Du jamais ou presque pour {subject}", "Le championnat n'a presque jamais vu ça de la part de {subject}.")],
+           "streak": [("{subject} continue sa série", "Un match de plus, et la série de {subject} continue."), ("{subject} dans l'histoire", "Une ligne de plus dans l'histoire du championnat pour {subject}.")],
+           "milestone": [("Un cap pour {subject}", "{subject} atteint un cap dans l'histoire du championnat."), ("{subject} entre dans l'histoire", "Un cap de l'histoire du championnat, franchi par {subject}.")],
+           "storyline": [("{home_team} contre {away_team}, une histoire", "{home_team} et {away_team} ajoutent un chapitre à une longue histoire."), ("{home_team} contre {away_team}, toute une histoire", "Une longue histoire du championnat se cache derrière {home_team} contre {away_team}.")],
+           "tactical": [("Une idée signée {subject}", "{subject} revient sans cesse à la même idée dans ce match."), ("{subject} et une idée à surveiller", "La même idée revient sans cesse chez {subject} dans ce match.")]},
+    "es": {"record": [("{subject} establece un récord", "{subject} llega adonde nadie había llegado en la historia de la liga."), ("{subject}, un récord para la historia", "Un récord en la historia de la liga: lo firma {subject}.")],
+           "rarity": [("Una rareza para {subject}", "{subject} logra algo que la liga casi nunca ha visto."), ("{subject}, algo casi nunca visto", "{subject} firma algo que la liga casi nunca había visto.")],
+           "streak": [("{subject} sigue con su racha", "Un partido más, y la racha de {subject} continúa."), ("{subject}, en la historia", "Una línea más en la historia de la liga para {subject}.")],
+           "milestone": [("Una marca para {subject}", "{subject} alcanza una marca en la historia de la liga."), ("{subject} entra en la historia", "Una marca de la historia de la liga, alcanzada por {subject}.")],
+           "storyline": [("{home_team} contra {away_team}, una historia", "{home_team} y {away_team} suman un capítulo a una larga historia."), ("{home_team} contra {away_team}, toda una historia", "Detrás de este partido entre el {home_team} y el {away_team} hay una larga historia de la liga.")],
+           "tactical": [("Una idea de {subject}", "{subject} vuelve una y otra vez a la misma idea en este partido."), ("{subject} y una idea a vigilar", "La misma idea de {subject} vuelve una y otra vez en este partido.")]},
+}
+UNNAMED = {  # only when the facts name neither a player nor a club, nor the two clubs of the match
+    "en": ("A moment for the history books", "This match adds a line to the league's history."),
+    "fr": ("Un moment pour l'histoire", "Ce match ajoute une ligne à l'histoire du championnat."),
+    "es": ("Un momento para la historia", "Este partido suma una línea a la historia de la liga."),
 }
 
 TEMPLATES = {m: {lang: fr_typography(v) if lang == "fr" else v for lang, v in by_lang.items()} for m, by_lang in TEMPLATES.items()}
@@ -1087,16 +1092,14 @@ class TemplateWriter:
 
     @staticmethod
     def _kind_text(doc: dict, kind: str, lang: str, values: dict, pick: _Picker) -> dict:
-        """A headline and why true for the kind of fact, with no number."""
-        pairs = INSIGHT_TEMPLATES[lang].get(kind) or INSIGHT_TEMPLATES[lang]["storyline"]
-        chosen = None
-        for headline, why in rotated(pairs, doc["id"], lang):
-            h, w = fill(headline, values, {}), fill(why, values, {})
-            if h and w and pick.memory.key(h[0]) not in pick.headlines:
-                chosen = (h[0], w[0])
-                break
-        if chosen is None:
-            chosen = (fill(pairs[-1][0], values, {}) or (pairs[-1][0], []))[0], (fill(pairs[-1][1], values, {}) or (pairs[-1][1], []))[0]
+        """A headline and why true for the kind of fact, with no number, naming who did it, or the two clubs when the facts name nobody; a headline the match has not seen first."""
+        filled = []
+        for pairs in (INSIGHT_TEMPLATES[lang].get(kind) or [], INSIGHT_TEMPLATES[lang]["storyline"]):
+            for headline, why in rotated(pairs, doc["id"], lang):
+                h, w = fill(headline, values, {}), fill(why, values, {})
+                if h and w:
+                    filled.append((h[0], w[0]))
+        chosen = next((p for p in filled if pick.memory.key(p[0]) not in pick.headlines), filled[0] if filled else UNNAMED[lang])
         return {"headline": chosen[0], "why": chosen[1], "lang": lang, "claims": []}
 
     @staticmethod

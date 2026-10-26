@@ -685,6 +685,20 @@ def test_a_starter_and_a_club_the_history_cannot_place_get_their_familys_texts()
             assert not any(w in (t["headline"] + t["why"]).lower() for w in ("bench", "banc", "banquillo", "substitut", "remplaçant", "suplente")), t
 
 
+def test_the_generic_insight_lines_name_who_did_it():
+    """The lines left for a fact no family can tell name the player or the club ({subject}), or both clubs; with nobody named in the facts, the two clubs are."""
+    for lang, kinds in INSIGHT_TEMPLATES.items():
+        for kind, pairs in kinds.items():
+            for headline, why in pairs:
+                both = "{home_team}" in headline + why and "{away_team}" in headline + why
+                assert both if kind == "storyline" else "{subject}" in headline and "{subject}" in why, (lang, kind, headline, why)
+    out = Desk(MemorySink(), TemplateWriter(), languages=LANGS).write_insight(insight_doc("landmark-1", {"goals": 3}, kind="record"), TEAMS)
+    assert out["verification"]["verified"]
+    for t in out["texts"]:
+        body = t["headline"] + " " + t["why"]
+        assert "Rovers" in body and "United" in body and "{" not in body, t
+
+
 def test_the_stat_of_the_match_keeps_the_club_name_and_one_colon():
     shots = next(f for k, f in family_facts() if k == "shots-p1-home-12-3")
     doc = insight_doc("stat-of-the-match", dict(shots, top_fact="shots-p1-home-12-3", top_value=70), kind="tactical", stat_of_the_match=True)
