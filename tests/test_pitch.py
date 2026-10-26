@@ -172,13 +172,43 @@ def test_shot_map_filters_by_team_and_half(demo_feed):
         assert len(headers) == (1 if team else 2)
 
 
-def test_buildup_arrows_widen_with_the_threat_added(demo_feed):
+def test_buildup_numbers_the_actions_and_draws_each_kind_its_own_way(demo_feed):
     for m in graphics.moments(demo_feed):
         fig = graphics.buildup_figure(demo_feed, m["event_id"])
-        assert fig.layout.meta["buildup"][-1] == m["event_id"]
-        assert annotation_arrows(fig)
+        seq = fig.layout.meta["buildup"]
+        assert seq[-1] == m["event_id"] and len(fig.layout.meta["sequence"]) == len(seq)
+        assert all(line.startswith(f"{k + 1}. ") for k, line in enumerate(fig.layout.meta["sequence"]))
+        assert fig.layout.meta["sequence"][-1].endswith(("goal", "goal ruled out (VAR)", "saved", "post", "blocked", "off target"))
+        dots = next(t for t in fig.data if t.name == "On the ball, in order")
+        assert sorted(int(n) for label in dots.text for n in label.split(",")) == list(range(1, len(seq) + 1))  # every action numbered once
+        strokes = [t for t in fig.data if (t.meta or {}).get("kind")]
+        assert strokes and {t.meta["kind"] for t in strokes} <= {"pass", "carry", "cross", "shot"}
+        for t in strokes:
+            assert t.line.dash == graphics.STROKES[t.meta["kind"]][1] and t.marker.symbol[-1] == "arrow"
+        shot = next(t for t in strokes if t.meta["kind"] == "shot")
+        assert shot.line.width >= 5 and shot.line.color == graphics.OUTCOMES["voided" if m.get("voided") else m["shot"]["outcome"]][1]
+        caption = next(a for a in fig.layout.annotations if a.name == "sequence")
+        assert "1. " in caption.text and next(a for a in fig.layout.annotations if a.name == "won").text
     assert graphics.arrow_width(0) == 1.5 and graphics.arrow_width(0.05) > graphics.arrow_width(0.01) and graphics.arrow_width(5) == 12
     assert "ruled out by VAR" in graphics.buildup_figure(demo_feed, "demo-0007-v2-a01179").layout.title.text
+    assert {graphics.stroke({"action_type": k}) for k in ("dribble", "take_on")} == {"carry"} and graphics.stroke({"action_type": "cross"}) == "cross"
+    assert graphics.stroke({"action_type": "tackle"}) == "won" and graphics.stroke({"action_type": "throw_in"}) == "pass"
+
+
+def test_buildup_says_where_and_how_the_ball_was_won(demo_feed):
+    fig = graphics.buildup_figure(demo_feed, "demo-0007-v2-a01179")  # 63': won by an interception deep in its own half
+    won = fig.layout.meta["won"]
+    assert won["how"] == "interception" and not won["high"] and won["metres"] < 20
+    assert fig.layout.meta["sequence"][0].endswith("wins it (interception)")
+    assert "flagged offside" in fig.layout.meta["sequence"][-2]
+    label = next(a for a in fig.layout.annotations if a.name == "won").text
+    assert label.startswith("<b>Won here</b>: interception") and "m from own goal" in label
+    feed = {"info": demo_feed["info"], "actions": [dict(a) for a in demo_feed["actions"]]}
+    first = next(a for a in feed["actions"] if a["event_id"] == won["event_id"])
+    first["start_x"] = 70.0  # the same interception in the opponent's half
+    fig = graphics.buildup_figure(feed, "demo-0007-v2-a01179")
+    assert fig.layout.meta["won"]["high"] and "(high regain)" in next(a for a in fig.layout.annotations if a.name == "won").text
+    assert next(t for t in fig.data if t.name == "Ball won high").marker.symbol == "star"
 
 
 def test_set_piece_animation_runs_from_delivery_to_first_contact(demo_feed):

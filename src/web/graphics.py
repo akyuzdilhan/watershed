@@ -141,6 +141,14 @@ def shot_map(feed: dict, theme="dark", width: int | None = 900, team: str | None
 
 # --- build-ups --------------------------------------------------------------------------------------
 
+CARRIES = {"dribble", "take_on"}
+CROSSES = {"cross", "corner_crossed", "freekick_crossed"}
+WINS = {"tackle": "tackle", "interception": "interception", "clearance": "clearance", "keeper_claim": "claim", "keeper_save": "save"}
+RESTART_WINS = {"throw_in": "throw-in", "goalkick": "goal kick", "corner_short": "corner", "corner_crossed": "corner", "freekick_short": "free kick", "freekick_crossed": "free kick"}
+# how each kind of action is drawn: legend name, line dash, whether the path is curved
+STROKES = {"pass": ("Pass", "solid", False), "carry": ("Carry or dribble", "dash", False), "cross": ("Cross", "dot", True), "shot": ("Shot", "solid", False)}
+
+
 def _possession(feed: dict, event_id: str, n_max: int = 10) -> list[dict]:
     return T.chain(feed["actions"], event_id)[-n_max:]
 
@@ -150,8 +158,91 @@ def arrow_width(threat: float) -> float:
     return round(min(12.0, 1.5 + 60 * max(threat, 0.0)), 2)
 
 
+def stroke(a: dict) -> str:
+    """How an action of a build-up is drawn: "shot", "carry" (dribble, take-on), "cross" (crosses and crossed set pieces), "won" (a tackle, interception or other action that wins the ball) or "pass" (any other ball played)."""
+    if a.get("shot"):
+        return "shot"
+    if a["action_type"] in CARRIES:
+        return "carry"
+    if a["action_type"] in CROSSES:
+        return "cross"
+    if a["action_type"] in WINS:
+        return "won"
+    return "pass"
+
+
+def ball_won(feed: dict, seq: list[dict]) -> dict:
+    """Where and how the team won the ball at the start of the possession that `seq` ends (the whole possession, even when `seq` is cut): `{how, x, y, metres, high, event_id}` in the team's frame, `metres` from its own goal line, `high` when won from the opponent in the opponent's half. `how` is "kept the ball" when the possession follows one of the same team."""
+    first = T.chain(feed["actions"], seq[-1]["event_id"])[0]
+    acts = feed["actions"]
+    i = next(k for k, a in enumerate(acts) if a["event_id"] == first["event_id"])
+    prev = acts[i - 1] if i > 0 and acts[i - 1].get("period") == first.get("period") else None
+    if first["action_type"] in WINS:
+        how = WINS[first["action_type"]]
+    elif first["action_type"] in RESTART_WINS:
+        how = RESTART_WINS[first["action_type"]]
+    elif prev is not None and prev["team"] != first["team"]:
+        how = "loose ball" if prev.get("result") != "success" else f"after a {pitch.ACTION_LABELS.get(prev['action_type'], prev['action_type'].replace('_', ' '))}"
+    else:
+        how = "kept the ball"
+    x, y = pitch.clamp(first["start_x"], first["start_y"])
+    return {"how": how, "x": x, "y": y, "metres": round(x), "high": x > pitch.HALF_X and how != "kept the ball", "event_id": first["event_id"]}
+
+
+def _lower(label: str) -> str:
+    return label[:1].lower() + label[1:]
+
+
+def _receiver(seq: list[dict], k: int) -> dict | None:
+    nxt = seq[k + 1] if k + 1 < len(seq) else None
+    return nxt if nxt is not None and nxt["team"] == seq[k]["team"] else None
+
+
+def buildup_steps(feed: dict, seq: list[dict]) -> list[str]:
+    """The build-up in words, one line per action: "2. #3 Name passes to #11 Name", "6. #20 Name shoots, xG 0.31, goal"."""
+    won = ball_won(feed, seq)
+    out = []
+    for k, a in enumerate(seq):
+        who, kind = _who(a), stroke(a)
+        rec = _receiver(seq, k)
+        to = f" to {_who(rec)}" if rec is not None and rec["player"]["id"] != a["player"]["id"] else ""
+        if kind == "shot":
+            what = f"shoots, xG {a['shot']['xg']:.2f}, {_lower(OUTCOMES[_outcome(a)][0])}"
+        elif kind == "won":
+            what = f"wins it ({won['how']})" if won["event_id"] == a["event_id"] else WINS[a["action_type"]]
+        elif kind == "carry":
+            what = f"carries it {math.hypot(a['end_x'] - a['start_x'], a['end_y'] - a['start_y']):.0f} m"
+        elif kind == "cross":
+            what = f"crosses{to}"
+        else:
+            what = f"passes{to}" + (", flagged offside" if a.get("result") == "offside" else ", lost" if a.get("result") == "fail" else "")
+        if k == 0 and kind != "won" and won["how"] != "kept the ball" and won["event_id"] == a["event_id"]:
+            what += f" (ball won: {won['how']})"
+        out.append(f"{k + 1}. {who} {what}")
+    return out
+
+
+def _wrap(parts: list[str], width: int = 120) -> list[str]:
+    lines, cur = [], ""
+    for p in parts:
+        if cur and len(cur) + 3 + len(p) > width:
+            lines.append(cur)
+            cur = p
+        else:
+            cur = f"{cur}   {p}" if cur else p
+    return lines + ([cur] if cur else [])
+
+
+def _curve(sx, sy, ex, ey, bend: float = 0.18, n: int = 12) -> tuple[list[float], list[float]]:
+    """A quadratic curve from start to end bowed to the left of the direction of travel by `bend` of its length."""
+    mx, my = (sx + ex) / 2, (sy + ey) / 2
+    cx, cy = mx - (ey - sy) * bend, my + (ex - sx) * bend
+    ts = [i / n for i in range(n + 1)]
+    return [(1 - u) ** 2 * sx + 2 * (1 - u) * u * cx + u * u * ex for u in ts], [(1 - u) ** 2 * sy + 2 * (1 - u) * u * cy + u * u * ey for u in ts]
+
+
 def buildup_figure(feed: dict, event_id: str, theme="dark", width: int | None = 900, n_max: int = 10) -> go.Figure:
-    """The actions of the possession that ended with `event_id` as arrows, widths by threat added, over the players at the final action. The attacking team attacks right."""
+    """The possession that ended with `event_id`, numbered in order: passes as solid arrows, carries dashed, crosses dotted and curved, the shot thick and coloured by its outcome (widths by threat added, the shot's by its xG); receivers as dots, where and how the ball was won starred (gold when in the opponent's half), and the sequence in words under the pitch. The attacking team attacks right, over the players at the final action."""
     t = _t(theme)
     teams = team_names(feed.get("info"))
     names = player_names(feed.get("info"))
@@ -160,31 +251,71 @@ def buildup_figure(feed: dict, event_id: str, theme="dark", width: int | None = 
     fig = pitch.pitch_figure(theme, width)
     traces = pitch.frame_traces(last, theme, last["team"], names)
     for tr in traces[:2]:
-        tr.marker.opacity = 0.55
-    fig.add_traces(traces[:3])
+        tr.marker.opacity = 0.45
+        tr.showlegend = False
+    fig.add_traces(traces[:2])
     color = t[last["team"]]
-    mids = []
+    starts, shown = [], set()
     for k, a in enumerate(seq):
         view = (lambda x, y: (x, y)) if a["team"] == last["team"] else (lambda x, y: (pitch.LENGTH - x, pitch.WIDTH - y))
         sx, sy = pitch.clamp(*view(a["start_x"], a["start_y"]))
         ex, ey = pitch.clamp(*view(a["end_x"], a["end_y"]))
-        if math.hypot(ex - sx, ey - sy) < 0.5:
+        starts.append((sx, sy))
+        kind = stroke(a)
+        if kind == "won" or math.hypot(ex - sx, ey - sy) < 0.5:
             continue
-        if a.get("shot"):
-            w, c, what = arrow_width(a["shot"]["xg"]), OUTCOMES[_outcome(a)][1], f"shot, xG {a['shot']['xg']:.2f}, {OUTCOMES[_outcome(a)][0].lower()}"
+        if kind == "shot":
+            w, c = max(5.0, arrow_width(a["shot"]["xg"])), OUTCOMES[_outcome(a)][1]
         else:
-            th = T.threat_added(a)
-            w, c, what = arrow_width(th), color, f"{a['action_type'].replace('_', ' ')}, threat {th:+.3f}"
+            w, c = max(2.0, arrow_width(T.threat_added(a))), color
         if a["team"] != last["team"]:
             c = t["muted"]
-        fig.add_annotation(**_arrow(sx, sy, ex, ey, c, w, opacity=0.95 if a["action_type"] not in ("dribble", "take_on") else 0.7))
-        mids.append(((sx + ex) / 2, (sy + ey) / 2, f"{k + 1}. {a.get('minute_label', '')} {_who(a)}: {what}"))
-    fig.add_trace(go.Scatter(x=[m[0] for m in mids], y=[m[1] for m in mids], mode="markers", marker={"size": 14, "opacity": 0}, hovertext=[m[2] for m in mids],
-                             hoverinfo="text", name="actions"))
+        name, dash, curved = STROKES[kind]
+        length = math.hypot(ex - sx, ey - sy)
+        cut = 0.0 if kind == "shot" else min(2.2, 0.3 * length) / length  # the arrowhead stops short of the next numbered dot
+        tx, ty = ex - (ex - sx) * cut, ey - (ey - sy) * cut
+        xs, ys = _curve(sx, sy, tx, ty) if curved else ([sx, tx], [sy, ty])
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=name, legendgroup=kind, showlegend=kind not in shown, hoverinfo="skip",
+                                 line={"color": c, "width": w, "dash": dash}, marker={"symbol": ["circle"] * (len(xs) - 1) + ["arrow"], "size": [0] * (len(xs) - 1) + [10 + w],
+                                                                                    "angleref": "previous", "color": c}, meta={"step": k + 1, "kind": kind}))
+        shown.add(kind)
+    steps = buildup_steps(feed, seq)
+    won = ball_won(feed, seq)
+    before = len(T.chain(feed["actions"], event_id)) - len(seq)  # actions of the possession before the first one drawn
+    wx, wy = won["x"], won["y"]  # in the attacking team's frame, as drawn
+    gold = t["actor"]
+    nx, ny = next(((x, y) for x, y in starts if math.hypot(x - wx, y - wy) >= 1.5), (pitch.HALF_X, pitch.MID_Y))
+    away = math.hypot(nx - wx, ny - wy) or 1.0
+    ax, ay = -40 * (nx - wx) / away, 30 * (ny - wy) / away  # the label on the side away from the next action (screen y points down)
+    ax, ay = ax if abs(ax) > 8 else 0, ay if abs(ay) > 8 else (-30 if wy < pitch.MID_Y else 30)
+    fig.add_trace(go.Scatter(x=[wx], y=[wy], mode="markers", name=("Ball won high" if won["high"] else "Ball won") if won["how"] != "kept the ball" else "Possession start", hoverinfo="skip",
+                             marker={"symbol": "star", "size": 30 if won["high"] else 24, "color": gold if won["high"] else "rgba(0,0,0,0)", "opacity": 0.85,
+                                     "line": {"color": gold, "width": 2}}))
+    fig.add_annotation(x=wx, y=wy, text=((f"<b>Won here</b>: {won['how']}, {won['metres']} m from own goal" + (" (high regain)" if won["high"] else "")) if won["how"] != "kept the ball"
+                       else f"<b>Possession starts here</b>, {won['metres']} m from own goal") + (f", {before} actions before 1" if before else ""), showarrow=True, arrowhead=0,
+                       arrowcolor=gold, ax=ax, ay=ay, font={"color": gold, "size": 12}, bgcolor=t["paper"], bordercolor=gold, borderpad=3, name="won")
+    dots: list[list] = []  # [x, y, labels, hover lines]: one dot per place the ball was played from, so a receiver who plays at once shares his dot
+    for k, (x, y) in enumerate(starts):
+        if dots and math.hypot(x - dots[-1][0], y - dots[-1][1]) < 1.5:
+            dots[-1][2].append(str(k + 1))
+            dots[-1][3].append(steps[k])
+        else:
+            dots.append([x, y, [str(k + 1)], [steps[k]]])
+    fig.add_trace(go.Scatter(x=[d[0] for d in dots], y=[d[1] for d in dots], mode="markers+text", name="On the ball, in order", text=[",".join(d[2]) for d in dots],
+                             textfont={"color": "#111827", "size": 12, "family": t["font"]}, hovertext=["<br>".join(d[3]) for d in dots], hoverinfo="text",
+                             marker={"size": [19 + 7 * (len(d[2]) - 1) for d in dots], "color": "#ffffff", "line": {"color": "#111827", "width": 1.5}}))
+    lines = _wrap(steps)
+    fig.add_annotation(x=0, y=0, xref="paper", yref="paper", xanchor="left", yanchor="top", yshift=-30, align="left", showarrow=False, text="<br>".join(lines),
+                       font={"color": t["text"], "size": 12}, name="sequence")
     s = last.get("score", {"home": 0, "away": 0})
     head = f"{last.get('minute_label', '')}  {teams['home']} {s['home']}-{s['away']} {teams['away']}"
-    sub = f"{teams[last['team']]} build-up to {_who(last)}'s " + ("goal" if T.any_goal(last) else "chance") + (" (ruled out by VAR)" if last.get("voided") else "") + ". Arrow width: threat added"
-    fig.update_layout(title_text=_title(head, sub), meta={"buildup": [a["event_id"] for a in seq]})
+    sub = f"{teams[last['team']]} build-up to {_who(last)}'s " + ("goal" if T.any_goal(last) else "chance") + (" (ruled out by VAR)" if last.get("voided") else "") \
+        + ". Numbered in order; width: threat added"
+    fig.update_layout(title_text=_title(head, sub), showlegend=True, margin={"b": 40 + 17 * len(lines)},
+                      legend={"orientation": "h", "y": 0, "x": 0, "yanchor": "top", "font": {"color": t["text"], "size": 12}, "itemsizing": "constant"},
+                      meta={"buildup": [a["event_id"] for a in seq], "sequence": steps, "won": won})
+    if width:
+        fig.update_layout(height=fig.layout.height + 30 + 17 * len(lines))
     return fig
 
 

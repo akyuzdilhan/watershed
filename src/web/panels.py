@@ -247,7 +247,7 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
 NOTES = {
     "shots": "Marker size is the xG of the shot (key under the pitch); pick a team or a half above. Purple crosses are goals VAR ruled out: drawn, but left out of the goals, shots and xG above the pitch.",
     "momentum": "Threat added: value of where completed passes and carries ended minus where they started (value = xG of a shot from there). Pick the bar width above; the thick lines average about 15 minutes. Win probability from the desk's match state.",
-    "buildups": "The possession behind the goal or chance (last 10 actions). Arrow width: threat added; the shot arrow: xG.",
+    "buildups": "The possession behind the goal or chance (last 10 actions), numbered in order and told in words under the pitch: solid arrows passes, dashed carries, dotted curves crosses, the thick arrow the shot in its outcome's colour. The star is where the ball was won, filled gold for a high regain in the opponent's half. Arrow width: threat added; the shot's: xG.",
     "setpieces": "Delivery width: value of the landing point. Play the animation: delivery, first contact, what followed.",
     "direct": "Seen from behind the taker. The box shows where the keeper stood in the frame.",
     "tactics": "Measured on the 360 freeze frames (synthetic positions, rounded to 0.1 m).",
