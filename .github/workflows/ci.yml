@@ -52,6 +52,24 @@ jobs:
           az bicep build --file infra/main.bicep --stdout > /dev/null
           az bicep build --file infra/killswitch/main.bicep --stdout > /dev/null
 
+  # Builds both images as azd would and imports what each one runs: a missing package or pin fails here, not at the first start in Azure.
+  # Nothing is pushed.
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build the web image
+        run: docker build -f src/web/Dockerfile -t watershed-web:ci .
+      - name: Import the web app in it
+        run: docker run --rm watershed-web:ci python -c "import web.app"
+      - name: Build the worker image
+        run: docker build -f src/worker/Dockerfile -t watershed-worker:ci .
+      - name: Import the Writer, Agent Framework's Foundry client and Service Bus in it
+        run: docker run --rm watershed-worker:ci python -c "import worker.writer, agent_framework.foundry, azure.servicebus"
+
   secrets:
     runs-on: ubuntu-latest
     timeout-minutes: 10

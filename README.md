@@ -31,7 +31,7 @@ All match data is synthetic, produced by the match engine in this repository. No
 | Evaluation against the hidden ground truth: 100 unscripted matches and the demo | Done | [`docs/evaluation.md`](docs/evaluation.md), `src/worker/evaluate.py` |
 | Producer feedback (thumbs, reasons, notes): stored, measured, exported; read back into the Writer prompt when `FEEDBACK_PROFILE` is set | Built; online it is stored and measured, not read back by the worker | [`src/worker/feedback.py`](src/worker/feedback.py), [`docs/notes/feedback.md`](docs/notes/feedback.md) |
 | Pitch figures from the 360 frames, including the 63' offside frame with the offside line | Built | [`src/web/pitch.py`](src/web/pitch.py), [`docs/img/`](docs/img/) |
-| CI (tests, Bicep build, secret scanning), Dependabot | Done | [`.github/`](.github/) |
+| CI (tests, Bicep build, both images built and their imports checked, secret scanning), Dependabot | Done | [`.github/`](.github/) |
 | Cost kill switch tied to the budget, which leaves the read-only web app up | Built and tested against fakes of the Azure API; not deployed | [`infra/killswitch/`](infra/killswitch/) |
 | Fictional league history: 50 seasons, 32 clubs with promotion and relegation, about 4,000 players with careers, 19,000 matches with scorers, substitutions and cards | Done, tested | [`src/league/history.py`](src/league/history.py), [`docs/notes/history.md`](docs/notes/history.md) |
 | Insight engine: facts that surface live (a substitute's hat-trick, a comeback, a half-time lead lost), ranked by how rare they are in the history, updated or withdrawn as the match goes on, and a stat of the match at full time; written from checked templates | Done, tested | [`src/worker/insights.py`](src/worker/insights.py), [`docs/notes/insights.md`](docs/notes/insights.md) |
@@ -194,7 +194,7 @@ Details, message types, the temporal contract of corrections, identities and fai
 | Microsoft Entra ID | One managed identity per app with built-in roles; Service Bus and Cosmos DB have key authentication disabled; producer sign-in through Container Apps authentication (Easy Auth) | [`infra/resources.bicep`](infra/resources.bicep), [`src/web/security.py`](src/web/security.py) |
 | Azure Monitor | Log Analytics: container logs with a daily ingestion cap; Application Insights: OpenTelemetry traces of every draft and model call, without texts | [`infra/resources.bicep`](infra/resources.bicep), [`src/worker/telemetry.py`](src/worker/telemetry.py) |
 | Azure Developer CLI (azd) and Bicep | azd and Bicep provision and deploy the app; the Foundry project and its deployment are created separately | [`azure.yaml`](azure.yaml), [`infra/`](infra/) |
-| GitHub Actions and Dependabot | CI on every push (tests, Bicep build, secret scanning); weekly dependency updates | [`.github/`](.github/) |
+| GitHub Actions and Dependabot | CI on every push (tests, Bicep build, both Docker images built and imported, secret scanning); weekly dependency updates | [`.github/`](.github/) |
 
 ## Enterprise readiness
 
@@ -239,7 +239,7 @@ How Watershed applies the twelve practices of Microsoft's [Best practices in clo
 | Reliability | Ordered sessions, settle after write, dead-letter queue, idempotent upserts, retries; a failed or rejected model call never blocks a card (template fallback) | One region, no availability zones; one worker replica keeps a match in memory, so a restart mid-match loses that match |
 | Security | No data keys, one managed identity per app with built-in roles, producers signed in with Entra ID, visitors read only, secret scanning in CI | Public endpoints, no private networking; the web identity has data access on the whole Cosmos DB account |
 | Cost optimization | Scale to zero, Cosmos DB free tier, a cap on model attempts per match, a daily log cap, budget alerts | The kill switch is not deployed; budget data arrives hours after the spend |
-| Operational excellence | azd and Bicep, CI that builds the templates, scripts to reset and replay a match, an audit trail, traces | The Foundry project and its deployment are configured by hand; no continuous deployment |
+| Operational excellence | azd and Bicep, CI that builds the templates and both images, scripts to reset and replay a match, an audit trail, traces | The Foundry project and its deployment are configured by hand; no continuous deployment |
 | Performance efficiency | Incremental reads, short caches, freeze frames out of the index, per-match sessions for ordering | The model is called inside the message loop, so a slow call delays the feed, bounded by the 45-second limit per call |
 
 ## Responsible AI
