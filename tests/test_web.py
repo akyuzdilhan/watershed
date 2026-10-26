@@ -828,9 +828,12 @@ def test_console_layout_has_the_view_switch_and_the_new_panels():
 def test_graphics_tab_draws_every_kind_from_the_feed(feed_desk):
     for kind in [k["value"] for k in panels.KINDS]:
         options, value, fig, note, sig = panels.graphics(MATCH, kind, None, "graphics", None, feed_desk)
-        assert sig and note and len(fig.data) >= 1, kind
-        if kind not in ("shots", "momentum"):
-            assert options and value == (options[-1]["value"] if kind == "buildups" else options[0]["value"]), kind
+        assert sig and note and options, kind
+        if kind == "penalties":  # none on the demo: one disabled option that says so, and the same words on the figure
+            assert value is no_update and options == [{"value": panels.NONE_ITEM, "label": "No penalty in this match", "disabled": True}]
+            assert fig.layout.annotations[0].text == "No penalty in this match."
+        else:
+            assert len(fig.data) >= 1 and value == (options[-1]["value"] if kind == "buildups" else options[0]["value"]), kind
         assert panels.graphics(MATCH, kind, value if value is not no_update else None, "graphics", sig, feed_desk)[2] is no_update  # unchanged: nothing re-sent
     _, _, fig, _, _ = panels.graphics(MATCH, "momentum", None, "graphics", None, feed_desk)
     assert len(fig.data) == 5  # threat bars and the desk's win-probability curve

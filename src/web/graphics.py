@@ -552,40 +552,136 @@ def momentum_figure(feed: dict, timeline: list[dict] | None = None, theme="dark"
 
 # --- penalties and direct free kicks ---------------------------------------------------------------------
 
+WALL_RADIUS_M = 11.0  # defenders this close to the ball, in front of it and near the line to goal, form the wall
+WALL_LANE_M = 4.0  # half-width of the lane from the ball to the goal centre in which a defender counts as in the wall
+
+
+def _goal_face(fig: go.Figure, a: dict, t: dict, xref: str = "x", yref: str = "y") -> tuple[float, float]:
+    """The goal seen from behind the taker (his right on the right) on axes `xref`/`yref`: posts, crossbar, the keeper where the frame has him, the ball where it crossed the line. Returns (ball horizontal, ball height)."""
+    to_h = lambda y: (pitch.WIDTH - y) - pitch.MID_Y  # noqa: E731  facing the goal at x = 105 with y = 0 on the right: horizontal = WIDTH - y, centred on the goal
+    half = GOAL_W / 2
+    on = {"xref": xref, "yref": yref}
+    fig.add_shape(type="rect", x0=-12, x1=12, y0=-0.6, y1=0, fillcolor=t["grass"], line={"width": 0}, layer="below", **on)
+    fig.add_shape(type="path", path=f"M {-half},0 L {-half},{GOAL_H} L {half},{GOAL_H} L {half},0", line={"color": t["text"], "width": 5}, **on)
+    for k in range(1, 8):
+        x = -half + k * GOAL_W / 8
+        fig.add_shape(type="line", x0=x, x1=x, y0=0, y1=GOAL_H, line={"color": "rgba(230,235,240,0.15)", "width": 1}, layer="below", **on)
+    keeper = next((p for p in a.get("freeze_frame") or [] if not p["teammate"] and p.get("keeper")), None)
+    if keeper:
+        kx = to_h(keeper["location"][1])
+        fig.add_shape(type="rect", x0=kx - 0.25, x1=kx + 0.25, y0=0, y1=1.9, fillcolor=t["away" if a["team"] == "home" else "home"], opacity=0.6, line={"width": 0}, **on)
+        fig.add_annotation(x=kx, y=1.95, text="keeper", showarrow=False, yanchor="bottom", font={"color": t["muted"], "size": 11}, **on)
+    shot = a.get("shot") or {}
+    o = _outcome(a)
+    bx, bz = to_h(a["end_y"]), shot.get("end_z", 0.3)
+    fig.add_trace(go.Scatter(x=[bx], y=[bz], mode="markers", marker={"size": 22, "color": OUTCOMES[o][1], "symbol": OUTCOMES[o][2].replace("-open", "").replace("x-thin", "x"),
+                                                                    "line": {"color": t["paper"], "width": 2}},
+                             hovertext=[f"{OUTCOMES[o][0]}, xG {shot.get('xg', 0):.2f}"], hoverinfo="text", name="ball", xaxis=xref, yaxis=yref))
+    return bx, bz
+
+
 def shot_on_goal_figure(feed: dict, event_id: str, theme="dark", width: int | None = 700) -> go.Figure:
     """The goal seen from behind the taker (his right on the right): where the ball crossed the line (end_y, end_z) and where the keeper stood in the frame."""
     t = _t(theme)
     teams = team_names(feed.get("info"))
     a = next(x for x in feed["actions"] if x["event_id"] == event_id)
-    # facing the goal at x = 105 with y = 0 on the right: horizontal = WIDTH - y, centred on the goal
-    to_h = lambda y: (pitch.WIDTH - y) - pitch.MID_Y  # noqa: E731
     fig = go.Figure()
-    half = GOAL_W / 2
-    fig.add_shape(type="rect", x0=-12, x1=12, y0=-0.6, y1=0, fillcolor=t["grass"], line={"width": 0}, layer="below")
-    fig.add_shape(type="path", path=f"M {-half},0 L {-half},{GOAL_H} L {half},{GOAL_H} L {half},0", line={"color": t["text"], "width": 5})
-    for k in range(1, 8):
-        x = -half + k * GOAL_W / 8
-        fig.add_shape(type="line", x0=x, x1=x, y0=0, y1=GOAL_H, line={"color": "rgba(230,235,240,0.15)", "width": 1}, layer="below")
-    keeper = next((p for p in a.get("freeze_frame") or [] if not p["teammate"] and p.get("keeper")), None)
-    if keeper:
-        kx = to_h(keeper["location"][1])
-        fig.add_shape(type="rect", x0=kx - 0.25, x1=kx + 0.25, y0=0, y1=1.9, fillcolor=t["away" if a["team"] == "home" else "home"], opacity=0.6, line={"width": 0})
-        fig.add_annotation(x=kx, y=1.95, text="keeper", showarrow=False, yanchor="bottom", font={"color": t["muted"], "size": 11})
+    bx, bz = _goal_face(fig, a, t)
     shot = a.get("shot") or {}
     o = _outcome(a)
-    bx, bz = to_h(a["end_y"]), shot.get("end_z", 0.3)
-    fig.add_trace(go.Scatter(x=[bx], y=[bz], mode="markers", marker={"size": 22, "color": OUTCOMES[o][1], "symbol": "circle", "line": {"color": t["paper"], "width": 2}},
-                             hovertext=[f"{OUTCOMES[o][0]}, xG {shot.get('xg', 0):.2f}"], hoverinfo="text", name="ball"))
     kind = "Penalty" if a["action_type"] == "shot_penalty" else "Free kick"
     s = a.get("score", {"home": 0, "away": 0})
     fig.update_layout(
         title_text=_title(f"{a.get('minute_label', '')}  {teams['home']} {s['home']}-{s['away']} {teams['away']}",
-                          f"{kind}: {teams[a['team']]} {_who(a)}, xG {shot.get('xg', 0):.2f}, {OUTCOMES[o][0].lower()}. Seen from behind the taker"),
+                          f"{kind}: {teams[a['team']]} {_who(a)}, xG {shot.get('xg', 0):.2f}, {_lower(OUTCOMES[o][0])}. Seen from behind the taker"),
         xaxis={"range": [-8, 8], "visible": False, "fixedrange": True}, yaxis={"range": [-0.6, 4], "visible": False, "fixedrange": True, "scaleanchor": "x", "scaleratio": 1},
         paper_bgcolor=t["paper"], plot_bgcolor=t["paper"], font={"family": t["font"], "color": t["text"]}, showlegend=False, margin={"l": 10, "r": 10, "t": 70, "b": 10},
         meta={"ball_h": round(bx, 2), "ball_z": bz})
     if width:
         fig.update_layout(width=width, height=round((width - 20) * 4.6 / 16) + 80)
+    return fig
+
+
+def wall(a: dict, radius_m: float = WALL_RADIUS_M, lane_m: float = WALL_LANE_M) -> list[dict]:
+    """The defensive wall of a direct free kick in its freeze frame: outfield opponents within `radius_m` of the ball, not behind it, and within `lane_m` of the line from the ball to the goal centre."""
+    bx, by = a["start_x"], a["start_y"]
+    gx, gy = pitch.LENGTH, pitch.MID_Y
+    length = math.hypot(gx - bx, gy - by) or 1.0
+    ux, uy = (gx - bx) / length, (gy - by) / length
+    out = []
+    for p in a.get("freeze_frame") or []:
+        if p["teammate"] or p.get("keeper"):
+            continue
+        dx, dy = p["location"][0] - bx, p["location"][1] - by
+        along, across = dx * ux + dy * uy, abs(-dx * uy + dy * ux)
+        if math.hypot(dx, dy) <= radius_m and along > 0 and across <= lane_m:
+            out.append(p)
+    return out
+
+
+def freekick_figure(feed: dict, event_id: str, theme="dark", width: int | None = 900) -> go.Figure:
+    """A direct free kick in two views: from above (the kick spot, its distance to goal, the wall found in the freeze frame, the keeper and the shot to where it crossed the line) and the goal face seen from behind the taker."""
+    t = _t(theme)
+    teams = team_names(feed.get("info"))
+    names = player_names(feed.get("info"))
+    a = next(x for x in feed["actions"] if x["event_id"] == event_id)
+    shot = a.get("shot") or {}
+    o = _outcome(a)
+    bx, by = pitch.clamp(a["start_x"], a["start_y"])
+    ex, ey = pitch.clamp(a["end_x"], a["end_y"])
+    dist = math.hypot(pitch.LENGTH - bx, pitch.MID_Y - by)
+    x0 = max(min(bx - 6, pitch.LENGTH - 30), 0)
+    span = pitch.LENGTH + pitch.PAD + 1 - x0
+    cy = (by + pitch.MID_Y) / 2
+    fig = go.Figure()
+    top = {"xaxis": "x", "yaxis": "y"}
+    for shape in pitch.pitch_shapes(t):
+        fig.add_shape(shape)
+    defenders = wall(a)
+    wall_ids = {p["player_id"] for p in defenders}
+    other = "away" if a["team"] == "home" else "home"
+    rows = []
+    for p in a.get("freeze_frame") or []:
+        x, y = p["location"]
+        if x < x0 - 1:
+            continue
+        side = a["team"] if p["teammate"] else other
+        rows.append((p, x, y, side))
+    for side in (a["team"], other):
+        mine = [r for r in rows if r[3] == side and not r[0].get("actor")]
+        fig.add_trace(go.Scatter(x=[r[1] for r in mine], y=[r[2] for r in mine], mode="markers+text", text=[pitch.shirt(r[0]["player_id"]) for r in mine], name=teams[side],
+                                 textfont={"color": t["number"], "size": 10}, hovertext=[names.get(r[0]["player_id"], r[0]["player_id"]) + (" (GK)" if r[0].get("keeper") else "")
+                                                                                       + (", in the wall" if r[0]["player_id"] in wall_ids else "") for r in mine], hoverinfo="text",
+                                 marker={"size": 18, "color": t[side], "symbol": ["square" if r[0].get("keeper") else "circle" for r in mine],
+                                         "opacity": 1.0 if side == other else 0.55, "line": {"color": t["paper"], "width": 1}}, **top))
+    if defenders:
+        fig.add_trace(go.Scatter(x=[p["location"][0] for p in defenders], y=[p["location"][1] for p in defenders], mode="markers", name="wall", hoverinfo="skip",
+                                 marker={"size": 28, "color": "rgba(0,0,0,0)", "line": {"color": t["text"], "width": 2, "dash": "dot"}}, **top))
+    r = 9.15
+    fig.add_shape(type="circle", x0=bx - r, x1=bx + r, y0=by - r, y1=by + r, line={"color": t["muted"], "width": 1, "dash": "dot"}, layer="below")
+    fig.add_trace(go.Scatter(x=[bx, ex], y=[by, ey], mode="lines+markers", name="shot", hoverinfo="skip", line={"color": OUTCOMES[o][1], "width": 4},
+                             marker={"symbol": ["circle", "arrow"], "size": [1, 16], "angleref": "previous", "color": OUTCOMES[o][1]}, **top))
+    fig.add_trace(go.Scatter(x=[bx], y=[by], mode="markers", name="kick spot", hovertext=[f"{_who(a)}, {dist:.0f} m from goal"], hoverinfo="text",
+                             marker={"size": 13, "color": t["ball"], "line": {"color": t["actor"], "width": 3}}, **top))
+    fig.add_annotation(x=bx, y=by, text=f"<b>{dist:.0f} m</b> to goal", showarrow=True, arrowhead=0, ax=-40, ay=-26, arrowcolor=t["actor"],
+                       font={"color": t["actor"], "size": 13}, bgcolor=t["paper"])
+    fig.add_annotation(x=x0 + 1, y=cy - span * 0.48 + 1, xanchor="left", yanchor="bottom", showarrow=False, font={"color": t["muted"], "size": 11},
+                       text=(f"Wall: {len(defenders)} (dotted rings)" if defenders else "No wall in the freeze frame") + ". Dotted circle: 9.15 m")
+    bh, bz = _goal_face(fig, a, t, "x2", "y2")
+    s = a.get("score", {"home": 0, "away": 0})
+    fig.update_layout(
+        title_text=_title(f"{a.get('minute_label', '')}  {teams['home']} {s['home']}-{s['away']} {teams['away']}",
+                          f"Direct free kick: {teams[a['team']]} {_who(a)}, {dist:.0f} m out, xG {shot.get('xg', 0):.2f}, {_lower(OUTCOMES[o][0])}. "
+                          "Left: from above; right: the goal seen from behind the taker"),
+        xaxis={"domain": [0, 0.5], "range": [x0, x0 + span], "visible": False, "fixedrange": True, "constrain": "domain"},
+        yaxis={"domain": [0, 1], "range": [cy - span * 0.48, cy + span * 0.48], "visible": False, "fixedrange": True, "scaleanchor": "x", "scaleratio": 1, "constrain": "domain"},
+        xaxis2={"domain": [0.53, 1], "range": [-6, 6], "visible": False, "fixedrange": True, "constrain": "domain"},
+        yaxis2={"domain": [0.2, 0.8], "range": [-0.6, 3.6], "visible": False, "fixedrange": True, "scaleanchor": "x2", "scaleratio": 1, "constrain": "domain"},
+        paper_bgcolor=t["paper"], plot_bgcolor=t["paper"], font={"family": t["font"], "color": t["text"], "size": 13}, showlegend=False, hovermode="closest",
+        margin={"l": 10, "r": 10, "t": 72, "b": 10}, title={"x": 0.02, "xanchor": "left", "font": {"size": 17}},
+        meta={"distance_m": round(dist, 1), "wall_ids": sorted(wall_ids), "ball_h": round(bh, 2), "ball_z": bz})
+    if width:
+        fig.update_layout(width=width, height=round(width * 0.5) + 82)
     return fig
 
 

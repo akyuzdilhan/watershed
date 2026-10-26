@@ -31,11 +31,15 @@ KINDS = [
     {"value": "momentum", "label": "Momentum and win probability"},
     {"value": "buildups", "label": "Goal and big-chance build-ups"},
     {"value": "setpieces", "label": "Corners and free kicks"},
-    {"value": "direct", "label": "Penalties and direct free kicks"},
+    {"value": "penalties", "label": "Penalties"},
+    {"value": "freekicks", "label": "Direct free kicks"},
     {"value": "tactics", "label": "Tactical details"},
 ]
+DIRECT_KINDS = {"penalties": {"shot_penalty"}, "freekicks": {"shot_freekick"}, "direct": G.DIRECT}
+EMPTY = {"penalties": "No penalty in this match.", "freekicks": "No direct free kick in this match."}
 STATUS = {"proposed": "Writing", "pending": "Pending", "approved": "On air", "rejected": "Rejected", "superseded": "Superseded", "candidate": "Candidate"}
 STATUS_CLASS = {"proposed": "st-proposed", "pending": "st-pending", "approved": "st-approved", "rejected": "st-rejected", "superseded": "st-retracted", "candidate": "st-proposed"}
+NONE_ITEM = "none"  # the picker's only, disabled, option when a kind has no item
 PRODUCER_ONLY_FACTS = frozenset({  # never on air, never in the read-only view: the offside margin, and the counts, league-wide rates, ratios and bits behind a rarity
     "margin_m", "frame_margin_m", "one_in", "surprisal_bits", "history_count", "history_opportunities", "history_per_season", "runner_up_surprisal_bits", "times_rarer_than_runner_up"})
 PRODUCER_ONLY_NOTE = "Offside margins and the counts, rates and bits behind a rarity are shown to the signed-in producer only."
@@ -194,9 +198,10 @@ def graphic_items(feed: dict, kind: str) -> list[dict]:
         out = [{"value": f"map:{s}", "label": f"All {teams[s]} deliveries"} for s in ("home", "away")]
         return out + [{"value": f"sp:{a['event_id']}", "label": f"{a.get('minute_label', '')} {teams[a['team']]} {pitch.ACTION_LABELS.get(a['action_type'], a['action_type'])}, {G._who(a)}"}
                       for a in feed["actions"] if a["action_type"] in G.SET_PIECES]
-    if kind == "direct":
-        return [{"value": a["event_id"], "label": f"{a.get('minute_label', '')} {teams[a['team']]} {'penalty' if a['action_type'] == 'shot_penalty' else 'free kick'}, {G._who(a)}"}
-                for a in feed["actions"] if a["action_type"] in G.DIRECT]
+    if kind in DIRECT_KINDS:  # "direct", both together, is kept for callers that still ask for it
+        return [{"value": a["event_id"], "label": f"{a.get('minute_label', '')} {teams[a['team']]} {'penalty' if a['action_type'] == 'shot_penalty' else 'free kick'}, {G._who(a)}"
+                 + (f", xG {a['shot']['xg']:.2f}, {G._lower(G.OUTCOMES[G._outcome(a)][0])}" if a.get("shot") else "")}
+                for a in feed["actions"] if a["action_type"] in DIRECT_KINDS[kind]]
     if kind == "tactics":
         out = [{"value": "lines", "label": "Defensive line height over time"}, {"value": "press", "label": "Opponents near the ball over time"}]
         breaks = sorted(T.line_breaks(feed["actions"], 4), key=lambda r: (-r["bypassed"], r["seq"]))[:8]
@@ -220,13 +225,15 @@ def graphic_figure(feed: dict, kind: str, item: str | None, timeline: list[dict]
         minutes = int(item.partition(":")[2]) if item and item.startswith("slice:") and item.partition(":")[2].isdigit() else 5
         return _sized(G.momentum_figure(feed, timeline, THEME, minutes=minutes, width=None), 520)
     if not item:
-        return empty_figure("Nothing of this kind in the match so far.")
+        return empty_figure(EMPTY.get(kind, "Nothing of this kind in the match so far."))
     if kind == "buildups":
         return _sized(G.buildup_figure(feed, item, THEME, None))
     if kind == "setpieces":
         tag, _, rest = item.partition(":")
         return _sized(G.set_pieces_map(feed, rest, THEME, None) if tag == "map" else G.set_piece_figure(feed, rest, THEME, None), 640)
-    if kind == "direct":
+    if kind in DIRECT_KINDS:
+        if next(a for a in feed["actions"] if a["event_id"] == item)["action_type"] == "shot_freekick":
+            return _sized(G.freekick_figure(feed, item, THEME, None), 480)
         return _sized(G.shot_on_goal_figure(feed, item, THEME, None), 360)
     if kind == "tactics":
         tag, _, rest = item.partition(":")
@@ -249,6 +256,8 @@ NOTES = {
     "momentum": "Threat added: value of where completed passes and carries ended minus where they started (value = xG of a shot from there). Pick the bar width above; the thick lines average about 15 minutes. Win probability from the desk's match state.",
     "buildups": "The possession behind the goal or chance (last 10 actions), numbered in order and told in words under the pitch: solid arrows passes, dashed carries, dotted curves crosses, the thick arrow the shot in its outcome's colour. The star is where the ball was won, filled gold for a high regain in the opponent's half. Arrow width: threat added; the shot's: xG.",
     "setpieces": "Delivery width: value of the landing point. One corner or free kick plays in three steps: Play runs them, the slider under the pitch jumps to one (1 Delivery, 2 First contact, 3 What followed).",
+    "penalties": "Seen from behind the taker: where the ball crossed the line, and the box where the keeper stood in the frame.",
+    "freekicks": "From above: the kick spot and its distance to goal, the wall (defenders within 11 m on the line to goal, from the freeze frame), the keeper and the shot. On the right the goal seen from behind the taker.",
     "direct": "Seen from behind the taker. The box shows where the keeper stood in the frame.",
     "tactics": "Measured on the 360 freeze frames (synthetic positions, rounded to 0.1 m).",
 }
@@ -280,8 +289,8 @@ def graphics(match_id: str | None, kind: str | None, item: str | None, view: str
     if feed is None or not feed["actions"]:
         return [], None, empty_figure("No feed for this match: set REPLAY_DIR, or put feed.jsonl.gz in the desk folder."), "", None
     state = store.state(match_id) or {}
-    options = graphic_items(feed, kind)
-    values = [o["value"] for o in options]
+    options = graphic_items(feed, kind) or [{"value": NONE_ITEM, "label": EMPTY.get(kind, "Nothing of this kind yet").rstrip("."), "disabled": True}]
+    values = [o["value"] for o in options if not o.get("disabled")]
     picked = item if item in values else (values[-1] if kind in ("buildups",) and values else values[0] if values else None)
     sig = _sig(match_id, kind, picked, feed["last_seq"], state.get("last_seq") if kind == "momentum" else None, read_only)
     if sig == last_sig:

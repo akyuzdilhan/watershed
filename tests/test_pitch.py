@@ -288,6 +288,22 @@ def test_penalty_and_direct_free_kick_views():
     assert "Penalty" in fig.layout.title.text
     fk = next(a for a in feed["actions"] if a["action_type"] == "shot_freekick")
     assert "Free kick" in graphics.shot_on_goal_figure(feed, fk["event_id"]).layout.title.text
+    fig = graphics.freekick_figure(feed, fk["event_id"])  # from above and the goal face
+    assert fig.layout.meta["distance_m"] == pytest.approx(math.hypot(pitch.LENGTH - fk["start_x"], pitch.MID_Y - fk["start_y"]), abs=0.1)
+    assert {t.xaxis for t in fig.data} == {"x", "x2"} and fig.layout.xaxis2.domain[0] > fig.layout.xaxis.domain[1]
+    assert "Direct free kick" in fig.layout.title.text and " m out, xG " in fig.layout.title.text
+
+
+def test_direct_free_kick_finds_the_wall_in_the_frame(demo_feed):
+    fk = next(a for a in demo_feed["actions"] if a["action_type"] == "shot_freekick")
+    fig = graphics.freekick_figure(demo_feed, fk["event_id"])
+    assert fig.layout.meta["wall_ids"] == [] and any("No wall in the freeze frame" in (a.text or "") for a in fig.layout.annotations)  # the generator plants no wall
+    assert any(a.text.startswith("<b>25 m</b>") for a in fig.layout.annotations)
+    shot = next(t for t in fig.data if t.name == "shot")
+    assert (shot.x[-1], shot.y[-1]) == (fk["end_x"], fk["end_y"]) and shot.line.color == graphics.OUTCOMES["post"][1]
+    planted = dict(fk, freeze_frame=fk["freeze_frame"] + [{"player_id": f"away-{n}", "teammate": False, "actor": False, "keeper": False, "location": [89.0, 31.0 + (n - 20) * 0.6]}
+                                                           for n in (20, 21, 22)] + [{"player_id": "away-23", "teammate": False, "actor": False, "keeper": False, "location": [70.0, 30.0]}])
+    assert sorted(p["player_id"] for p in graphics.wall(planted)) == ["away-20", "away-21", "away-22"]  # in front, on the line to goal, within 11 m; not the one behind the ball
 
 
 def test_tactical_figures_show_the_measured_numbers(demo_feed):
