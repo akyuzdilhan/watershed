@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from web.matchfeed import build, load
-from worker.analysis import (ANALYST_EXAMPLE, ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, defenders_taken_out, dry_analyst, feed_actions, fill_note, note_scores,
+from worker.analysis import (ANALYST_EXAMPLE, ANALYST_INSTRUCTIONS, HOW, NOTES, AnalystDesk, AnalystWriter, analyse_async, analysis_facts, analysis_feedback, compare, move_tempo, defenders_taken_out, dry_analyst, feed_actions, fill_note, note_scores,
                              parse_analysis, template_analysis, verify_analysis)
 from worker.desk import Desk
 from worker.pipeline import MemorySink, Pipeline
@@ -54,7 +54,7 @@ def test_every_goal_of_the_demo_has_its_facts_each_with_a_meaning(feed):
 
 
 def test_defenders_taken_out_stay_credible_on_the_demo_goals(feed):
-    taken = {c["minute_label"]: analysis_facts(feed, c)[0].get("best_pass_defenders_taken_out") for c in goal_cards(feed)}
+    taken = {c["minute_label"]: analysis_facts(feed, c)[0].get("key_pass_defenders_taken_out") for c in goal_cards(feed)}
     assert taken == {"14'": 2, "31'": 2, "52'": 3, "57'": 3, "63'": 2, "66'": 3, "69'": 2, "83'": 4, "88'": 3}
 
 
@@ -69,9 +69,10 @@ def test_a_short_pass_takes_nobody_out():
 
 def test_the_52nd_minute_goal_is_measured_on_the_move(feed):
     facts, _ = facts_at(feed, "52'")
-    assert (facts["team"], facts["opponent"], facts["regain_how"], facts["regain_zone"], facts["high_regain"]) == ("Varleigh", "Yarnford", "tackle", "own_third", False)
-    assert (facts["regain_from_own_goal_m"], facts["passes_in_move"], facts["move_duration_s"], facts["best_pass_defenders_taken_out"]) == (19, 5, 12, 3)
-    assert facts["opponent_line_moved"] == "deeper" and facts["team_threat_trend"] == "up" and facts["team_threat_share_shift_pts"] >= 15
+    assert (facts["team"], facts["opponent"], facts["regain_how"], facts["high_regain"], facts["move_tempo"]) == ("Varleigh", "Yarnford", "tackle", False, "quick counter")
+    assert (facts["shooter_name"], facts["ball_winner_name"], facts["key_passer_name"], facts["key_pass_receiver_name"]) == ("Marijn Scarpetta", "Brett Rivero", "Paul Dunleavy", "Joseph Żuchowicz")
+    assert (facts["regain_from_own_goal_m"], facts["passes_in_move"], facts["move_duration_s"], facts["key_pass_defenders_taken_out"]) == (19, 5, 12, 3)
+    assert (facts["line_vs_average"], facts["threat_share_reading"], facts["threat_trend"], facts["space_vs_typical"]) == ("deeper than usual", "in control", "rising", "more room than usual")
 
 
 def test_only_the_actions_before_the_shot_count(feed):
@@ -116,12 +117,12 @@ def test_the_notes_are_the_strongest_facts_in_the_same_order_in_every_language(f
     assert keys == ["threat_up", "counter"]
     for lang in LANGS:
         assert [sorted(c["source_field"] for c in l["claims"]) for l in texts[lang]] == [
-            ["team_threat_share_before_shot_pct", "team_threat_share_earlier_pct"], ["move_duration_s", "passes_in_move", "regain_from_own_goal_m"]]
+            ["team_threat_share_before_shot_pct", "team_threat_share_earlier_pct"], ["move_duration_s", "regain_from_own_goal_m"]]
     assert "63%" in texts["en"][0]["line"] and "63 %" in texts["fr"][0]["line"] and "28%" in texts["es"][0]["line"]
 
 
 def test_french_and_spanish_decimals_use_a_comma():
-    facts = {"shooter": "Ari Holt", "shooter_space_m": 6.1, "typical_space_m": 2.3, "home_team": "Varleigh", "away_team": "Yarnford"}
+    facts = {"shooter_name": "Ari Holt", "shooter_space_m": 6.1, "typical_space_m": 2.3, "space_vs_typical": "more room than usual", "home_team": "Varleigh", "away_team": "Yarnford"}
     lines = {lang: template_analysis(facts, [lang], count=1)[lang][0]["line"] for lang in LANGS}
     assert "6.1 m" in lines["en"] and "6,1 m" in lines["fr"] and "6,1 m" in lines["es"]
     assert all(verify_analysis({lang: template_analysis(facts, [lang], count=2)[lang]}, [lang], facts)["languages"][lang]["count_ok"] is False for lang in LANGS)
@@ -129,14 +130,18 @@ def test_french_and_spanish_decimals_use_a_comma():
 
 def test_every_note_verifies_in_every_language_when_its_facts_are_there(feed):
     facts, _ = facts_at(feed, "52'")
-    facts = facts | {"high_regain": True, "shooter_space_m": 6.1, "typical_space_m": 2.3, "opponent_line_moved": "higher", "opponent_line_gap_m": 4}
-    cases = [(key, how) for key in NOTES for how in (HOW["en"] if key in ("high_regain", "counter", "build_up", "quick") else ["tackle"])]
+    facts = facts | {"high_regain": True, "shooter_space_m": 6.1, "typical_space_m": 2.3, "opponent_line_gap_m": 4, "ball_winner_name": "Otto Meyer"}
+    readings = {"line_higher": {"line_vs_average": "higher than usual"}, "line_deeper": {"line_vs_average": "deeper than usual", "opponent_line_before_shot_m": 18},
+                "threat_down": {"threat_share_reading": "under the cosh", "threat_trend": "falling", "team_threat_share_before_shot_pct": 20},
+                "direct": {"move_tempo": "direct move"}, "build_up": {"move_tempo": "patient build-up"}, "high_regain": {"move_tempo": "direct move"}}
+    cases = [(key, how) for key in NOTES for how in (HOW["en"] if key in ("high_regain", "counter", "build_up", "quick", "direct") else ["tackle"])]
     for key, how in cases:
+        mine = facts | readings.get(key, {}) | {"regain_how": how}
         for lang in LANGS:
-            note = fill_note(NOTES[key][lang], facts | {"regain_how": how, "regain_player": "Otto Meyer"}, lang)
+            note, xg = fill_note(NOTES[key][lang], mine, lang), fill_note(NOTES["xg"][lang], mine, lang)
             assert note is not None, (key, how, lang)
-            report = verify_analysis({lang: [{"line": note[0], "claims": note[1]}] * 2}, [lang], facts | {"regain_player": "Otto Meyer"})
-            assert report["verified"], (key, how, lang, report["lines"][0])
+            report = verify_analysis({lang: [{"line": note[0], "claims": note[1]}, {"line": xg[0], "claims": xg[1]}]}, [lang], mine)
+            assert report["verified"], (key, how, lang, report["lines"][0], report["languages"])
 
 
 def good(feed):
@@ -165,7 +170,7 @@ def good(feed):
     ("en", "Varleigh's line played higher (34 m, 31 m).", [{"value": 34, "source_field": "regain_from_own_goal_m"}], "data_dump"),
     ("en", "Varleigh had space against a 2.8 m match median.", [{"value": 2.8, "source_field": "typical_space_m"}], "field_word"),
     ("en", "Varleigh's recent line was deep.", [], "field_word"),
-    ("en", "Varleigh's line moved, change 3.", [{"value": 3, "source_field": "best_pass_defenders_taken_out"}], "field_word"),
+    ("en", "Varleigh's line moved, change 3.", [{"value": 3, "source_field": "key_pass_defenders_taken_out"}], "field_word"),
     ("en", "Varleigh's opponent_line_before_shot_m was low.", [], "field_word"),
     ("fr", "Varleigh avait de l'espace, contre une médiane faible.", [], "field_word"),
     ("en", "Varleigh won it 19 m out, then 5 passes in 12 s.", [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 5, "source_field": "passes_in_move"},
@@ -201,7 +206,9 @@ def test_the_instructions_name_the_on_air_rules():
     from worker.writer import WRITER_INSTRUCTIONS
 
     for rule in ("At most 2 numbers in a sentence", "Never write the minute", "Never the words median, médiane, mediana, recent", "Never numbers in brackets",
-                 "There is no minute field"):
+                 "There is no minute field", "never judge a number yourself", "move_tempo: quick counter, direct move or patient build-up",
+                 "space_vs_typical", "line_vs_average", "threat_share_reading", "Only shooter_name shoots", "only when move_tempo is quick counter",
+                 "no space before it in English", "At most 3 sentences and 60 words per language"):
         assert rule in ANALYST_INSTRUCTIONS, rule
     for lang in ("fr", "es"):  # the Writer's rule on clubs, word for word
         line = next(l for l in WRITER_INSTRUCTIONS.splitlines() if l.startswith(f"- {lang}:"))
@@ -269,7 +276,7 @@ def test_the_example_of_the_instructions_passes_the_verifier_on_the_real_facts(f
     report = verify_analysis(ANALYST_EXAMPLE, LANGS, facts)
     assert report["verified"], [e for e in report["lines"] if not e["verified"]]
     assert all(len(re.findall(r"[.!?](?:\s|$)", l["line"])) <= 2 for lines in ANALYST_EXAMPLE.values() for l in lines)
-    assert all(sum(len(re.findall(r"[.!?](?:\s|$)", l["line"])) for l in lines) == 3 for lines in ANALYST_EXAMPLE.values())
+    assert all(sum(len(re.findall(r"[.!?](?:\s|$)", l["line"])) for l in lines) <= 3 for lines in ANALYST_EXAMPLE.values())
 
 
 def test_the_retry_carries_every_problem_and_what_the_rule_means(feed):
@@ -335,7 +342,7 @@ def test_every_goal_and_the_save_get_verified_notes_and_the_red_card_none(demo):
     for c in cards:
         if "analysis" in c:
             a = c["analysis"]
-            assert a["verified"] and a["writer"] == "template" and a["card_version"] == c["version"] and a["facts_version"] == 3
+            assert a["verified"] and a["writer"] == "template" and a["card_version"] == c["version"] and a["facts_version"] == 4
             assert sorted(a["texts"]) == sorted(LANGS) and a["machine_translated"] == ["es"] and set(a["facts"]) == set(a["field_meanings"])
 
 
@@ -488,3 +495,51 @@ def test_the_console_detail_shows_the_analyst_notes(demo):
     card = next(c for c in sink.cards.values() if c["minute_label"] == "52'")
     assert TITLE in texts_of(console.detail(card, [], read_only=True, lang="en"))
     assert TITLE not in texts_of(console.detail({k: v for k, v in card.items() if k != "analysis"}, [], read_only=True, lang="en"))
+
+
+# --- what the numbers mean ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("minute,line,claims,rule", [
+    ("31'", "Dominic Carter had 2.7 m of space, bigger than the usual 2.8 m.", [("shooter_space_m", 2.7), ("typical_space_m", 2.8)], "direction"),
+    ("31'", "Dominic Carter had 2.7 m of space. That was bigger than usual at 2.8 m.", [("shooter_space_m", 2.7), ("typical_space_m", 2.8)], "direction"),
+    ("52'", "Yarnford's last defender sat 22 m from goal, higher than the 25 m they usually hold.", [("opponent_line_before_shot_m", 22), ("opponent_line_usual_m", 25)], "direction"),
+    ("31'", "Yarnford had 20% of the threat in the last ten minutes, carrying the advantage.", [("team_threat_share_before_shot_pct", 20)], "threat_reading"),
+    ("52'", "Varleigh had 63% of the threat in the last ten minutes, against the run of play.", [("team_threat_share_before_shot_pct", 63)], "threat_reading"),
+    ("52'", "Joseph Żuchowicz finished the move for Varleigh.", [], "role"),
+    ("52'", "Brett Rivero won the ball and Rivero scored.", [], "role"),
+    ("83'", "A quick move from Varleigh.", [], "tempo"),
+    ("83'", "Varleigh, rapides vers l'avant.", [], "tempo"),
+    ("52'", "Varleigh had 63 % of the threat in the last ten minutes.", [("team_threat_share_before_shot_pct", 63)], "percent_space"),
+])
+def test_the_verifier_refuses_a_wrong_reading(feed, minute, line, claims, rule):
+    facts, _ = facts_at(feed, minute)
+    lang = "fr" if "rapides" in line else "en"
+    texts = template_analysis(facts, LANGS)
+    texts[lang] = [texts[lang][0], {"line": line, "claims": [{"value": v, "source_field": f} for f, v in claims]}]
+    report = verify_analysis(texts, LANGS, facts)
+    bad = [e for e in report["lines"] if not e["verified"]]
+    assert not report["verified"] and len(bad) == 1 and rule in {i["rule"] for i in bad[0]["style_errors"]}, bad
+
+
+def test_a_reading_that_follows_the_numbers_passes(feed):
+    facts, _ = facts_at(feed, "31'")
+    texts = template_analysis(facts, LANGS)
+    texts["en"] = [texts["en"][0], {"line": "Dominic Carter had 2.7 m of space, less than the usual 2.8 m, and still found the corner.",
+                                    "claims": [{"value": 2.7, "source_field": "shooter_space_m"}, {"value": 2.8, "source_field": "typical_space_m"}]}]
+    assert verify_analysis(texts, LANGS, facts)["verified"]
+    assert facts["space_vs_typical"] == "about usual" and facts["threat_share_reading"] == "under the cosh" and facts["move_tempo"] == "quick counter"
+
+
+def test_at_most_three_sentences_and_sixty_words_per_language(feed):
+    facts, texts = good(feed)
+    long = {"line": "Varleigh kept going. They pressed. They pushed.", "claims": []}
+    report = verify_analysis({**texts, "en": texts["en"] + [long]}, LANGS, facts)
+    assert not report["verified"] and report["languages"]["en"]["length_ok"] is False and report["languages"]["fr"]["length_ok"]
+    assert "en: too long" in " ".join(analysis_feedback(report))
+
+
+def test_the_readings_are_computed_in_code():
+    assert [move_tempo(12, 5), move_tempo(15, 7), move_tempo(39, 9), move_tempo(40, 3)] == ["quick counter", "direct move", "direct move", "patient build-up"]
+    words = ("more", "less", "same")
+    assert [compare(3.3, 2.8, words, ratio=0.15), compare(3.2, 2.8, words, ratio=0.15), compare(2.3, 2.8, words, ratio=0.15)] == ["more", "same", "less"]
+    assert [compare(28, 25, words, margin=3), compare(27, 25, words, margin=3), compare(22, 25, words, margin=3)] == ["more", "same", "less"]

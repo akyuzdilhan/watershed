@@ -24,12 +24,13 @@ from worker.writer import (EM_DASH, LANGUAGES, WRITER_INSTRUCTIONS, MACHINE_TRAN
 
 log = logging.getLogger(__name__)
 
-FACTS_VERSION = 3  # 3: no minute, no field named after a median or a window; 2: defenders taken out goal-side at the pass, behind the receiver at reception
+FACTS_VERSION = 4  # 4: readings computed in code (move_tempo, space_vs_typical, line_vs_average, threat_share_reading, threat_trend), roles named; 3: no minute, no field named after a median or a window; 2: defenders taken out goal-side at the pass, behind the receiver at reception
 ANALYSIS_MOMENTS = ("goal", "chance", "save")
-PATIENT_S = 25  # a move this long is build-up, a shorter one a quick break
+QUICK_S, QUICK_PASSES, PATIENT_S = 15, 6, 40  # move_tempo: a quick counter, a patient build-up, else a direct move
+SPACE_BAND, LINE_BAND_M, TREND_BAND_PTS = 0.15, 3, 10  # the bands of space_vs_typical, line_vs_average and threat_trend
 MIN_PROGRESS_M = 10.0  # a pass that gains less ground takes nobody out
+DEEP_REGAIN_X = 35.0  # won in the own third: a counter from deep
 HIGH_REGAIN_X = 65.0  # won within 40 m of the opponent's goal: a high regain
-DEEP_REGAIN_X = 35.0  # won in the own third
 LINE_WINDOW_S, THREAT_WINDOW_S = 300, 600
 MIN_LINES, MAX_LINES, LINE_MAX_WORDS = 2, 3, 45
 CARRIES = ("dribble", "take_on")
@@ -68,6 +69,19 @@ def defenders_taken_out(pass_action: dict, reception: dict) -> list[str]:
     return sorted(p["player_id"] for p in T.opponents(reception) if p["player_id"] in goal_side and p["location"][0] < rx)
 
 
+def move_tempo(duration_s: float, passes: int) -> str:
+    if duration_s <= QUICK_S and passes <= QUICK_PASSES:
+        return "quick counter"
+    return "patient build-up" if duration_s >= PATIENT_S else "direct move"
+
+
+def compare(a: float, b: float, words: tuple[str, str, str], ratio: float | None = None, margin: float | None = None) -> str:
+    """words[0] when `a` is above `b` by more than `ratio` (relative) or by `margin` or more (absolute), words[1] when below, else words[2]."""
+    if ratio is not None:
+        return words[0] if a > b * (1 + ratio) else words[1] if a < b * (1 - ratio) else words[2]
+    return words[0] if a - b >= margin else words[1] if b - a >= margin else words[2]
+
+
 def _shares(actions: list[dict], side: str, start: float, end: float) -> int | None:
     """The `side` share (%) of the threat both teams created between `start` and `end` (match clock, s): completed passes and carries, forward value only."""
     mine = other = 0.0
@@ -97,35 +111,36 @@ def analysis_facts(feed: list[dict], card: dict, teams: dict[str, str] | None = 
     team, opponent = names[side], names[opp]
     regain_x = T.actor_location(first)[0]
     how = _regain_how(feed, first)
+    duration = round(shot["clock_s"] - first["clock_s"])
+    passes = sum(1 for a in move[:-1] if a.get("action_type") in T.PASS_TYPES)
     facts: dict[str, Any] = {"moment": card["moment"], "team": team, "opponent": opponent,
-                             "home_team": names["home"], "away_team": names["away"], "shooter": shot["player"]["name"],
+                             "home_team": names["home"], "away_team": names["away"], "shooter_name": shot["player"]["name"],
                              "xg_pct": round(100 * shot["shot"]["xg"]) if shot.get("shot") else None,
-                             "regain_how": how, "regain_player": first["player"]["name"], "regain_from_own_goal_m": round(regain_x),
-                             "regain_to_opponent_goal_m": round(T.LENGTH - regain_x),
-                             "regain_zone": "own_third" if regain_x < DEEP_REGAIN_X else "final_third" if regain_x >= 70 else "middle_third",
-                             "high_regain": regain_x >= HIGH_REGAIN_X,
-                             "passes_in_move": sum(1 for a in move[:-1] if a.get("action_type") in T.PASS_TYPES),
-                             "carries_in_move": sum(1 for a in move[:-1] if a.get("action_type") in CARRIES),
-                             "players_in_move": len({a["player"]["id"] for a in move}), "move_duration_s": round(shot["clock_s"] - first["clock_s"])}
+                             "regain_how": how, "ball_winner_name": first["player"]["name"], "regain_from_own_goal_m": round(regain_x),
+                             "regain_to_opponent_goal_m": round(T.LENGTH - regain_x), "high_regain": regain_x >= HIGH_REGAIN_X,
+                             "passes_in_move": passes, "carries_in_move": sum(1 for a in move[:-1] if a.get("action_type") in CARRIES),
+                             "players_in_move": len({a["player"]["id"] for a in move}), "move_duration_s": duration, "move_tempo": move_tempo(duration, passes)}
     meanings = {"moment": "what the card is about: goal, chance (a shot that missed) or save (a shot the keeper stopped)",
                 "team": "the attacking team, whose possession ended in the shot", "opponent": "the defending team", "home_team": "home club of the match",
-                "away_team": "away club of the match", "shooter": "player who took the shot", "xg_pct": "chance the shot had of being a goal (expected goals), in %",
+                "away_team": "away club of the match", "shooter_name": "the player who took the shot: the only player who may shoot, finish or score in a note",
+                "xg_pct": "chance the shot had of being a goal (expected goals), in %",
                 "regain_how": "how the attacking team won the ball at the start of the possession: tackle, interception, keeper (a catch), a restart (throw_in, goal_kick, free_kick, corner, penalty), clearance (picked up after an opponent's clearance), misplaced_pass (an opponent's pass that went astray) or loose_ball",
-                "regain_player": "player of the attacking team who won the ball, or took the restart",
+                "ball_winner_name": "the player of the attacking team who won the ball, or took the restart, at the start of the move",
                 "regain_from_own_goal_m": "distance in metres from the attacking team's own goal line to where the ball was won",
                 "regain_to_opponent_goal_m": "distance in metres from where the ball was won to the opponent's goal line",
-                "regain_zone": "third of the pitch where the ball was won, from the attacking team's side: own_third, middle_third or final_third",
                 "high_regain": "true when the ball was won within 40 m of the opponent's goal",
                 "passes_in_move": "passes the attacking team played from winning the ball to the shot", "carries_in_move": "carries and take-ons in the same possession",
                 "players_in_move": "players of the attacking team who touched the ball in the possession, the shooter included",
-                "move_duration_s": "seconds from winning the ball to the shot"}
+                "move_duration_s": "seconds from winning the ball to the shot",
+                "move_tempo": "what kind of move it was, computed from its seconds and passes: quick counter (15 s or less, 6 passes or fewer), patient build-up (40 s or more) or direct move; only a quick counter may be called quick, rapid or a counter"}
     breaks = [(len(defenders_taken_out(a, b)), math.hypot(a["end_x"] - a["start_x"], a["end_y"] - a["start_y"]), a, b) for a, b in T.receptions(move)]
     breaks = [t for t in breaks if t[0] > 0]
     if breaks:
         n, length, a, b = max(breaks, key=lambda t: (t[0], t[1]))
-        facts |= {"best_pass_defenders_taken_out": n, "best_pass_passer": a["player"]["name"], "best_pass_receiver": b["player"]["name"], "best_pass_length_m": round(length)}
-        meanings |= {"best_pass_defenders_taken_out": "most outfield opponents one pass of the move took out: goal-side of the ball when it was played, behind the receiver when it arrived; only passes gaining 10 m or more",
-                     "best_pass_passer": "player who played that pass", "best_pass_receiver": "player who received it", "best_pass_length_m": "length of that pass in metres"}
+        facts |= {"key_pass_defenders_taken_out": n, "key_passer_name": a["player"]["name"], "key_pass_receiver_name": b["player"]["name"], "key_pass_length_m": round(length)}
+        meanings |= {"key_pass_defenders_taken_out": "most outfield opponents one pass of the move took out: goal-side of the ball when it was played, behind the receiver when it arrived; only passes gaining 10 m or more",
+                     "key_passer_name": "the player who played that key pass (not the shooter, unless the names are the same)",
+                     "key_pass_receiver_name": "the player who received the key pass", "key_pass_length_m": "length of the key pass in metres"}
     spaces = T.space_at_reception(before + [shot])
     shooter_id = shot["player"]["id"]
     mine = [s for s in spaces if s["event_id"] == shot_id or (s["receiver_id"] == shooter_id and s["event_id"] in {a["event_id"] for a in move})]
@@ -134,25 +149,30 @@ def analysis_facts(feed: list[dict], card: dict, teams: dict[str, str] | None = 
         meanings["shooter_space_m"] = "distance in metres from the shooter to the nearest opponent (keeper included) when the ball reached him in this move"
         if spaces:
             facts["typical_space_m"] = round(statistics.median(s["space_m"] for s in spaces), 1)
-            meanings["typical_space_m"] = "the space a player usually had when receiving the ball in this match so far, both teams (half the receptions had less): say \"far more than usual\", never name how it is computed"
+            facts["space_vs_typical"] = compare(facts["shooter_space_m"], facts["typical_space_m"], ratio=SPACE_BAND, words=("more room than usual", "less room than usual", "about usual"))
+            meanings["typical_space_m"] = "the space a player usually had when receiving the ball in this match so far, both teams (half the receptions had less)"
+            meanings["space_vs_typical"] = "the shooter's space against the usual one, computed: more room than usual, less room than usual or about usual (within 15%); say it this way, never the other way round"
     heights = [r for r in T.line_heights(before) if r["in_possession"] == side]
     recent = [r[opp] for r in heights if shot["clock_s"] - LINE_WINDOW_S <= r["clock_s"] < shot["clock_s"]]
     if recent and len(heights) > len(recent):
         last, usual = round(statistics.median(recent)), round(statistics.median(r[opp] for r in heights))
         facts |= {"opponent_line_before_shot_m": last, "opponent_line_usual_m": usual, "opponent_line_gap_m": abs(last - usual),
-                  "opponent_line_moved": "higher" if last > usual else "deeper" if last < usual else "same"}
+                  "line_vs_average": compare(last, usual, margin=LINE_BAND_M, words=("higher than usual", "deeper than usual", "as usual"))}
         meanings |= {"opponent_line_before_shot_m": "how far in metres the defending team's last outfield defender usually stood from its own goal line while the attacking team had the ball, in the 5 minutes before the shot",
                      "opponent_line_usual_m": "the same over the whole match so far, \"on average\"", "opponent_line_gap_m": "difference between the two, in metres",
-                     "opponent_line_moved": "how the defending team's line sat in the 5 minutes before the shot against the rest of the match: higher, deeper or same"}
+                     "line_vs_average": "how the defending team's line sat before the shot against its average, computed: higher than usual, deeper than usual or as usual (within 3 m)"}
     t = shot["clock_s"]
     last_share = _shares(before, side, t - THREAT_WINDOW_S, t)
     prev_share = _shares(before, side, t - 2 * THREAT_WINDOW_S, t - THREAT_WINDOW_S)
     if last_share is not None and prev_share is not None and t >= 2 * THREAT_WINDOW_S:
-        facts |= {"team_threat_share_before_shot_pct": last_share, "team_threat_share_earlier_pct": prev_share,
-                  "team_threat_share_shift_pts": abs(last_share - prev_share), "team_threat_trend": "up" if last_share > prev_share else "down" if last_share < prev_share else "level"}
+        facts |= {"team_threat_share_before_shot_pct": last_share, "team_threat_share_earlier_pct": prev_share, "team_threat_share_shift_pts": abs(last_share - prev_share),
+                  "threat_share_reading": "in control" if last_share >= 55 else "under the cosh" if last_share <= 45 else "even",
+                  "threat_trend": compare(last_share, prev_share, margin=TREND_BAND_PTS - 0.5, words=("rising", "falling", "steady"))}
         meanings |= {"team_threat_share_before_shot_pct": "attacking team's share of the threat both teams created in the ten minutes before the shot (say \"in the last ten minutes\", in words), in %; threat is the gain in shot value (xG of a shot from there) of completed passes and carries",
                      "team_threat_share_earlier_pct": "the same share in the ten minutes before that, in %",
-                     "team_threat_share_shift_pts": "difference between the two shares, in percentage points", "team_threat_trend": "direction of that change for the attacking team: up, down or level"}
+                     "team_threat_share_shift_pts": "difference between the two shares, in percentage points",
+                     "threat_share_reading": "what that share means, computed: in control (55% or more), even (between 45% and 55%) or under the cosh (45% or less); a team under the cosh never had the advantage",
+                     "threat_trend": "how the share moved from the ten minutes before, computed: rising or falling (by 10 points or more) or steady"}
     facts = {k: v for k, v in facts.items() if v is not None}
     return facts, {k: v for k, v in meanings.items() if k in facts}
 
@@ -162,80 +182,89 @@ def analysis_facts(feed: list[dict], card: dict, teams: dict[str, str] | None = 
 # (numbers claimed) or derived words: {how} (how the ball was won, naming who won it), {de_*} (French "de" before a name).
 
 HOW = {
-    "en": {"tackle": "{regain_player}'s tackle", "interception": "{regain_player}'s interception", "keeper": "{regain_player}'s catch",
-           "throw_in": "a throw-in by {regain_player}", "goal_kick": "a goal kick by {regain_player}", "free_kick": "a free kick by {regain_player}",
-           "corner": "a corner by {regain_player}", "penalty": "a penalty by {regain_player}", "clearance": "{regain_player} picking up a cleared ball",
-           "misplaced_pass": "{regain_player} picking up a stray pass", "loose_ball": "{regain_player} picking up a loose ball"},
-    "fr": {"tackle": "le tacle {de_regain_player}", "interception": "l'interception {de_regain_player}", "keeper": "la prise de balle {de_regain_player}",
-           "throw_in": "une touche {de_regain_player}", "goal_kick": "un six mètres {de_regain_player}", "free_kick": "un coup franc {de_regain_player}",
-           "corner": "un corner {de_regain_player}", "penalty": "un penalty {de_regain_player}", "clearance": "un ballon repoussé, récupéré par {regain_player}",
-           "misplaced_pass": "une passe adverse ratée, récupérée par {regain_player}", "loose_ball": "un ballon qui traîne, récupéré par {regain_player}"},
-    "es": {"tackle": "la entrada de {regain_player}", "interception": "la intercepción de {regain_player}", "keeper": "un balón atrapado por {regain_player}",
-           "throw_in": "un saque de banda de {regain_player}", "goal_kick": "un saque de puerta de {regain_player}", "free_kick": "una falta sacada por {regain_player}",
-           "corner": "un córner de {regain_player}", "penalty": "un penalti de {regain_player}", "clearance": "un despeje rival recogido por {regain_player}",
-           "misplaced_pass": "un pase rival errado, recogido por {regain_player}", "loose_ball": "un balón suelto recogido por {regain_player}"},
+    "en": {"tackle": "{ball_winner_name}'s tackle", "interception": "{ball_winner_name}'s interception", "keeper": "{ball_winner_name}'s catch",
+           "throw_in": "a throw-in by {ball_winner_name}", "goal_kick": "a goal kick by {ball_winner_name}", "free_kick": "a free kick by {ball_winner_name}",
+           "corner": "a corner by {ball_winner_name}", "penalty": "a penalty by {ball_winner_name}", "clearance": "{ball_winner_name} picking up a cleared ball",
+           "misplaced_pass": "{ball_winner_name} picking up a stray pass", "loose_ball": "{ball_winner_name} picking up a loose ball"},
+    "fr": {"tackle": "le tacle {de_ball_winner_name}", "interception": "l'interception {de_ball_winner_name}", "keeper": "la prise de balle {de_ball_winner_name}",
+           "throw_in": "une touche {de_ball_winner_name}", "goal_kick": "un six mètres {de_ball_winner_name}", "free_kick": "un coup franc {de_ball_winner_name}",
+           "corner": "un corner {de_ball_winner_name}", "penalty": "un penalty {de_ball_winner_name}", "clearance": "un ballon repoussé, récupéré par {ball_winner_name}",
+           "misplaced_pass": "une passe adverse ratée, récupérée par {ball_winner_name}", "loose_ball": "un ballon qui traîne, récupéré par {ball_winner_name}"},
+    "es": {"tackle": "la entrada de {ball_winner_name}", "interception": "la intercepción de {ball_winner_name}", "keeper": "un balón atrapado por {ball_winner_name}",
+           "throw_in": "un saque de banda de {ball_winner_name}", "goal_kick": "un saque de puerta de {ball_winner_name}", "free_kick": "una falta sacada por {ball_winner_name}",
+           "corner": "un córner de {ball_winner_name}", "penalty": "un penalti de {ball_winner_name}", "clearance": "un despeje rival recogido por {ball_winner_name}",
+           "misplaced_pass": "un pase rival errado, recogido por {ball_winner_name}", "loose_ball": "un balón suelto recogido por {ball_winner_name}"},
 }
 
-NOTES = {  # pundit sentences: at most 2 numbers in each (analysis_issues), and what the fact means for the game
-    "high_regain": {"en": "{team} won it high: {how}, just {regain_to_opponent_goal_m} m from goal. The shot came {move_duration_s} s later, before the defence could reset.",
-                    "fr": "{team} récupère haut : {how}, à {regain_to_opponent_goal_m} m du but adverse. Le tir part {move_duration_s} s plus tard, avant que la défense ne se replace.",
-                    "es": "El {team} recupera arriba: {how}, a {regain_to_opponent_goal_m} m de la portería rival. El tiro llega {move_duration_s} s después, antes de que la defensa se reorganice."},
-    "counter": {"en": "It started deep, with {how} {regain_from_own_goal_m} m from the {team} goal. From there it took {move_duration_s} s and {passes_in_move} passes to get the shot away, a proper counter.",
-                "fr": "Tout part de loin, avec {how} à {regain_from_own_goal_m} m de son propre but. Il ne faut ensuite que {move_duration_s} s et {passes_in_move} passes pour frapper : un vrai contre.",
-                "es": "Todo empieza atrás, con {how} a {regain_from_own_goal_m} m de su propia portería. Luego bastan {move_duration_s} s y {passes_in_move} pases para rematar: un contragolpe de manual."},
-    "build_up": {"en": "It began with {how}, {regain_from_own_goal_m} m from the {team} goal. They then kept the ball for {move_duration_s} s and {passes_in_move} passes before the shot, patient build-up.",
-                 "fr": "Tout commence par {how}, à {regain_from_own_goal_m} m de son propre but. {team} garde ensuite le ballon {move_duration_s} s et {passes_in_move} passes avant de frapper : une construction patiente.",
-                 "es": "Todo empieza con {how}, a {regain_from_own_goal_m} m de su propia portería. Después el {team} guarda el balón {move_duration_s} s y {passes_in_move} pases antes de rematar: una construcción paciente."},
-    "quick": {"en": "It began with {how}, {regain_from_own_goal_m} m from the {team} goal. Just {move_duration_s} s and {passes_in_move} passes later the shot was away, before the defence had settled.",
-              "fr": "Tout commence par {how}, à {regain_from_own_goal_m} m de son propre but. {move_duration_s} s et {passes_in_move} passes plus tard, le tir part, avant que la défense ne soit en place.",
-              "es": "Todo empieza con {how}, a {regain_from_own_goal_m} m de su propia portería. Solo {move_duration_s} s y {passes_in_move} pases después llega el tiro, antes de que la defensa se coloque."},
-    "line_break": {"en": "{best_pass_passer}'s pass took {best_pass_defenders_taken_out} {opponent} defenders out of the game and found {best_pass_receiver}. That is the ball that opened them up.",
-                   "fr": "La passe {de_best_pass_passer} élimine d'un coup {best_pass_defenders_taken_out} défenseurs adverses et trouve {best_pass_receiver}. C'est le ballon qui ouvre la défense.",
-                   "es": "El pase de {best_pass_passer} deja atrás a {best_pass_defenders_taken_out} defensores del {opponent} y encuentra a {best_pass_receiver}. Es el balón que abre la defensa."},
-    "space": {"en": "{shooter} had {shooter_space_m} m of space when the ball arrived, far more than anyone usually gets in this match. Nobody was close enough to block.",
-              "fr": "{shooter} reçoit avec {shooter_space_m} m d'espace, bien plus que d'habitude dans ce match. Personne n'est assez près pour contrer.",
-              "es": "{shooter} recibe con {shooter_space_m} m de espacio, mucho más de lo habitual en este partido. Nadie llega a tiempo para tapar el tiro."},
-    "line_higher": {"en": "{opponent} had pushed their back line up in the minutes before the shot. Their last defender sat {opponent_line_before_shot_m} m from goal against {opponent_line_usual_m} m on average, leaving space in behind.",
-                    "fr": "{opponent} avait remonté sa ligne dans les minutes avant le tir. Son dernier défenseur était à {opponent_line_before_shot_m} m de son but, contre {opponent_line_usual_m} m en moyenne : de l'espace dans le dos.",
-                    "es": "El {opponent} había adelantado su línea en los minutos previos al tiro. Su último defensor estaba a {opponent_line_before_shot_m} m de su portería, frente a {opponent_line_usual_m} m de media: espacio a la espalda."},
-    "line_deeper": {"en": "{opponent} had dropped deep in the minutes before the shot. Their last defender sat {opponent_line_before_shot_m} m from goal against {opponent_line_usual_m} m on average, inviting pressure they could not hold.",
-                    "fr": "{opponent} avait reculé dans les minutes avant le tir. Son dernier défenseur était à {opponent_line_before_shot_m} m de son but, contre {opponent_line_usual_m} m en moyenne, et la pression a fini par payer.",
-                    "es": "El {opponent} se había hundido en los minutos previos al tiro. Su último defensor estaba a {opponent_line_before_shot_m} m de su portería, frente a {opponent_line_usual_m} m de media, y la presión acabó pagando."},
-    "threat_up": {"en": "{team} had taken over in the last ten minutes, creating {team_threat_share_before_shot_pct}% of the threat. Before that they had only {team_threat_share_earlier_pct}%, so this had been coming.",
-                  "fr": "{team} avait pris l'ascendant sur les dix dernières minutes, avec {team_threat_share_before_shot_pct} % de la menace. Avant, seulement {team_threat_share_earlier_pct} % : ce but se préparait.",
-                  "es": "El {team} se había adueñado del partido en los últimos diez minutos, con el {team_threat_share_before_shot_pct}% de la amenaza. Antes solo tenía el {team_threat_share_earlier_pct}%: este gol se veía venir."},
-    "threat_down": {"en": "Against the run of play: {team} had only {team_threat_share_before_shot_pct}% of the threat in the last ten minutes. They had {team_threat_share_earlier_pct}% before that, and one attack was enough.",
-                    "fr": "Contre le cours du jeu : {team} n'avait que {team_threat_share_before_shot_pct} % de la menace sur les dix dernières minutes. Avant, {team_threat_share_earlier_pct} %, et une seule attaque a suffi.",
-                    "es": "Contra la corriente del partido: el {team} solo tenía el {team_threat_share_before_shot_pct}% de la amenaza en los últimos diez minutos. Antes tenía el {team_threat_share_earlier_pct}%, y bastó un ataque."},
-    "move": {"en": "A move of {passes_in_move} passes in {move_duration_s} s. It ended in a {xg_pct}% chance (expected goals).",
-             "fr": "Une action de {passes_in_move} passes en {move_duration_s} s. Elle se conclut sur une occasion à {xg_pct} % de but (expected goals).",
-             "es": "Una jugada de {passes_in_move} pases en {move_duration_s} s. Termina en una ocasión del {xg_pct}% de gol esperado."},
-    "xg": {"en": "{shooter}'s shot was a {xg_pct}% chance (expected goals).", "fr": "Le tir {de_shooter} était une occasion à {xg_pct} % de but (expected goals).",
-           "es": "El tiro de {shooter} era una ocasión del {xg_pct}% de gol esperado."},
+NOTES = {  # one sentence each, at most 2 numbers, the reading computed in code (move_tempo, space_vs_typical, line_vs_average, threat_share_reading, threat_trend)
+    "high_regain": {"en": "{team} won it high, {how} just {regain_to_opponent_goal_m} m from goal, and the shot came {move_duration_s} s later before the defence could reset.",
+                    "fr": "{team} récupère haut, avec {how} à {regain_to_opponent_goal_m} m du but adverse, et le tir part {move_duration_s} s plus tard, avant que la défense ne se replace.",
+                    "es": "El {team} recupera arriba, con {how} a {regain_to_opponent_goal_m} m de la portería rival, y el tiro llega {move_duration_s} s después, antes de que la defensa se reorganice."},
+    "counter": {"en": "A quick counter from deep: {how} {regain_from_own_goal_m} m from the {team} goal, and {move_duration_s} s later the shot was away.",
+                "fr": "Un contre éclair parti de loin : {how} à {regain_from_own_goal_m} m de son propre but, et {move_duration_s} s plus tard le tir est parti.",
+                "es": "Un contragolpe rápido desde atrás: {how} a {regain_from_own_goal_m} m de su propia portería, y {move_duration_s} s después llega el tiro."},
+    "quick": {"en": "A quick counter: {how} {regain_to_opponent_goal_m} m from goal, and {move_duration_s} s later the shot was away.",
+              "fr": "Un contre éclair : {how} à {regain_to_opponent_goal_m} m du but adverse, et {move_duration_s} s plus tard le tir est parti.",
+              "es": "Un contragolpe rápido: {how} a {regain_to_opponent_goal_m} m de la portería rival, y {move_duration_s} s después llega el tiro."},
+    "direct": {"en": "It began with {how} {regain_from_own_goal_m} m from the {team} goal, and a direct move took {move_duration_s} s to reach the shot.",
+               "fr": "Tout commence par {how} à {regain_from_own_goal_m} m de son propre but, et une action directe mène au tir en {move_duration_s} s.",
+               "es": "Todo empieza con {how} a {regain_from_own_goal_m} m de su propia portería, y una jugada directa llega al tiro en {move_duration_s} s."},
+    "build_up": {"en": "{team} built patiently, keeping the ball for {move_duration_s} s and {passes_in_move} passes before the shot.",
+                 "fr": "{team} construit patiemment, en gardant le ballon {move_duration_s} s et {passes_in_move} passes avant le tir.",
+                 "es": "El {team} construye con paciencia, con el balón durante {move_duration_s} s y {passes_in_move} pases antes del tiro."},
+    "line_break": {"en": "{key_passer_name}'s pass took {key_pass_defenders_taken_out} {opponent} defenders out of the game and found {key_pass_receiver_name}, the ball that opened them up.",
+                   "fr": "La passe {de_key_passer_name} élimine d'un coup {key_pass_defenders_taken_out} défenseurs adverses et trouve {key_pass_receiver_name} : c'est le ballon qui ouvre la défense.",
+                   "es": "El pase de {key_passer_name} deja atrás a {key_pass_defenders_taken_out} defensores del {opponent} y encuentra a {key_pass_receiver_name}: es el balón que abre la defensa."},
+    "space": {"en": "{shooter_name} had {shooter_space_m} m of space when the ball arrived, more room than usual in this match, and nobody was close enough to block.",
+              "fr": "{shooter_name} reçoit avec {shooter_space_m} m d'espace, plus que d'habitude dans ce match, et personne n'est assez près pour contrer.",
+              "es": "{shooter_name} recibe con {shooter_space_m} m de espacio, más de lo habitual en este partido, y nadie llega a tiempo para tapar el tiro."},
+    "line_higher": {"en": "{opponent} had pushed their back line up before the shot, their last defender {opponent_line_before_shot_m} m from goal against {opponent_line_usual_m} m on average, leaving space in behind.",
+                    "fr": "{opponent} avait remonté sa ligne avant le tir, son dernier défenseur à {opponent_line_before_shot_m} m de son but contre {opponent_line_usual_m} m en moyenne, et l'espace était dans le dos.",
+                    "es": "El {opponent} había adelantado su línea antes del tiro, con su último defensor a {opponent_line_before_shot_m} m de su portería frente a {opponent_line_usual_m} m de media, y dejó espacio a la espalda."},
+    "line_deeper": {"en": "{opponent} had dropped deep before the shot, their last defender {opponent_line_before_shot_m} m from goal against {opponent_line_usual_m} m on average, and the pressure told.",
+                    "fr": "{opponent} avait reculé avant le tir, son dernier défenseur à {opponent_line_before_shot_m} m de son but contre {opponent_line_usual_m} m en moyenne, et la pression a fini par payer.",
+                    "es": "El {opponent} se había hundido antes del tiro, con su último defensor a {opponent_line_before_shot_m} m de su portería frente a {opponent_line_usual_m} m de media, y la presión acabó pagando."},
+    "threat_up": {"en": "{team} were in control in the last ten minutes, with {team_threat_share_before_shot_pct}% of the threat after {team_threat_share_earlier_pct}% before, so this had been coming.",
+                  "fr": "{team} avait la main sur les dix dernières minutes, avec {team_threat_share_before_shot_pct} % de la menace après {team_threat_share_earlier_pct} % auparavant : ce but se préparait.",
+                  "es": "El {team} mandaba en los últimos diez minutos, con el {team_threat_share_before_shot_pct}% de la amenaza tras el {team_threat_share_earlier_pct}% anterior: este gol se veía venir."},
+    "threat_down": {"en": "Against the run of play: {team} had only {team_threat_share_before_shot_pct}% of the threat in the last ten minutes, after {team_threat_share_earlier_pct}% before.",
+                    "fr": "Contre le cours du jeu : {team} n'avait que {team_threat_share_before_shot_pct} % de la menace sur les dix dernières minutes, après {team_threat_share_earlier_pct} % auparavant.",
+                    "es": "Contra la corriente del partido: el {team} solo tenía el {team_threat_share_before_shot_pct}% de la amenaza en los últimos diez minutos, tras el {team_threat_share_earlier_pct}% anterior."},
+    "move": {"en": "A move of {passes_in_move} passes, finished from a {xg_pct}% chance (expected goals).",
+             "fr": "Une action de {passes_in_move} passes, conclue sur une occasion à {xg_pct} % de but (expected goals).",
+             "es": "Una jugada de {passes_in_move} pases, cerrada con una ocasión del {xg_pct}% de gol esperado."},
+    "xg": {"en": "{shooter_name}'s shot was a {xg_pct}% chance (expected goals).", "fr": "Le tir {de_shooter_name} était une occasion à {xg_pct} % de but (expected goals).",
+           "es": "El tiro de {shooter_name} era una ocasión del {xg_pct}% de gol esperado."},
 }
 NOTES = {key: {lang: fr_typography(v) if lang == "fr" else v for lang, v in by_lang.items()} for key, by_lang in NOTES.items()}
 HOW["fr"] = fr_typography(HOW["fr"])
 
 
 def note_scores(facts: dict) -> list[tuple[int, str]]:
-    """(score, note key) of every note true for the facts, strongest first; ties keep the order of NOTES."""
+    """(score, note key) of every note true for the facts, strongest first; ties keep the order of NOTES. Each note follows the reading computed in code."""
     f = facts.get
     out = []
+    tempo = f("move_tempo")
     if f("regain_how") in HOW["en"] and f("passes_in_move", 0) >= 2:
-        if f("high_regain") and f("regain_how") in WON_BY_PLAYER + ("misplaced_pass", "loose_ball"):
+        if f("high_regain") and f("regain_how") in WON_BY_PLAYER + ("misplaced_pass", "loose_ball") and tempo != "patient build-up":
             out.append((90, "high_regain"))
-        elif f("regain_from_own_goal_m", 99) < DEEP_REGAIN_X and f("move_duration_s", 99) <= 20:
-            out.append((75, "counter"))
+        elif tempo == "quick counter":
+            out.append((75, "counter") if f("regain_from_own_goal_m", 99) < DEEP_REGAIN_X else (60, "quick"))
+        elif tempo == "patient build-up":
+            out.append((45, "build_up"))
         else:
-            out.append((40, "build_up") if f("move_duration_s", 0) >= PATIENT_S else (45, "quick"))
-    if f("best_pass_defenders_taken_out", 0) >= 3:
-        out.append((45 + 10 * facts["best_pass_defenders_taken_out"], "line_break"))
-    if f("shooter_space_m", 0) >= 3 and f("typical_space_m") and facts["shooter_space_m"] >= 2 * facts["typical_space_m"]:
+            out.append((40, "direct"))
+    if f("key_pass_defenders_taken_out", 0) >= 3:
+        out.append((45 + 10 * facts["key_pass_defenders_taken_out"], "line_break"))
+    if f("shooter_space_m", 0) >= 3 and f("space_vs_typical") == "more room than usual":
         out.append((round(55 + 3 * facts["shooter_space_m"]), "space"))
-    if f("opponent_line_gap_m", 0) >= 4 and f("opponent_line_moved") in ("higher", "deeper"):
-        out.append((45 + 3 * facts["opponent_line_gap_m"], f"line_{facts['opponent_line_moved']}"))
-    if f("team_threat_share_shift_pts", 0) >= 15 and f("team_threat_trend") in ("up", "down"):
-        out.append((45 + facts["team_threat_share_shift_pts"], f"threat_{facts['team_threat_trend']}"))
+    if f("opponent_line_gap_m", 0) >= 4 and f("line_vs_average") in ("higher than usual", "deeper than usual"):
+        out.append((45 + 3 * facts["opponent_line_gap_m"], "line_higher" if facts["line_vs_average"] == "higher than usual" else "line_deeper"))
+    if f("team_threat_share_shift_pts", 0) >= 15:
+        if f("threat_share_reading") == "in control" and f("threat_trend") == "rising":
+            out.append((45 + facts["team_threat_share_shift_pts"], "threat_up"))
+        elif f("threat_share_reading") == "under the cosh" and f("threat_trend") == "falling":
+            out.append((45 + facts["team_threat_share_shift_pts"], "threat_down"))
     if f("passes_in_move", 0) >= 2 and "xg_pct" in facts:
         out.append((20, "move"))
     if "xg_pct" in facts:
@@ -320,6 +349,52 @@ def analysis_issues(line: str, lang: str) -> list[dict]:
     return found
 
 
+MORE_WORDS = {"en": r"(?i)\b(?:above|more|bigger|larger|higher|greater|over|up from)\b", "fr": r"(?i)\b(?:plus|au-dessus|supérieure?s?)\b",
+              "es": r"(?i)\b(?:más|por encima|mayor(?:es)?|superior(?:es)?)\b"}
+LESS_WORDS = {"en": r"(?i)\b(?:below|less|smaller|lower|deeper|fewer|under|down from)\b", "fr": r"(?i)\b(?:moins|en dessous|en deçà|inférieure?s?)\b",
+              "es": r"(?i)\b(?:menos|por debajo|menor(?:es)?|inferior(?:es)?)\b"}
+PAIRS = (("shooter_space_m", "typical_space_m"), ("opponent_line_before_shot_m", "opponent_line_usual_m"), ("team_threat_share_before_shot_pct", "team_threat_share_earlier_pct"))
+CONTROL_WORDS = {"en": r"(?i)\b(?:in control|on top|dominat\w*|the advantage|took over|taken over|in charge|controll\w*)\b",
+                 "fr": r"(?i)(?:\bla main\b|\bl['’]ascendant\b|\bdomin\w*|\bmaîtris\w*|\bcontrôl\w*)", "es": r"(?i)\b(?:mandaba|mandar|domin\w*|control\w*|adueñ\w*|el mando)\b"}
+RUN_OF_PLAY_WORDS = {"en": r"(?i)\b(?:run of play|under the cosh|pinned back|on the back foot)\b", "fr": r"(?i)\b(?:cours du jeu|subissait|dos au mur)\b",
+                     "es": r"(?i)\b(?:corriente del partido|sufría|encerrad\w*)\b"}
+FINISH_WORDS = {"en": r"(?i)\b(?:finish(?:es|ed|ing)?|shoot(?:s|ing)?|scor(?:e|es|ed|ing)|strik(?:e|es|ing)|struck|slot(?:s|ted)?|fired)\b",
+                "fr": r"(?i)\b(?:frapp(?:e|er|é|ait)|tir(?:e|er|é)|marqu(?:e|er|é)|conclu(?:t|re))\b", "es": r"(?i)\b(?:remat(?:a|ar|ó|e)|dispar(?:a|ar|ó)|marc(?:a|ar|ó)|defin(?:e|ir|ió))\b"}
+TEMPO_WORDS = {"en": r"(?i)\b(?:quick|quickly|rapid|fast|counter|counters|counter-attack\w*|counterattack\w*|breakaway)\b",
+               "fr": r"(?i)\b(?:rapides?|rapidement|vite|éclair|contre-attaques?|(?:un|en|le|du|vrai|ce) contre)\b",
+               "es": r"(?i)\b(?:rápid[oa]s?|rápidamente|contragolpes?|contraataques?|a la contra)\b"}
+MAX_SENTENCES, MAX_WORDS = 3, 60  # per language, all notes together
+
+
+def meaning_issues(line: str, lang: str, claims: list[dict], facts: dict) -> list[dict]:
+    """What the numbers mean, against the readings computed in code: a comparison that goes the wrong way (more space when the shooter had less), a team under the cosh told in control or the reverse, a player other than the shooter who finishes, a quick move that was not a quick counter, a space before % in English."""
+    found = []
+    claimed = {c["source_field"]: float(c["value"]) for c in claims}
+    for s in re.split(r"(?<=[.!?])\s+", line):
+        values = {v for v, _ in numbers_in(s)}
+        more, less = bool(re.search(MORE_WORDS[lang], s)), bool(re.search(LESS_WORDS[lang], s))
+        for first, second in PAIRS:
+            if first not in facts or second not in facts or not any(f in claimed and claimed[f] in values for f in (first, second)) or not (more or less):
+                continue
+            a, b = float(facts[first]), float(facts[second])
+            if (a > b and less and not more) or (a < b and more and not less) or a == b:
+                found.append({"rule": "direction", "text": s})
+        if "team_threat_share_before_shot_pct" in claimed and claimed["team_threat_share_before_shot_pct"] in values:
+            reading = facts.get("threat_share_reading")
+            if (reading == "under the cosh" and re.search(CONTROL_WORDS[lang], s)) or (reading == "in control" and re.search(RUN_OF_PLAY_WORDS[lang], s)):
+                found.append({"rule": "threat_reading", "text": s})
+        if re.search(FINISH_WORDS[lang], s):
+            shooter = str(facts.get("shooter_name", ""))
+            others = {str(facts[k]) for k in ("ball_winner_name", "key_passer_name", "key_pass_receiver_name") if facts.get(k) and facts[k] != shooter}
+            if any(re.search(rf"\b{re.escape(n)}\b", s) or re.search(rf"\b{re.escape(n.split()[-1])}\b", s) and n.split()[-1] not in shooter.split() for n in others):
+                found.append({"rule": "role", "text": s})
+        if facts.get("move_tempo") != "quick counter" and re.search(TEMPO_WORDS[lang], s):
+            found.append({"rule": "tempo", "text": s})
+    if lang == "en" and re.search(r"\d[ \u00a0\u202f]%", line):
+        found.append({"rule": "percent_space", "text": line})
+    return found
+
+
 def parse_analysis(text: Any) -> tuple[dict, bool]:
     """`{lang: [line, ...]}` of a reply (a JSON object, or the object found in the text), em dashes normalised as for every model text."""
     obj, valid = text, True
@@ -344,14 +419,17 @@ def verify_analysis(texts: Any, languages: list[str], facts: dict) -> dict:
     report: dict[str, Any] = {"languages": {}, "lines": []}
     for lang in languages:
         lines = texts.get(lang) if isinstance(texts.get(lang), list) else []
-        report["languages"][lang] = {"count": len(lines), "count_ok": MIN_LINES <= len(lines) <= MAX_LINES}
+        body = " ".join(normalise(str(l.get("line", ""))) for l in lines if isinstance(l, dict))
+        n_sentences = len([x for x in re.split(r"(?<=[.!?])\s+", body.strip()) if x])
+        report["languages"][lang] = {"count": len(lines), "count_ok": MIN_LINES <= len(lines) <= MAX_LINES, "sentences": n_sentences, "words": word_count(body),
+                                     "length_ok": n_sentences <= MAX_SENTENCES and word_count(body) <= MAX_WORDS}
         for i, l in enumerate(lines):
             l = l if isinstance(l, dict) else {}
             line = normalise(str(l.get("line", "")))
             claims = l.get("claims") if isinstance(l.get("claims"), list) else []
             nums = check_numbers(line, claims, facts)
             errors, warnings = style_issues("", line, lang, nums["good"], facts)
-            errors += analysis_issues(line, lang)
+            errors += analysis_issues(line, lang) + meaning_issues(line, lang, nums["good"], facts)
             warnings = [w for w in warnings if w["rule"] != "too_long"]
             if word_count(line) > LINE_MAX_WORDS:
                 warnings.append({"rule": "too_long", "text": f"{word_count(line)} words"})
@@ -360,7 +438,7 @@ def verify_analysis(texts: Any, languages: list[str], facts: dict) -> dict:
                      "style_errors": errors, "style_warnings": warnings}
             entry["verified"] = entry["keys_ok"] and not any(entry[k] for k in ("bad_claims", "unclaimed_numbers", "wrong_unit", "unknown_names", "style_errors"))
             report["lines"].append(entry)
-    report["verified"] = all(v["count_ok"] for v in report["languages"].values()) and all(e["verified"] for e in report["lines"])
+    report["verified"] = all(v["count_ok"] and v["length_ok"] for v in report["languages"].values()) and all(e["verified"] for e in report["lines"])
     return report
 
 
@@ -368,6 +446,8 @@ def analysis_feedback(report: dict, json_valid: bool = True) -> list[str]:
     """What the Verifier rejected, one line per problem: the retry note and the trace."""
     lines = [] if json_valid else ["the reply was not one JSON object"]
     lines += [f"{lang}: 2 or 3 lines" for lang, v in report["languages"].items() if not v["count_ok"]]
+    lines += [f"{lang}: too long, {v['sentences']} sentences and {v['words']} words (at most {MAX_SENTENCES} and {MAX_WORDS})" for lang, v in report["languages"].items()
+              if not v.get("length_ok", True)]
     for e in report["lines"]:
         problems = [f"{k}: {e[k]}" for k in ("bad_claims", "unclaimed_numbers", "wrong_unit", "unknown_names") if e[k]] + [f"{i['rule']}: {i['text']}" for i in e["style_errors"]]
         if problems or not e["keys_ok"]:
@@ -389,6 +469,12 @@ RULE_HINTS = {  # what each refusal means, in the retry note
     "points_not_from_pts_field": "the word points only after a number from a field ending in _pts",
     "signed_number": "no + or - before a number: say up or down",
     "em_dash": "never the long dash",
+    "direction": "a comparison must follow the numbers: use space_vs_typical, line_vs_average and threat_trend as given, never the other way round",
+    "threat_reading": "follow threat_share_reading: a team under the cosh never had the advantage or control, a team in control was not against the run of play",
+    "role": "only shooter_name shoots, finishes or scores; ball_winner_name won the ball, key_passer_name played the key pass",
+    "tempo": "quick, rapid or counter only when move_tempo is quick counter; otherwise say direct move or patient build-up as move_tempo says",
+    "percent_space": "English: no space before % (63%)",
+    "too long": "at most 3 sentences and 60 words per language, all notes together",
     "forbidden_word": "never swing or momentum in French or Spanish",
     "probability_without_team": "French chance(s), Spanish probabilidad, opciones, posibilidades only in a sentence that names a club; say occasion, ocasión",
 }
@@ -410,43 +496,58 @@ def _writer_rule(lang: str) -> str:
 
 # A compliant reply for the 52' goal of the demo match, kept as data so that a test runs it through the Verifier against the real facts.
 ANALYST_EXAMPLE = {
-    "en": [{"line": "Varleigh had taken over in the last ten minutes, creating 63% of the threat.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]},
-           {"line": "It started deep, with Brett Rivero's tackle 19 m from his own goal. From there it took 12 s and 5 passes to get the shot away, a proper counter.",
-            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}, {"value": 5, "source_field": "passes_in_move"}]}],
-    "fr": [{"line": "Varleigh avait pris l'ascendant sur les dix dernières minutes, avec 63 % de la menace.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]},
-           {"line": "Tout part de loin, avec le tacle de Brett Rivero à 19 m de son propre but. Il ne faut ensuite que 12 s et 5 passes pour frapper : un vrai contre.",
-            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}, {"value": 5, "source_field": "passes_in_move"}]}],
-    "es": [{"line": "El Varleigh se había adueñado del partido en los últimos diez minutos, con el 63% de la amenaza.", "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}]},
-           {"line": "Todo empieza atrás, con la entrada de Brett Rivero a 19 m de su propia portería. Luego bastan 12 s y 5 pases para rematar: un contragolpe de manual.",
-            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}, {"value": 5, "source_field": "passes_in_move"}]}],
+    "en": [{"line": "Varleigh were in control in the last ten minutes, with 63% of the threat after 28% before, so this had been coming.",
+            "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}, {"value": 28, "source_field": "team_threat_share_earlier_pct"}]},
+           {"line": "A quick counter from deep: Brett Rivero's tackle 19 m from the Varleigh goal, and 12 s later the shot was away.",
+            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}]}],
+    "fr": [{"line": "Varleigh avait la main sur les dix dernières minutes, avec 63 % de la menace après 28 % auparavant : ce but se préparait.",
+            "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}, {"value": 28, "source_field": "team_threat_share_earlier_pct"}]},
+           {"line": "Un contre éclair parti de loin : le tacle de Brett Rivero à 19 m de son propre but, et 12 s plus tard le tir est parti.",
+            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}]}],
+    "es": [{"line": "El Varleigh mandaba en los últimos diez minutos, con el 63% de la amenaza tras el 28% anterior: este gol se veía venir.",
+            "claims": [{"value": 63, "source_field": "team_threat_share_before_shot_pct"}, {"value": 28, "source_field": "team_threat_share_earlier_pct"}]},
+           {"line": "Un contragolpe rápido desde atrás: la entrada de Brett Rivero a 19 m de su propia portería, y 12 s después llega el tiro.",
+            "claims": [{"value": 19, "source_field": "regain_from_own_goal_m"}, {"value": 12, "source_field": "move_duration_s"}]}],
 }
 
 ANALYST_INSTRUCTIONS = """You are the Analyst of a live football broadcast: for a goal or a big chance, you write 2 or 3 short tactical notes for the producer and the commentators, the way a TV pundit or a coach would explain the move. They are read in the control room, never voiced.
 
 Facts: call the get_analysis_facts tool with the card_id. Use ONLY those facts: where and how the ball was won, the passes and the time it took, the pass that took the most defenders out, the shooter's space, the defending team's line, the share of the threat before the shot. Never invent a statistic, a name or a fact; never name a person who is not in the facts. Leave out what is not in the facts.
 
-What to write: what is not obvious from the replay. Pick the 2 or 3 strongest facts. Each note is 1 or 2 full sentences, at most 40 words: say what happened, then why it matters for the game (a high regain caught the defence unset, a counter from deep, a pass that broke the lines, a defender left too far from the shooter, a line pushed up and caught behind, a team that had taken over or scored against the run of play).
+Readings: the code has already judged what the numbers mean. Use these facts as given, never judge a number yourself:
+- move_tempo: quick counter, direct move or patient build-up.
+- space_vs_typical: more room than usual, less room than usual or about usual.
+- line_vs_average: higher than usual, deeper than usual or as usual.
+- threat_share_reading: in control, even or under the cosh; threat_trend: rising, falling or steady.
+Roles: shooter_name took the shot; ball_winner_name won the ball; key_passer_name played the key pass to key_pass_receiver_name. Never swap them.
+
+What to write: what is not obvious from the replay. Pick the 2 or 3 strongest facts. Each note is one full sentence: say what happened and why it matters for the game (a high regain caught the defence unset, a quick counter, a pass that broke the lines, a shooter with more room than usual, a line pushed up and caught behind, a team in control or scoring against the run of play). At most 3 sentences and 60 words per language, all notes together.
 
 Rules. The Verifier refuses a note that breaks any of them, and one refused note sends all of them back:
-1. At most 2 numbers in a sentence. Every group of digits counts: metres, seconds, percentages, passes. "Went from 20 m to the Varleigh goal in 13 s using 5 passes" has 3 numbers and is refused; write "It started 20 m from the Varleigh goal. It took 13 s to reach the shot."
+1. At most 2 numbers in a sentence. Every group of digits counts: metres, seconds, percentages, passes. "Went from 20 m to the Varleigh goal in 13 s using 5 passes" has 3 numbers and is refused; write "It started 20 m from the Varleigh goal, and 13 s later the shot was away."
 2. Never write the minute ("at 52'", "à la 52'", "al 52'"): the console shows it. There is no minute field to claim.
-3. Never the words median, médiane, mediana, recent, "match median", "change 3", and never a field name or a word with an underscore. Say "far more than usual in this match", "against 26 m on average", "in the last ten minutes" (the windows in words, never as a number).
+3. Never the words median, médiane, mediana, recent, "match median", "change 3", and never a field name or a word with an underscore. Say "more room than usual in this match", "against 26 m on average", "in the last ten minutes" (the windows in words, never as a number).
 4. Never numbers in brackets, never a list of numbers: full sentences only.
-5. Every number in claims, with the field of get_analysis_facts it comes from and its exact value. Write each number as given, never compute a new one, no sign (never +30). Fields ending in _pct take a % sign; _m are metres ("6.1 m", French and Spanish "6,1 m"); _s are seconds; _pts are percentage points: the word points (puntos) right after the number, never with take, gain, win, earn, prendre, gagner, ganar, sumar.
-6. Never a count of matches, a rate across the league, a ratio ("3 times more") or bits. An offside is "by a whisker" ("d'un rien", "por muy poco") or "clear" ("net", "claro"), never a distance; no centimetres.
-7. Sentence case: a capital on the first word and on names from the facts only. Never the long dash (em dash).
-8. French: never "chance" or "chances" in a sentence that does not name a club (say "occasion"). Spanish: never "probabilidad", "opciones" or "posibilidades" in a sentence that does not name a club (say "ocasión").
-9. Clubs, as for the cards:
+5. Every number in claims, with the field of get_analysis_facts it comes from and its exact value. Write each number as given, never compute a new one, no sign (never +30). Fields ending in _pct take a % sign, with no space before it in English (63%); _m are metres ("6.1 m", French and Spanish "6,1 m"); _s are seconds; _pts are percentage points: the word points (puntos) right after the number, never with take, gain, win, earn, prendre, gagner, ganar, sumar.
+6. A comparison follows the readings: with less room than usual, never "more", "above", "bigger" (plus, au-dessus; más, por encima); with a line deeper than usual, never "higher"; a share that fell is never "up". A team under the cosh never "had the advantage", "took over" or "was in control" (la main, l'ascendant, domine; mandaba, domina, controla); a team in control never scored "against the run of play".
+7. Only shooter_name shoots, finishes, strikes or scores (frappe, tire, marque, conclut; remata, dispara, marca). A sentence with such a verb names no other player.
+8. Quick, rapid, fast or counter (rapide, éclair, contre-attaque, un contre; rápido, contragolpe, a la contra) only when move_tempo is quick counter.
+9. Never a count of matches, a rate across the league, a ratio ("3 times more") or bits. An offside is "by a whisker" ("d'un rien", "por muy poco") or "clear" ("net", "claro"), never a distance; no centimetres.
+10. Sentence case: a capital on the first word and on names from the facts only. Never the long dash (em dash). Plain English: "in their own half", never "in the own third".
+11. French: never "chance" or "chances" in a sentence that does not name a club (say "occasion"). Spanish: never "probabilidad", "opciones" or "posibilidades" in a sentence that does not name a club (say "ocasión").
+12. Clubs, as for the cards:
 <writer_rules>
 
 Bad and good:
 - bad: "Yarnford's line played higher (39 m recent, 26 m match, change 13)." (numbers in brackets, field words, no reason)
-- good: "Yarnford had pushed their back line up in the minutes before the shot. Their last defender sat 39 m from goal against 26 m on average, leaving space in behind."
-- bad: "Méndez had 4.2 m of space versus a 2.9 m match median." (field word, no reason)
-- good: "Méndez had 4.2 m of space when the ball arrived, far more than usual in this match. Nobody was close enough to block."
+- good: "Yarnford had pushed their back line up before the shot, their last defender 39 m from goal against 26 m on average, leaving space in behind."
+- bad: "Méndez had 1.4 m of space, well above the 2.8 m typical reception." (less room than usual told as more, field word)
+- good: "Méndez had 4.2 m of space when the ball arrived, more room than usual in this match, and nobody was close enough to block."
+- bad: "Varleigh had 33% of the threat, carrying the advantage." (33% is under the cosh)
+- bad: "Kosznik's pass released Carter to finish." when shooter_name is Méndez (only the shooter finishes)
 - bad (French): "Le Yarnford presse, et la défense du Varleigh recule." good: "Yarnford presse, et Varleigh recule."
 
-Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...], "es": [...]} with the requested languages, each a list of 2 or 3 notes {"line": string, "claims": [{"value": number, "source_field": string}]}. The same notes in every language, each written natively, not translated word for word. A compliant reply for a goal (Varleigh, ball won by Brett Rivero's tackle 19 m from his own goal, 5 passes in 12 s, 63% of the threat in the ten minutes before the shot):
+Output: reply with one JSON object only, no other text: {"en": [...], "fr": [...], "es": [...]} with the requested languages, each a list of 2 or 3 notes {"line": string, "claims": [{"value": number, "source_field": string}]}. The same notes in every language, each written natively, not translated word for word. A compliant reply for a goal (Varleigh, ball won by Brett Rivero's tackle 19 m from his own goal, move_tempo quick counter, the shot 12 s later; 63% of the threat in the ten minutes before the shot after 28% before, in control and rising):
 <example>
 """
 ANALYST_INSTRUCTIONS = ANALYST_INSTRUCTIONS.replace("<writer_rules>", "\n".join(_writer_rule(lang) for lang in ("fr", "es"))).replace(
