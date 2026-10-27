@@ -9,39 +9,18 @@ Every match tells a story no other match tells. Watershed finds it live and hand
 > - **Project page:** [Inside the Game on Innovation Studio](https://innovationstudio.microsoft.com/hackathons/insidethegamedeveloperhackathon/project/127119).
 > - **Run it locally:** Python 3.12, no Azure and no model call: [How to test, locally](#locally-no-azure-needed).
 
+| Judging criterion | Where to read |
+|---|---|
+| Technological implementation | [Architecture](#architecture), [Microsoft and Azure technologies](#microsoft-and-azure-technologies), [Synthetic data](#synthetic-data), [Cloud application best practices](#cloud-application-best-practices), [Tests](#tests) |
+| Agentic design and innovation | [Story, history and the commentary duo](#story-history-and-the-commentary-duo), [Agents and MCP](#agents-and-mcp-optional-local) |
+| Real-world impact | [Why it matters](#why-it-matters), [Enterprise readiness](#enterprise-readiness), [Responsible AI](#responsible-ai), [Limitations](#limitations) |
+| User experience | [How to test, online](#online-about-4-minutes-no-sign-in), [the demo video](https://www.youtube.com/watch?v=wLEoelBfVYU) |
+
 Every football match has its own story: the moments that turn it, and what it has that no other match had. Watershed finds that story as the match event feed arrives and gives it to the commentators while it still matters. Before kick-off it sets out the storyline: the table, the relegation stakes, form and head-to-head. During the match it measures how far each key moment moves the win probability to find the turning points, compares the match with 50 seasons of a fictional league history and tells what is rare in seasons ("the first four-goal haul by a substitute in 50 seasons"), and an Analyst agent on gpt-5-mini notes the tactical detail behind each goal from the 360 freeze frames (where the ball was won, how many defenders a pass took out). At the final whistle a recap agent writes the match report.
 
 Each key moment becomes a card (the on-screen graphic of a moment), written in English, French and Spanish by the Writer, an Agent Framework agent that calls gpt-5.4-nano on Microsoft Foundry, with a few suggested lines for two fictional commentators. Code checks every number against the data, a producer approves each card before it goes on air, and when the feed changes its mind (a VAR overturn, a goal credited to another player) the desk retracts or rewrites the card on air. Watershed works alongside human commentators: it writes text only, nothing is voiced.
 
 All match data is synthetic, produced by the match engine in this repository. No real match, club, player, footage or logo is used.
-
-## What exists today
-
-| Part | State | Where |
-|---|---|---|
-| Synthetic match engine, ground truth, Common Data Format export | Done, tested | `src/generator/` |
-| Win-probability model (Skellam, with expected added time) behind a replaceable interface | Done, tested | `src/winprob/` |
-| Worker: deduplication, reordering, match state, Spotter, card actions on corrections | Deployed in Azure Container Apps, scaled from zero by KEDA on the Service Bus subscription; tested offline | `src/worker/match.py`, `spotter.py`, `pipeline.py`, `azure_io.py` |
-| Writer agent (Agent Framework, gpt-5.4-nano on Microsoft Foundry), deterministic Verifier, approval desk with audit trail | Deployed; measured on the reference replay of 26/10 (below) | `src/worker/writer.py`, `desk.py` |
-| Recap at the final whistle: the recap agent (same model) writes it when its draft passes the Verifier, the template otherwise | Deployed; on the reference replay the template wrote it | `src/worker/recap.py` |
-| Desk data contract: cards, match state with the win-probability curve, insights, storyline, recap, audit trail, in Cosmos DB or in local JSON files | Done | `docs/contracts.md`, `src/worker/pipeline.py` (`JsonFileSink`, `match_state`) |
-| Infrastructure as code (azd and Bicep): Service Bus, Cosmos DB, Container Apps, Container Registry, Log Analytics, Application Insights, one managed identity per app, Easy Auth | Deployed; the Foundry project and its model deployment are created separately | `infra/` |
-| Demo replay as a Container Apps Job, and a reset of one match between two replays | Deployed | `infra/resources.bicep`, `src/generator/publish.py`, `src/worker/reset.py` |
-| Producer console and public overlay: read-only view without sign-in, producer actions behind Easy Auth (Microsoft Entra ID), per-IP rate limit | Deployed | [`src/web/`](src/web/) |
-| Traces of each draft and each model call in Application Insights (OpenTelemetry), without prompt or reply text | Deployed | [`src/worker/telemetry.py`](src/worker/telemetry.py) |
-| Evaluation against the hidden ground truth: 100 unscripted matches and the demo | Done | [`docs/evaluation.md`](docs/evaluation.md), `src/worker/evaluate.py` |
-| Producer feedback (thumbs, reasons, notes): stored, measured, exported; read back into the Writer prompt when `FEEDBACK_PROFILE` is set | Built; online it is stored and measured, not read back by the worker | [`src/worker/feedback.py`](src/worker/feedback.py), [`docs/notes/feedback.md`](docs/notes/feedback.md) |
-| Pitch figures from the 360 frames, including the 63' offside frame with the offside line | Built | [`src/web/pitch.py`](src/web/pitch.py), [`docs/img/`](docs/img/) |
-| CI (tests, Bicep build, both images built and their imports checked, secret scanning), Dependabot | Done | [`.github/`](.github/) |
-| Cost kill switch tied to the budget, which leaves the read-only web app up | Built and tested against fakes of the Azure API; not deployed | [`infra/killswitch/`](infra/killswitch/) |
-| Fictional league history: 50 seasons, 32 clubs with promotion and relegation, about 4,000 players with careers, 19,000 matches with scorers, substitutions and cards | Done, tested | [`src/league/history.py`](src/league/history.py), [`docs/notes/history.md`](docs/notes/history.md) |
-| Insight engine: facts that surface live (a substitute's hat-trick, a comeback, a half-time lead lost), ranked by how rare they are in the history, updated or withdrawn as the match goes on, and a stat of the match at full time; written from checked templates | Done, tested | [`src/worker/insights.py`](src/worker/insights.py), [`docs/notes/insights.md`](docs/notes/insights.md) |
-| Storyline: table, relegation stakes, form and head-to-head before kick-off; what the result changed after it | Done, tested | [`src/worker/storyline.py`](src/worker/storyline.py) |
-| Commentary duo: two fictional commentators, in three languages, with a per-match memory against repetition | Deployed: the model writes the lines with each card; templates write the lines on a VAR ruling | [`src/worker/duo.py`](src/worker/duo.py), [`docs/notes/duo.md`](docs/notes/duo.md) |
-| Agents and MCP: a read-only MCP server over the desk and the league history, the Writer reading its facts through it, and an optional commentary duo by two agents in an Agent Framework GroupChat | Built and tested offline with scripted models, behind options; not in the deployed image | [`src/worker/mcp_server.py`](src/worker/mcp_server.py), [`src/worker/duo_agents.py`](src/worker/duo_agents.py), [`docs/notes/agentic.md`](docs/notes/agentic.md) |
-| Match graphics (shot map, goal build-ups, animated set pieces, momentum) and tactical details from the 360 frames | Built | [`src/web/graphics.py`](src/web/graphics.py), [`src/worker/tactics.py`](src/worker/tactics.py) |
-
-**Live run, 26/10/2026, in Azure.** The reference replay of the demo match went through the deployed pipeline in judging mode (auto-approve): the model wrote all 12 card writes (11 cards and one rewrite), 11 verified at the first attempt and 1 at the second; the recap agent's two drafts failed the Verifier (numbers without a claim, then an invalid reply) and the template wrote the recap. 15 model calls of the 40 allowed per match, no HTTP 429, 24.4 s per card attempt at the median (31.5 s at p95), 139,586 input and 42,044 output tokens for the cards. Measures in [`docs/evaluation.md`](docs/evaluation.md#live-run-production-prompt) ("Live run, production prompt"), documents as stored in [`docs/samples/`](docs/samples/).
 
 ## How to test
 
@@ -99,6 +78,34 @@ python -m worker data/replay/demo-0007.jsonl.gz --writer template --duo agents -
 ```
 
 Each eligible card then prints a line such as `duo agents:dry: wren, joss (player_history), wren, joss: 4 runs, 0.2 s`, and the run ends with `duo agents (dry): 9 written, {} template, 27 of 36 runs`. The duo has a budget of its own (`--duo-calls`, 36 runs per match), apart from the Writer's 40. Design, budget, latency and what is not yet verified against the real model: [`docs/notes/agents.md`](docs/notes/agents.md); fields and tools: [`docs/contracts.md`](docs/contracts.md#agents-and-mcp-behind-options).
+
+## What exists today
+
+| Part | State | Where |
+|---|---|---|
+| Synthetic match engine, ground truth, Common Data Format export | Done, tested | `src/generator/` |
+| Win-probability model (Skellam, with expected added time) behind a replaceable interface | Done, tested | `src/winprob/` |
+| Worker: deduplication, reordering, match state, Spotter, card actions on corrections | Deployed in Azure Container Apps, scaled from zero by KEDA on the Service Bus subscription; tested offline | `src/worker/match.py`, `spotter.py`, `pipeline.py`, `azure_io.py` |
+| Writer agent (Agent Framework, gpt-5.4-nano on Microsoft Foundry), deterministic Verifier, approval desk with audit trail | Deployed; measured on the judging replay of 26/10 (below) | `src/worker/writer.py`, `desk.py` |
+| Recap at the final whistle: the recap agent (same model) writes it when its draft passes the Verifier, the template otherwise | Deployed; on the judging replay of 26/10 the model wrote it | `src/worker/recap.py` |
+| Desk data contract: cards, match state with the win-probability curve, insights, storyline, recap, audit trail, in Cosmos DB or in local JSON files | Done | `docs/contracts.md`, `src/worker/pipeline.py` (`JsonFileSink`, `match_state`) |
+| Infrastructure as code (azd and Bicep): Service Bus, Cosmos DB, Container Apps, Container Registry, Log Analytics, Application Insights, one managed identity per app, Easy Auth | Deployed; the Foundry project and its model deployment are created separately | `infra/` |
+| Demo replay as a Container Apps Job, and a reset of one match between two replays | Deployed | `infra/resources.bicep`, `src/generator/publish.py`, `src/worker/reset.py` |
+| Producer console and public overlay: read-only view without sign-in, producer actions behind Easy Auth (Microsoft Entra ID), per-IP rate limit | Deployed | [`src/web/`](src/web/) |
+| Traces of each draft and each model call in Application Insights (OpenTelemetry), without prompt or reply text | Deployed | [`src/worker/telemetry.py`](src/worker/telemetry.py) |
+| Evaluation against the hidden ground truth: 100 unscripted matches and the demo | Done | [`docs/evaluation.md`](docs/evaluation.md), `src/worker/evaluate.py` |
+| Producer feedback (thumbs, reasons, notes): stored, measured, exported; read back into the Writer prompt when `FEEDBACK_PROFILE` is set | Built; online it is stored and measured, not read back by the worker | [`src/worker/feedback.py`](src/worker/feedback.py), [`docs/notes/feedback.md`](docs/notes/feedback.md) |
+| Pitch figures from the 360 frames, including the 63' offside frame with the offside line | Built | [`src/web/pitch.py`](src/web/pitch.py), [`docs/img/`](docs/img/) |
+| CI (tests, Bicep build, both images built and their imports checked, secret scanning), Dependabot | Done | [`.github/`](.github/) |
+| Cost kill switch tied to the budget, which leaves the read-only web app up | Built and tested against fakes of the Azure API; not deployed | [`infra/killswitch/`](infra/killswitch/) |
+| Fictional league history: 50 seasons, 32 clubs with promotion and relegation, about 4,000 players with careers, 19,000 matches with scorers, substitutions and cards | Done, tested | [`src/league/history.py`](src/league/history.py), [`docs/notes/history.md`](docs/notes/history.md) |
+| Insight engine: facts that surface live (a substitute's hat-trick, a comeback, a half-time lead lost), ranked by how rare they are in the history, updated or withdrawn as the match goes on, and a stat of the match at full time; written from checked templates | Done, tested | [`src/worker/insights.py`](src/worker/insights.py), [`docs/notes/insights.md`](docs/notes/insights.md) |
+| Storyline: table, relegation stakes, form and head-to-head before kick-off; what the result changed after it | Done, tested | [`src/worker/storyline.py`](src/worker/storyline.py) |
+| Commentary duo: two fictional commentators, in three languages, with a per-match memory against repetition | Deployed: the model writes the lines with each card; templates write the lines on a VAR ruling | [`src/worker/duo.py`](src/worker/duo.py), [`docs/notes/duo.md`](docs/notes/duo.md) |
+| Agents and MCP: a read-only MCP server over the desk and the league history, the Writer reading its facts through it, and an optional commentary duo by two agents in an Agent Framework GroupChat | Built and tested offline with scripted models, behind options; not in the deployed image | [`src/worker/mcp_server.py`](src/worker/mcp_server.py), [`src/worker/duo_agents.py`](src/worker/duo_agents.py), [`docs/notes/agentic.md`](docs/notes/agentic.md) |
+| Match graphics (shot map, goal build-ups, animated set pieces, momentum) and tactical details from the 360 frames | Built | [`src/web/graphics.py`](src/web/graphics.py), [`src/worker/tactics.py`](src/worker/tactics.py) |
+
+**Live run, 26/10/2026, in Azure.** The judging replay that the live demo shows went through the deployed pipeline in judging mode (auto-approve): of the 12 card writes (11 cards and one rewrite), the model wrote 10, 7 verified at the first attempt and 3 at the second, and the template wrote 2 after the model timed out; every write passed the Verifier. The recap agent wrote the recap, verified at its second attempt. 17 model calls of the 40 allowed per match, no HTTP 429, 28 s per card attempt at the median (45 s at p95), 140,475 input and 34,094 output tokens for the cards (read back from Cosmos DB with `python -m worker.measure --cosmos demo-0007`). An earlier reference run is measured in detail in [`docs/evaluation.md`](docs/evaluation.md#live-run-production-prompt) ("Live run, production prompt"), its documents as stored in [`docs/samples/`](docs/samples/).
 
 ## Why it matters
 
@@ -376,7 +383,7 @@ The deployed run with `gpt-5.4-nano` is measured in [`docs/evaluation.md`](docs/
 - **Synthetic data only.** The engine is hand-tuned to real orders of magnitude, not fitted, and the demo match is scripted. Retraction on air is exercised on the demo's two scripted VAR overturns; the 100 unscripted matches have none.
 - **Simple win-probability model.** Constant scoring rates, placeholder red-card factors and team strengths; no shots, momentum or substitutions in the model, and it ignores the season table.
 - **The live demo is one replay.** The deployed console shows the demo match replayed once through the pipeline in judging mode (auto-approve); only a signed-in producer can make decisions online.
-- **Templates for facts, and for the recap when the model fails.** Insights and the storyline are written from templates during the match; cards and their suggested lines by the model; the recap by the model when its draft passes the Verifier, otherwise by the template, as on the reference replay.
+- **Templates for facts, and for the recap when the model fails.** Insights and the storyline are written from templates during the match; cards and their suggested lines by the model; the recap by the model when its draft passes the Verifier, otherwise by the template, as on an earlier reference run.
 - **Worker state lives in memory.** In Azure the worker keeps listening (`--forever`) with one replica, but a worker restarted mid-match does not reload the match from Cosmos DB and loses it.
 - **A VAR check flags a card but does not lock it.** A producer can still put a card under review on air, but only through "Approve during VAR check", an explicit confirmation the audit records (`approved_under_review`); only a retracted card is locked.
 - **History is score-first.** Each historical match draws its score before placing the events, so a team two goals down does not push harder and a red card does not change the score; club strength decides results, player ratings only who scores. The history has seasons, not dates.
