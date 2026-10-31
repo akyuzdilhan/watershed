@@ -1,6 +1,6 @@
 dash==4.4.1
 gunicorn==26.2.0
 azure-cosmos==4.17.1
-azure-identity==1.26.0
+azure-identity==1.27.0
 numpy==2.5.4
 scipy==1.18.1
