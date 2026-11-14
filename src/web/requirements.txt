@@ -1,5 +1,5 @@
 dash==4.4.1
-gunicorn==26.2.0
+gunicorn==27.0.0
 azure-cosmos==4.17.1
 azure-identity==1.26.0
 numpy==2.5.4
