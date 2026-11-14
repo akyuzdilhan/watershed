@@ -1,6 +1,6 @@
 # Build from the repository root: docker build -f src/web/Dockerfile .
 # The console imports the worker (Desk, Cosmos sink) and winprob packages from src/.
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
