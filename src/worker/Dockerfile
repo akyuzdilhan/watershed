@@ -1,6 +1,6 @@
 # Worker image, also used by the replay job. Build context: the repository root.
 #   docker build -f src/worker/Dockerfile .
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
